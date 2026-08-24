@@ -4,7 +4,7 @@
  *
  * Usage: npx tsx scripts/seed.ts
  */
-import "dotenv/config";
+import "./lib/loadEnv";
 import { createClient } from "@supabase/supabase-js";
 
 // See scripts/gen-agent-key.ts for why this doesn't import src/lib/supabase/admin.ts.

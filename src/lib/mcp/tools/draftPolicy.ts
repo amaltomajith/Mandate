@@ -1,62 +1,26 @@
 import "server-only";
-import { Type } from "@google/genai";
-import { getGemini, GEMINI_MODEL } from "@/lib/gemini/client";
+import { z } from "zod";
+import { getLLM, LLM_MODEL } from "@/lib/llm/client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { evaluatePolicy } from "@/lib/policy/engine";
 import { getActiveRules } from "@/lib/mcp/traceHelpers";
 import type { PolicyRuleType } from "@/types/db";
 import type { Json } from "@/types/db";
 
-const DRAFT_SCHEMA = {
-  type: Type.OBJECT,
-  properties: {
-    type: { type: Type.STRING, enum: ["cap", "velocity", "category_block", "step_up"] },
-    name: { type: Type.STRING },
-    rationale: { type: Type.STRING },
-    cap: {
-      type: Type.OBJECT,
-      nullable: true,
-      properties: {
-        max_amount: { type: Type.NUMBER },
-        currency: { type: Type.STRING },
-        scope: { type: Type.STRING, enum: ["per_transaction", "per_day"] },
-      },
-    },
-    velocity: {
-      type: Type.OBJECT,
-      nullable: true,
-      properties: {
-        max_count: { type: Type.INTEGER },
-        window_seconds: { type: Type.INTEGER },
-        scope: { type: Type.STRING, enum: ["per_agent", "per_customer"] },
-      },
-    },
-    category_block: {
-      type: Type.OBJECT,
-      nullable: true,
-      properties: { categories: { type: Type.ARRAY, items: { type: Type.STRING } } },
-    },
-    step_up: {
-      type: Type.OBJECT,
-      nullable: true,
-      properties: {
-        threshold_amount: { type: Type.NUMBER },
-        currency: { type: Type.STRING },
-      },
-    },
-  },
-  required: ["type", "name", "rationale"],
-};
-
-interface DraftShape {
-  type: PolicyRuleType;
-  name: string;
-  rationale: string;
-  cap?: { max_amount: number; currency: string; scope: "per_transaction" | "per_day" };
-  velocity?: { max_count: number; window_seconds: number; scope: "per_agent" | "per_customer" };
-  category_block?: { categories: string[] };
-  step_up?: { threshold_amount: number; currency: string };
-}
+// Groq's `json_schema` structured-output mode is model-gated (not guaranteed on
+// every model); the broadly-supported `json_object` mode plus validating the
+// result ourselves is more portable across whichever Groq model ends up
+// configured, so validation happens here rather than being delegated to the API.
+const DraftShape = z.object({
+  type: z.enum(["cap", "velocity", "category_block", "step_up"]),
+  name: z.string(),
+  rationale: z.string(),
+  cap: z.object({ max_amount: z.number(), currency: z.string(), scope: z.enum(["per_transaction", "per_day"]) }).optional(),
+  velocity: z.object({ max_count: z.number(), window_seconds: z.number(), scope: z.enum(["per_agent", "per_customer"]) }).optional(),
+  category_block: z.object({ categories: z.array(z.string()) }).optional(),
+  step_up: z.object({ threshold_amount: z.number(), currency: z.string() }).optional(),
+});
+type DraftShape = z.infer<typeof DraftShape>;
 
 export interface DraftPolicyResult {
   ruleId: string;
@@ -68,6 +32,20 @@ export interface DraftPolicyResult {
   backtest: { tracesEvaluated: number; wouldHaveChangedDecision: number };
 }
 
+const SYSTEM_PROMPT = `You turn plain-language policy requests or regulatory notices into one structured spend-control rule for a payments control plane. Read the input and produce exactly one rule of type "cap" (a spend ceiling), "velocity" (a rate limit), "category_block" (blocks a category outright), or "step_up" (requires human approval above a threshold). Respond with ONLY a JSON object shaped like:
+
+{
+  "type": "cap" | "velocity" | "category_block" | "step_up",
+  "name": string,
+  "rationale": string,
+  "cap": { "max_amount": number, "currency": string, "scope": "per_transaction" | "per_day" },
+  "velocity": { "max_count": number, "window_seconds": number, "scope": "per_agent" | "per_customer" },
+  "category_block": { "categories": string[] },
+  "step_up": { "threshold_amount": number, "currency": string }
+}
+
+Only include the ONE key ("cap", "velocity", "category_block", or "step_up") matching your chosen "type" — omit the other three. Fill in realistic numbers inferred from the text. Amounts are in paise (INR smallest unit) unless the text clearly implies another currency. Respond with the JSON object only, no other text.`;
+
 /**
  * NL -> structured rule -> auto-backtest, always landing as `pending_review`.
  * Nothing this produces ever becomes `active` on its own — see HANDOVER.md
@@ -78,21 +56,27 @@ export async function draftPolicy(
   source: "human" | "horizon",
   sourceLabel?: string
 ): Promise<DraftPolicyResult> {
-  const ai = getGemini();
-  const response = await ai.models.generateContent({
-    model: GEMINI_MODEL,
-    contents: `You turn plain-language policy requests or regulatory notices into one structured spend-control rule for a payments control plane. Read the input and produce exactly one rule of type "cap" (a spend ceiling), "velocity" (a rate limit), "category_block" (blocks a category outright), or "step_up" (requires human approval above a threshold). Fill in only the object matching the chosen "type" (cap/velocity/category_block/step_up) with realistic numbers inferred from the text; leave the others out. Amounts are in paise (INR smallest unit) unless the text clearly implies another currency.
-
-Input:
-${text}`,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: DRAFT_SCHEMA,
-    },
+  const llm = getLLM();
+  const response = await llm.chat.completions.create({
+    model: LLM_MODEL,
+    response_format: { type: "json_object" },
+    temperature: 0.2,
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: text },
+    ],
   });
 
-  const draft = JSON.parse(response.text ?? "{}") as DraftShape;
-  const params = draft[draft.type] ?? {};
+  const raw = response.choices[0]?.message?.content ?? "{}";
+  let draft: DraftShape;
+  try {
+    draft = DraftShape.parse(JSON.parse(raw));
+  } catch (err) {
+    throw new Error(`draft_policy: model did not return a valid rule shape: ${err instanceof Error ? err.message : err}`);
+  }
+
+  const params = draft[draft.type];
+  if (!params) throw new Error(`draft_policy: model chose type "${draft.type}" but didn't include its params object.`);
 
   const db = createAdminClient();
   const existingRules = await getActiveRules();

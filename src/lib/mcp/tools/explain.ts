@@ -1,6 +1,6 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getGemini, GEMINI_MODEL } from "@/lib/gemini/client";
+import { getLLM, LLM_MODEL } from "@/lib/llm/client";
 
 /**
  * Grounded explanation: the model is only ever shown the actual trace + rule that
@@ -43,11 +43,15 @@ export async function explainTrace(traceId: string): Promise<{ explanation: stri
 Trace data:
 ${JSON.stringify(grounding, null, 2)}`;
 
-  const ai = getGemini();
-  const response = await ai.models.generateContent({
-    model: GEMINI_MODEL,
-    contents: prompt,
+  const llm = getLLM();
+  const response = await llm.chat.completions.create({
+    model: LLM_MODEL,
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0.3,
   });
 
-  return { explanation: response.text ?? "No explanation could be generated.", traceId };
+  return {
+    explanation: response.choices[0]?.message?.content ?? "No explanation could be generated.",
+    traceId,
+  };
 }

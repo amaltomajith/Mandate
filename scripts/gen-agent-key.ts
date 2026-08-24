@@ -6,7 +6,7 @@
  *
  * Usage: npx tsx scripts/gen-agent-key.ts "Checkout Agent" "Demo AI buyer agent"
  */
-import "dotenv/config";
+import "./lib/loadEnv";
 import { createClient } from "@supabase/supabase-js";
 import { generateKeyPair } from "../src/lib/webBotAuth/keys";
 

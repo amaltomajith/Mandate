@@ -1,11 +1,12 @@
 import "server-only";
-import { createClient } from "@/lib/supabase/server";
+import { currentUser } from "@clerk/nextjs/server";
 
+/** Dashboard (human) auth is Clerk — see HANDOVER.md "two auth layers". */
 export async function requireDashboardUser() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await currentUser();
   if (!user) throw new Error("Not authenticated.");
-  return user;
+  return {
+    id: user.id,
+    email: user.emailAddresses[0]?.emailAddress ?? user.id,
+  };
 }

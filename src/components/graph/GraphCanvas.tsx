@@ -2,7 +2,8 @@
 
 import { useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Html, Line, OrbitControls } from "@react-three/drei";
+import { Grid, Html, Line, OrbitControls, Stars } from "@react-three/drei";
+import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import type * as THREE from "three";
 import type { Agent, PolicyRule, Trace } from "@/types/db";
 import { computeLayout, type Vec3 } from "./layout";
@@ -152,13 +153,15 @@ function HoverPanel({ info }: { info: HoverInfo }) {
 
   return (
     <Html position={info.position} distanceFactor={8} style={{ pointerEvents: "none" }}>
+      {/* Hardcoded dark colors, not the (light-theme) CSS vars — this tooltip
+          floats over the graph's own dark canvas, not the light dashboard shell. */}
       <div
-        className="w-56 rounded-lg border px-3 py-2 text-xs shadow-xl"
-        style={{ background: "#0d0f16f0", borderColor: "var(--panel-border)", color: "var(--foreground)" }}
+        className="w-56 rounded-lg border px-3 py-2 text-xs shadow-xl backdrop-blur-sm"
+        style={{ background: "rgba(13,15,22,0.94)", borderColor: "rgba(255,255,255,0.12)", color: "#eef0f7" }}
       >
         <p className="mb-1 font-semibold">{title}</p>
         {lines.filter(Boolean).map((line, i) => (
-          <p key={i} style={{ color: "var(--muted)" }}>
+          <p key={i} style={{ color: "#8890a8" }}>
             {line}
           </p>
         ))}
@@ -210,9 +213,24 @@ function Scene({ agents, rules, traces }: { agents: Agent[]; rules: PolicyRule[]
 
   return (
     <>
-      <ambientLight intensity={0.5} />
+      <ambientLight intensity={0.45} />
       <pointLight position={[6, 8, 6]} intensity={40} />
       <pointLight position={[-6, -4, -6]} intensity={15} color={ENTITY_COLORS.mandate} />
+
+      <Stars radius={60} depth={30} count={2200} factor={2.2} saturation={0} fade speed={0.4} />
+      <Grid
+        position={[0, -5.4, 0]}
+        args={[40, 40]}
+        cellSize={1}
+        cellThickness={0.4}
+        cellColor="#1c2030"
+        sectionSize={5}
+        sectionThickness={0.8}
+        sectionColor="#2a3050"
+        fadeDistance={26}
+        fadeStrength={1.5}
+        infiniteGrid
+      />
 
       {agentEdges.map((e, i) => (
         <Edge key={`ae-${i}`} from={e.from} to={e.to} color={e.agentColor} opacity={0.12} />
@@ -236,13 +254,24 @@ function Scene({ agents, rules, traces }: { agents: Agent[]; rules: PolicyRule[]
 
       <HoverPanel info={hover} />
       <OrbitControls makeDefault enableDamping dampingFactor={0.08} minDistance={3} maxDistance={30} />
+
+      <EffectComposer multisampling={0}>
+        <Bloom
+          mipmapBlur
+          luminanceThreshold={0.15}
+          luminanceSmoothing={0.3}
+          intensity={0.9}
+          radius={0.6}
+        />
+        <Vignette eskil={false} offset={0.15} darkness={0.9} />
+      </EffectComposer>
     </>
   );
 }
 
 export function GraphCanvas({ agents, rules, traces }: { agents: Agent[]; rules: PolicyRule[]; traces: Trace[] }) {
   return (
-    <Canvas camera={{ position: [9, 7, 9], fov: 50 }} className="h-full w-full">
+    <Canvas camera={{ position: [9, 7, 9], fov: 50 }} className="h-full w-full" dpr={[1, 1.75]}>
       <color attach="background" args={["#05060a"]} />
       <fog attach="fog" args={["#05060a", 14, 34]} />
       <Scene agents={agents} rules={rules} traces={traces} />

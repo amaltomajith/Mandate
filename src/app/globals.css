@@ -1,22 +1,34 @@
 @import "tailwindcss";
 
 :root {
-  --background: #05060a;
-  --foreground: #e6e8ef;
-  --panel: #0d0f16;
-  --panel-border: #1c2030;
-  --muted: #8890a4;
+  /* Razorpay-inspired: white canvas, deep navy ink, bright blue accent. */
+  --background: #ffffff;
+  --background-2: #f6f8fc;
+  --foreground: #0b1220;
+  --panel: #ffffff;
+  --panel-2: #f7f9fc;
+  --panel-border: #e6e9f2;
+  --panel-border-strong: #d7dcea;
+  --muted: #5a6478;
+  --muted-2: #8891a5;
 
-  --entity-agent: #5b8def;
-  --entity-mandate: #a475f5;
-  --entity-transaction: #c7cbd6;
-  --entity-rule: #e0a941;
-  --entity-customer: #4fbf7f;
+  --brand-navy: #0c2651;
+  --brand-blue: #0d94fb;
+  --brand-blue-dark: #0b7fd9;
 
-  --decision-allow: #3ecf7e;
-  --decision-block: #f0555a;
-  --decision-escalate: #e0a941;
-  --decision-reject: #b25be0;
+  --entity-agent: #0d6efd;
+  --entity-mandate: #8b5cf6;
+  --entity-transaction: #1f2430;
+  --entity-rule: #d97706;
+  --entity-customer: #16a34a;
+
+  --decision-allow: #16a34a;
+  --decision-block: #dc2626;
+  --decision-escalate: #d97706;
+  --decision-reject: #7c3aed;
+
+  --shadow-card: 0 1px 2px 0 rgba(16, 24, 40, 0.04), 0 1px 0 0 rgba(255, 255, 255, 0.6) inset;
+  --shadow-card-lg: 0 8px 24px -12px rgba(16, 24, 40, 0.18), 0 2px 6px -2px rgba(16, 24, 40, 0.08);
 }
 
 @theme inline {
@@ -26,12 +38,79 @@
   --font-mono: var(--font-geist-mono);
 }
 
+html {
+  color-scheme: light;
+}
+
 body {
-  background: var(--background);
   color: var(--foreground);
+  background:
+    radial-gradient(1000px 480px at 8% -8%, rgba(13, 148, 251, 0.07), transparent 60%),
+    radial-gradient(900px 460px at 100% 0%, rgba(139, 92, 246, 0.05), transparent 55%),
+    var(--background);
+  background-attachment: fixed;
+  position: relative;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.6;
+  background-image:
+    linear-gradient(to right, rgba(12, 38, 81, 0.028) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(12, 38, 81, 0.028) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(circle at 20% 0%, black, transparent 65%);
 }
 
 ::selection {
-  background: var(--entity-agent);
-  color: #05060a;
+  background: var(--brand-blue);
+  color: #ffffff;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(12, 38, 81, 0.14);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(12, 38, 81, 0.24);
+  background-clip: padding-box;
+}
+
+@keyframes glow-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.live-dot {
+  animation: glow-pulse 2.4s ease-in-out infinite;
+}
+
+.panel-card {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow-card);
+}
+
+.panel-card-lg {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow-card-lg);
 }

@@ -1,9 +1,15 @@
 import "server-only";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
-/** Auth-scoped reads for the dashboard — goes through RLS (see migrations/0001_init.sql). */
+/**
+ * Dashboard reads now go through the service-role client rather than an
+ * RLS-scoped one — Clerk gates access to these Server Components at the proxy
+ * layer, so Supabase's own `authenticated`-role RLS policies are no longer the
+ * access boundary for this app (they're vestigial but harmless; MCP writes
+ * already used the service role). See HANDOVER.md "auth" section.
+ */
 export async function getDashboardData() {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const [agents, rules, traces, escalations, alerts] = await Promise.all([
     supabase.from("agents").select("*").order("trust_score", { ascending: false }),

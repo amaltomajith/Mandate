@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { approvePolicyRule, rejectPolicyRule } from "@/lib/actions/policy";
 import type { PolicyRule } from "@/types/db";
-import { EmptyState, Panel, relativeTime } from "./ui";
+import { DangerButton, EmptyState, Icons, Panel, SuccessButton, relativeTime } from "./ui";
 
 function ParamsLine({ rule }: { rule: PolicyRule }) {
   const p = rule.params as Record<string, unknown>;
@@ -20,6 +20,13 @@ function ParamsLine({ rule }: { rule: PolicyRule }) {
       return null;
   }
 }
+
+const TYPE_LABEL: Record<PolicyRule["type"], string> = {
+  cap: "Cap",
+  velocity: "Velocity",
+  category_block: "Category block",
+  step_up: "Step-up",
+};
 
 export function PolicyRulesPanel({ rules }: { rules: PolicyRule[] }) {
   const active = rules.filter((r) => r.status === "active");
@@ -43,56 +50,50 @@ export function PolicyRulesPanel({ rules }: { rules: PolicyRule[] }) {
   }
 
   return (
-    <Panel title="Policy rules" count={pendingReview.length}>
+    <Panel title="Policy rules" icon={<Icons.Shield />} accent="var(--entity-rule)" count={pendingReview.length}>
       {error && (
-        <p className="mb-2 text-xs" style={{ color: "var(--decision-block)" }}>
+        <p className="mb-3 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: "var(--decision-block)", color: "var(--decision-block)", background: "color-mix(in srgb, var(--decision-block) 6%, white)" }}>
           {error}
         </p>
       )}
 
       {pendingReview.length > 0 && (
-        <div className="mb-4 space-y-2">
-          <p className="text-xs font-medium" style={{ color: "var(--entity-rule)" }}>
+        <div className="mb-4 space-y-2.5">
+          <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--entity-rule)" }}>
             Pending review
           </p>
           {pendingReview.map((rule) => {
             const busy = isPending && busyId === rule.id;
             return (
-              <div key={rule.id} className="rounded-lg border p-3" style={{ borderColor: "var(--panel-border)" }}>
-                <div className="flex items-center justify-between">
+              <div
+                key={rule.id}
+                className="rounded-xl border p-3.5"
+                style={{ borderColor: "var(--panel-border)", background: "var(--panel-2)" }}
+              >
+                <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium">{rule.name}</span>
                   <span
-                    className="rounded px-1.5 py-0.5 text-[10px] uppercase"
-                    style={{ background: "var(--entity-rule)", color: "#05060a" }}
+                    className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
+                    style={{ background: "color-mix(in srgb, var(--entity-rule) 15%, white)", color: "var(--entity-rule)" }}
                   >
-                    {rule.type} · {rule.source}
+                    {TYPE_LABEL[rule.type]} · {rule.source}
                   </span>
                 </div>
-                <p className="mt-1 text-xs" style={{ color: "var(--muted)" }}>
+                <p className="mt-1.5 font-mono text-[11px]" style={{ color: "var(--muted)" }}>
                   <ParamsLine rule={rule} />
                 </p>
                 {rule.rationale && (
-                  <p className="mt-1 whitespace-pre-line text-xs" style={{ color: "var(--muted)" }}>
+                  <p className="mt-1.5 whitespace-pre-line text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
                     {rule.rationale}
                   </p>
                 )}
                 <div className="mt-3 flex gap-2">
-                  <button
-                    disabled={busy}
-                    onClick={() => act(rule.id, approvePolicyRule)}
-                    className="flex-1 rounded-md py-1.5 text-xs font-medium text-black disabled:opacity-50"
-                    style={{ background: "var(--decision-allow)" }}
-                  >
+                  <SuccessButton disabled={busy} onClick={() => act(rule.id, approvePolicyRule)} className="flex-1">
                     {busy ? "Working…" : "Activate"}
-                  </button>
-                  <button
-                    disabled={busy}
-                    onClick={() => act(rule.id, rejectPolicyRule)}
-                    className="flex-1 rounded-md py-1.5 text-xs font-medium text-black disabled:opacity-50"
-                    style={{ background: "var(--decision-block)" }}
-                  >
+                  </SuccessButton>
+                  <DangerButton disabled={busy} onClick={() => act(rule.id, rejectPolicyRule)} className="flex-1">
                     {busy ? "Working…" : "Reject"}
-                  </button>
+                  </DangerButton>
                 </div>
               </div>
             );
@@ -100,15 +101,18 @@ export function PolicyRulesPanel({ rules }: { rules: PolicyRule[] }) {
         </div>
       )}
 
-      <p className="mb-2 text-xs font-medium" style={{ color: "var(--muted)" }}>
+      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--muted-2)" }}>
         Active ({active.length})
       </p>
       {active.length === 0 && <EmptyState text="No active rules yet — run npm run seed." />}
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         {active.map((rule) => (
-          <div key={rule.id} className="flex items-center justify-between text-xs">
-            <span>{rule.name}</span>
-            <span style={{ color: "var(--muted)" }}>{relativeTime(rule.created_at)}</span>
+          <div key={rule.id} className="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs hover:bg-[var(--panel-2)]">
+            <span className="flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--decision-allow)" }} />
+              {rule.name}
+            </span>
+            <span style={{ color: "var(--muted-2)" }}>{relativeTime(rule.created_at)}</span>
           </div>
         ))}
       </div>

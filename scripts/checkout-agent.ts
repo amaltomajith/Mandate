@@ -12,7 +12,7 @@
  *
  * Usage: npx tsx scripts/checkout-agent.ts
  */
-import "dotenv/config";
+import "./lib/loadEnv";
 import { MandateClient } from "./lib/mandateClient";
 
 const BASE_URL = process.env.MANDATE_APP_URL ?? "http://localhost:3000";
