@@ -152,16 +152,21 @@ function HoverPanel({ info }: { info: HoverInfo }) {
   }
 
   return (
-    <Html position={info.position} distanceFactor={8} style={{ pointerEvents: "none" }}>
+    // No `distanceFactor` on purpose: it CSS-scales the overlay by distance
+    // from the camera to fake perspective, which made this tooltip shrink to
+    // near-illegible for any node that wasn't right up against the lens.
+    // Dropping it renders Html at a constant screen-space size — readable
+    // regardless of zoom, which is what a hover label needs to be.
+    <Html position={info.position} style={{ pointerEvents: "none" }} zIndexRange={[100, 0]}>
       {/* Hardcoded dark colors, not the (light-theme) CSS vars — this tooltip
           floats over the graph's own dark canvas, not the light dashboard shell. */}
       <div
-        className="w-56 rounded-lg border px-3 py-2 text-xs shadow-xl backdrop-blur-sm"
-        style={{ background: "rgba(13,15,22,0.94)", borderColor: "rgba(255,255,255,0.12)", color: "#eef0f7" }}
+        className="w-64 -translate-x-1/2 -translate-y-[calc(100%+14px)] rounded-xl border px-3.5 py-3 shadow-2xl backdrop-blur-md"
+        style={{ background: "rgba(9,11,18,0.97)", borderColor: "rgba(255,255,255,0.14)", color: "#f3f5fb" }}
       >
-        <p className="mb-1 font-semibold">{title}</p>
+        <p className="mb-1.5 text-[13px] font-semibold leading-snug">{title}</p>
         {lines.filter(Boolean).map((line, i) => (
-          <p key={i} style={{ color: "#8890a8" }}>
+          <p key={i} className="text-[12px] leading-relaxed" style={{ color: "#a4acc4" }}>
             {line}
           </p>
         ))}
