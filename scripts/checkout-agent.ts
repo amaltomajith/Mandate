@@ -1,14 +1,25 @@
 /**
  * The Checkout/Upsell Agent demo — runs the exact scenario from HANDOVER.md's
- * "Demo script": a few normal payouts, one that breaches the step-up threshold
- * and gets escalated (not blocked), then a deliberately tampered request that
- * gets caught at the protocol layer before it ever reaches the policy engine.
+ * "Demo script": a few normal purchases, one that breaches the step-up
+ * threshold and gets escalated (not blocked), then a deliberately tampered
+ * request that gets caught at the protocol layer before it ever reaches the
+ * policy engine.
+ *
+ * Uses `order.create` (standard Razorpay test-mode keys) rather than
+ * `payout.create` (RazorpayX) as the real-money-adjacent action — RazorpayX's
+ * dashboard gates even test mode behind having a registered business, which
+ * not everyone running this demo will have. `order.create` needs nothing but
+ * the standard RAZORPAY_KEY_ID/SECRET and is a real, live Razorpay API call
+ * (it'll show up in your test-mode Orders dashboard). `payout.create`'s code
+ * path in src/lib/razorpay/actions.ts is untouched or unaffected — if you get
+ * RazorpayX access later, `enforce_action` already supports it, this script
+ * just doesn't call it by default. See HANDOVER.md §6.
  *
  * Prereqs:
  *   1. `npx tsx scripts/seed.ts` (policy rules)
  *   2. `npx tsx scripts/gen-agent-key.ts "Checkout Agent"` — copy the printed
  *      agent id and secret key into CHECKOUT_AGENT_ID / CHECKOUT_AGENT_SECRET_KEY
- *   3. `npm run dev` running, with real Razorpay/RazorpayX test-mode keys set
+ *   3. `npm run dev` running, with real Razorpay test-mode keys set
  *
  * Usage: npx tsx scripts/checkout-agent.ts
  */
@@ -19,14 +30,12 @@ const BASE_URL = process.env.MANDATE_APP_URL ?? "http://localhost:3000";
 const AGENT_ID = process.env.CHECKOUT_AGENT_ID;
 const SECRET_KEY = process.env.CHECKOUT_AGENT_SECRET_KEY;
 
-// Razorpay's documented test-mode VPA for a simulated successful UPI transaction.
-const TEST_VPA = "success@razorpay";
-
 interface ActionResult {
   decision: "allow" | "block" | "escalate";
   reasoning: string;
   traceId: string;
   wouldEscalate: boolean;
+  razorpayResponse?: { id?: string } | null;
 }
 
 function log(step: string, result: ActionResult) {
@@ -34,19 +43,20 @@ function log(step: string, result: ActionResult) {
   console.log(`\n${icon} ${step} — ${result.decision.toUpperCase()}`);
   console.log(`   ${result.reasoning}`);
   console.log(`   trace: ${result.traceId}`);
+  if (result.razorpayResponse?.id) {
+    console.log(`   razorpay order: ${result.razorpayResponse.id} (check your test-mode dashboard)`);
+  }
 }
 
-async function payout(client: MandateClient, label: string, amountPaise: number) {
+async function purchase(client: MandateClient, label: string, amountPaise: number) {
   const args = {
-    actionType: "payout.create",
+    actionType: "order.create",
     amount: amountPaise,
     currency: "INR",
     category: "restock",
     params: {
-      vendorName: "Test Supplier Co",
-      vpa: TEST_VPA,
-      purpose: "vendor_bill",
-      narration: label,
+      receipt: `mandate-demo-${Date.now()}`,
+      notes: { label },
     },
   };
 
@@ -69,13 +79,13 @@ async function main() {
   console.log("Initializing MCP session...");
   await client.initialize("mandate-checkout-agent");
 
-  console.log("\n--- Normal activity: a few payouts under every threshold ---");
-  await payout(client, "Restock order #1", 100000); // ₹1,000
-  await payout(client, "Restock order #2", 150000); // ₹1,500
-  await payout(client, "Restock order #3", 200000); // ₹2,000
+  console.log("\n--- Normal activity: a few purchases under every threshold ---");
+  await purchase(client, "Restock order #1", 100000); // ₹1,000
+  await purchase(client, "Restock order #2", 150000); // ₹1,500
+  await purchase(client, "Restock order #3", 200000); // ₹2,000
 
   console.log("\n--- The graceful-failure moment: over the step-up threshold ---");
-  const escalated = await payout(client, "Large restock order", 600000); // ₹6,000
+  const escalated = await purchase(client, "Large restock order", 600000); // ₹6,000
   if (escalated.decision === "escalate") {
     console.log("\n   -> Sitting in the dashboard's pending-escalations panel now.");
     console.log("   -> Approve it there to see the trace resolve and the alert log update.");

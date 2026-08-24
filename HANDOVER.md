@@ -33,21 +33,27 @@ explains every decision by tracing a real graph.
 - Seed / key-generation CLI scripts
 - Full visual pass: rich dark control-plane theme (deep navy/black, Razorpay-inspired blue `#2F8FFF` as the accent) with a bloom-lit, starfield-and-grid 3D graph panel as the centerpiece. (A light "white/navy" variant was tried first and reverted — dark read as more premium for this product; the CSS tokens in `globals.css` are the single place to flip it back if that changes again.)
 
-**Configured this session:**
+**Fully configured and verified live, this session:**
 
-- Supabase project (schema applied — confirm before assuming; see below)
+- Supabase project, schema applied, RLS in place
 - Razorpay test-mode keys (`RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET`)
-- Groq API key (`GROQ_API_KEY`) — see §5a, this replaced Gemini
+- Groq API key (`GROQ_API_KEY`) — see §5a, this replaced Gemini; the exact
+  `draft_policy` prompt was tested end-to-end against the live API
+- Clerk keys — signed in, dashboard confirmed rendering (dark theme, 3D graph,
+  hover tooltips all checked)
+- `npm run seed` run (policy rules + sample customer), `npm run gen-agent-key`
+  run (a real registered agent identity, id + secret key in `.env.local`)
+- **`npm run demo:checkout` run partway, successfully**: MCP session
+  `initialize` → Web Bot Auth signature verify → `simulate_action` all
+  confirmed working together, live, for the first time. It stopped at the
+  first `enforce_action` call because RazorpayX (see §6) needs a registered
+  business account, which wasn't available — **fixed by switching the demo's
+  real-money action from `payout.create` to `order.create`** (§6), which only
+  needs the standard Razorpay keys already configured. Re-running the demo
+  script end to end is the very next step, not yet confirmed.
 
-**Still needed before the dashboard actually loads:**
-
-- **Clerk keys** (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY`) —
-  dashboard auth was moved to Clerk this session (see §5b). Without these,
-  every route under `/dashboard` will fail at the proxy layer.
-- **RazorpayX account number + IP allowlist** for real payout calls (§6).
-- A run of `npm run seed` (policy rules) and `npm run gen-agent-key` (an
-  agent identity) — the dashboard will look intentionally empty without them;
-  see the in-app "Get the graph moving" banner, which tracks this for you.
+Everything above except the last full re-run is real, not aspirational — this
+is closer to done than a fresh reader might assume from a "handover" doc.
 
 ## 3. What changed from the original plan, and why
 
@@ -202,8 +208,7 @@ that changed:
 Verified against Razorpay's actual API docs during this build (not assumed):
 
 - **`payout.create` (RazorpayX) and `refund.create`** are genuinely
-  server-to-server, no customer-facing step. `payout.create` is the demo
-  script's primary "real money movement" proof point for exactly this reason.
+  server-to-server, no customer-facing step.
 - **`order.create` and `subscription.create`** are real S2S calls too, but
   they're the *first* leg of flows whose completion (capturing a card payment,
   or a customer authorizing a UPI Autopay mandate) is, by Razorpay's own
@@ -211,9 +216,24 @@ Verified against Razorpay's actual API docs during this build (not assumed):
   documented headless "just charge a card server-side" API in test mode;
   don't build one to fake it.
 
-**Operational gotcha, not hypothetical:** RazorpayX requires allowlisting the
-calling server's IP in the RazorpayX dashboard before `/payouts` accepts
-requests, even in test mode. A 403 on payouts is almost always this.
+### RazorpayX needs a registered business — even for test mode
+
+Found out the hard way: RazorpayX's dashboard gates access behind having a
+registered business account, not just a Razorpay login. Test mode with a
+dummy balance is real once you're in, but getting in isn't self-serve the way
+standard Razorpay test-mode is — and on top of that, RazorpayX requires
+**allowlisting the calling server's IP** before `/payouts` accepts requests
+even in test mode. Neither of those is a hackathon-friendly five minutes if
+you don't already have a registered business.
+
+**Consequence: `scripts/checkout-agent.ts` uses `order.create` as its
+real-money-adjacent proof point, not `payout.create`.** `order.create` needs
+nothing but standard `RAZORPAY_KEY_ID`/`RAZORPAY_KEY_SECRET` (no business
+registration gate) and is still a real, live Razorpay API call — it shows up
+in your test-mode Orders dashboard. The `payout.create` code path in
+`src/lib/razorpay/actions.ts` and `src/lib/razorpay/x.ts` is fully written and
+untouched; `enforce_action` already supports it. If RazorpayX access shows up
+later, swap the demo script's action type back — no engine changes needed.
 
 ## 7. Trust score
 
@@ -237,10 +257,12 @@ Every agent starts at a neutral 50. See `src/lib/trust/score.ts`.
    via the SQL Editor. *Free-tier projects auto-pause after 7 days of
    inactivity — open the dashboard once beforehand if it's been idle.*
 2. **Razorpay**: test-mode keys (Dashboard → Settings → API Keys) into
-   `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET`.
-3. **RazorpayX**: enable test mode, add a dummy test balance, get the test
-   `account_number` into `RAZORPAYX_ACCOUNT_NUMBER`, and **allowlist the
-   calling IP** (§6).
+   `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET`. This alone is enough to run the
+   demo script (§6 — it uses `order.create`, not RazorpayX payouts).
+3. **RazorpayX** (optional, needs a registered business — see §6): enable
+   test mode, add a dummy test balance, get the test `account_number` into
+   `RAZORPAYX_ACCOUNT_NUMBER`, and allowlist the calling IP. Only needed if
+   you want to exercise `payout.create` specifically.
 4. **Groq**: get a free key at console.groq.com/keys into `GROQ_API_KEY`.
 5. **Clerk**: create an application at clerk.com, copy the publishable and
    secret keys into `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY`.
@@ -261,13 +283,14 @@ and disappears once all three are done — it's reading the same data you are.
 
 `scripts/checkout-agent.ts`, matching Track 1's bar exactly:
 
-1. Three normal payouts under every threshold — calm, all `allow`.
-2. One payout at ₹6,000, over the seeded ₹5,000 step-up rule → `escalate`,
+1. Three normal purchases (`order.create`) under every threshold — calm, all
+   `allow`. Each is a real Razorpay test-mode order — check your dashboard.
+2. One purchase at ₹6,000, over the seeded ₹5,000 step-up rule → `escalate`,
    *not* blocked. Sits in the dashboard's Escalations panel with a
    plain-language reasoning string.
 3. Approve it in the dashboard (`approveEscalation` server action) — the real
-   RazorpayX payout executes only now, driven by the human through Clerk, not
-   Web Bot Auth (see §5b's "two auth layers").
+   Razorpay order-create call executes only now, driven by the human through
+   Clerk, not Web Bot Auth (see §5b's "two auth layers").
 4. A deliberately tampered signed request → rejected at the protocol layer,
    logged as `protocol_reject`, never reaches the policy engine.
 5. Optional, if there's time: the dashboard's "Simulate Horizon finding an

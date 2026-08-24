@@ -99,7 +99,7 @@ export class MandateClient {
       jsonrpc: "2.0",
       id: this.nextId++,
       method: "tools/call",
-      params: { name: "enforce_action", arguments: { actionType: "payout.create" } },
+      params: { name: "enforce_action", arguments: { actionType: "order.create" } },
     };
     const bodyText = JSON.stringify(body);
     const signed = signRequest({
@@ -112,7 +112,7 @@ export class MandateClient {
     });
 
     // Tamper with the body after signing — content-digest now won't match.
-    const tamperedBody = bodyText.replace("payout.create", "payout.create ");
+    const tamperedBody = bodyText.replace("order.create", "order.create ");
 
     const res = await fetch(url, {
       method: "POST",
