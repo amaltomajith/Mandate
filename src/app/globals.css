@@ -1,0 +1,37 @@
+@import "tailwindcss";
+
+:root {
+  --background: #05060a;
+  --foreground: #e6e8ef;
+  --panel: #0d0f16;
+  --panel-border: #1c2030;
+  --muted: #8890a4;
+
+  --entity-agent: #5b8def;
+  --entity-mandate: #a475f5;
+  --entity-transaction: #c7cbd6;
+  --entity-rule: #e0a941;
+  --entity-customer: #4fbf7f;
+
+  --decision-allow: #3ecf7e;
+  --decision-block: #f0555a;
+  --decision-escalate: #e0a941;
+  --decision-reject: #b25be0;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+::selection {
+  background: var(--entity-agent);
+  color: #05060a;
+}

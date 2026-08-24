@@ -1,0 +1,44 @@
+{
+  "name": "mandate",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "seed": "tsx scripts/seed.ts",
+    "gen-agent-key": "tsx scripts/gen-agent-key.ts",
+    "create-dashboard-user": "tsx scripts/create-dashboard-user.ts",
+    "demo:checkout": "tsx scripts/checkout-agent.ts"
+  },
+  "dependencies": {
+    "@google/genai": "^2.18.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@noble/ed25519": "^3.1.0",
+    "@noble/hashes": "^2.3.0",
+    "@react-three/drei": "^10.7.8",
+    "@react-three/fiber": "^9.7.0",
+    "@supabase/ssr": "^0.12.5",
+    "@supabase/supabase-js": "^2.112.4",
+    "next": "16.3.2",
+    "razorpay": "^2.9.8",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "server-only": "^0.0.1",
+    "three": "^0.185.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "dotenv": "^17.4.2",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.2",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.12",
+    "typescript": "^5"
+  }
+}

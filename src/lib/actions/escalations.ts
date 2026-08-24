@@ -1,0 +1,81 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { requireDashboardUser } from "./authGuard";
+import { executeRealAction } from "@/lib/razorpay/actions";
+import { ActionInput } from "@/lib/mcp/schemas";
+import { recomputeTrust } from "@/lib/mcp/traceHelpers";
+import type { Json } from "@/types/db";
+
+/**
+ * The other half of the step-up flow: `enforce_action` never executed anything
+ * for a decision of "escalate" — it just recorded the trace and left an
+ * `escalations` row pending. Approving here is where the real Razorpay call
+ * finally happens, driven by a human, through the dashboard's own Supabase Auth
+ * session — not through Web Bot Auth, because this isn't an agent acting, it's
+ * the merchant overriding the gate on purpose.
+ */
+export async function approveEscalation(escalationId: string) {
+  const user = await requireDashboardUser();
+  const db = createAdminClient();
+
+  const { data: escalation, error: escError } = await db
+    .from("escalations")
+    .select("*")
+    .eq("id", escalationId)
+    .single();
+  if (escError || !escalation) throw new Error("Escalation not found.");
+  if (escalation.status !== "pending") throw new Error("Escalation was already resolved.");
+
+  const { data: trace, error: traceError } = await db
+    .from("traces")
+    .select("*")
+    .eq("id", escalation.trace_id)
+    .single();
+  if (traceError || !trace) throw new Error("Underlying trace not found.");
+
+  const rawParams = trace.params as Record<string, unknown>;
+  const candidate = {
+    actionType: trace.action_type,
+    amount: rawParams.amount,
+    currency: rawParams.currency,
+    category: rawParams.category,
+    params: rawParams,
+  };
+  const parsed = ActionInput.parse(candidate);
+
+  const razorpayResponse = await executeRealAction(parsed);
+
+  await db.from("traces").update({ razorpay_response: razorpayResponse as Json }).eq("id", trace.id);
+  await db
+    .from("escalations")
+    .update({ status: "approved", resolved_by: user.email ?? user.id, resolved_at: new Date().toISOString() })
+    .eq("id", escalationId);
+  await db
+    .from("alerts")
+    .insert({ trace_id: trace.id, severity: "info", message: `Escalation approved by ${user.email ?? user.id} — action executed.` });
+
+  if (trace.agent_id) await recomputeTrust(trace.agent_id);
+
+  revalidatePath("/dashboard");
+}
+
+export async function denyEscalation(escalationId: string) {
+  const user = await requireDashboardUser();
+  const db = createAdminClient();
+
+  const { data: escalation, error } = await db.from("escalations").select("*").eq("id", escalationId).single();
+  if (error || !escalation) throw new Error("Escalation not found.");
+  if (escalation.status !== "pending") throw new Error("Escalation was already resolved.");
+
+  await db
+    .from("escalations")
+    .update({ status: "denied", resolved_by: user.email ?? user.id, resolved_at: new Date().toISOString() })
+    .eq("id", escalationId);
+  await db
+    .from("alerts")
+    .insert({ trace_id: escalation.trace_id, severity: "info", message: `Escalation denied by ${user.email ?? user.id}.` });
+
+  revalidatePath("/dashboard");
+}
