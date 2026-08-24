@@ -54,7 +54,7 @@ export function AuthShell({ children }: { children: ReactNode }) {
         </p>
       </div>
 
-      <div className="flex items-center justify-center bg-[var(--background-2)] p-6 lg:bg-white">
+      <div className="flex items-center justify-center bg-[var(--background-2)] p-6">
         <div className="w-full max-w-sm">
           <div className="mb-8 flex flex-col items-center gap-3 lg:hidden">
             <MandateMark size={36} />

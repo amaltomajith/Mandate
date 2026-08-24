@@ -17,5 +17,12 @@ export function getLLM(): OpenAI {
   return cached;
 }
 
-// Verified against console.groq.com/docs/models — exact production model IDs.
-export const LLM_MODEL = "llama-3.3-70b-versatile";
+// `llama-3.3-70b-versatile` (what Groq's own docs listed) 404'd on this
+// account — Groq's catalog is account/region-gated in ways their docs don't
+// always reflect. Verified live against GET /v1/models with this project's own
+// key instead of trusting docs a second time. gpt-oss-120b is a reasoning
+// model: it spends tokens on hidden chain-of-thought before `message.content`,
+// so callers must NOT cap `max_tokens` low or the real answer gets truncated
+// before it's written (see src/lib/mcp/tools/explain.ts and draftPolicy.ts —
+// neither sets max_tokens, on purpose).
+export const LLM_MODEL = "openai/gpt-oss-120b";

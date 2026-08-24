@@ -34,7 +34,7 @@ export function EscalationsPanel({
   return (
     <Panel title="Escalations" icon={<Icons.Escalation />} accent="var(--decision-escalate)" count={pending.length}>
       {error && (
-        <p className="mb-3 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: "var(--decision-block)", color: "var(--decision-block)", background: "color-mix(in srgb, var(--decision-block) 6%, white)" }}>
+        <p className="mb-3 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: "var(--decision-block)", color: "var(--decision-block)", background: "color-mix(in srgb, var(--decision-block) 14%, transparent)" }}>
           {error}
         </p>
       )}
@@ -52,7 +52,7 @@ export function EscalationsPanel({
               <div className="flex items-center justify-between">
                 <span
                   className="rounded-md px-1.5 py-0.5 text-[10px] font-bold tracking-wide"
-                  style={{ background: "color-mix(in srgb, var(--decision-escalate) 15%, white)", color: "var(--decision-escalate)" }}
+                  style={{ background: "color-mix(in srgb, var(--decision-escalate) 15%, transparent)", color: "var(--decision-escalate)" }}
                 >
                   NEEDS APPROVAL
                 </span>

@@ -32,7 +32,7 @@ export function GettingStartedBanner({ hasAgents, hasRules, hasTraces }: Props) 
         </div>
         <span
           className="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold"
-          style={{ background: "color-mix(in srgb, var(--brand-blue) 12%, white)", color: "var(--brand-blue-dark)" }}
+          style={{ background: "color-mix(in srgb, var(--brand-blue) 18%, transparent)", color: "var(--brand-blue)" }}
         >
           {Object.values(done).filter(Boolean).length}/3 done
         </span>

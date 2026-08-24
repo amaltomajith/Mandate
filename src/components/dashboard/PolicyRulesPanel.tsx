@@ -52,7 +52,7 @@ export function PolicyRulesPanel({ rules }: { rules: PolicyRule[] }) {
   return (
     <Panel title="Policy rules" icon={<Icons.Shield />} accent="var(--entity-rule)" count={pendingReview.length}>
       {error && (
-        <p className="mb-3 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: "var(--decision-block)", color: "var(--decision-block)", background: "color-mix(in srgb, var(--decision-block) 6%, white)" }}>
+        <p className="mb-3 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: "var(--decision-block)", color: "var(--decision-block)", background: "color-mix(in srgb, var(--decision-block) 14%, transparent)" }}>
           {error}
         </p>
       )}
@@ -74,7 +74,7 @@ export function PolicyRulesPanel({ rules }: { rules: PolicyRule[] }) {
                   <span className="text-sm font-medium">{rule.name}</span>
                   <span
                     className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
-                    style={{ background: "color-mix(in srgb, var(--entity-rule) 15%, white)", color: "var(--entity-rule)" }}
+                    style={{ background: "color-mix(in srgb, var(--entity-rule) 15%, transparent)", color: "var(--entity-rule)" }}
                   >
                     {TYPE_LABEL[rule.type]} · {rule.source}
                   </span>

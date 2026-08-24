@@ -1,34 +1,36 @@
 @import "tailwindcss";
 
 :root {
-  /* Razorpay-inspired: white canvas, deep navy ink, bright blue accent. */
-  --background: #ffffff;
-  --background-2: #f6f8fc;
-  --foreground: #0b1220;
-  --panel: #ffffff;
-  --panel-2: #f7f9fc;
-  --panel-border: #e6e9f2;
-  --panel-border-strong: #d7dcea;
-  --muted: #5a6478;
-  --muted-2: #8891a5;
+  /* Rich dark control-plane theme — Razorpay navy/blue as the accent system,
+     not the canvas. */
+  --background: #05070d;
+  --background-2: #090c15;
+  --foreground: #eaeefa;
+  --panel: #0d1018;
+  --panel-2: #131726;
+  --panel-border: rgba(255, 255, 255, 0.08);
+  --panel-border-strong: rgba(255, 255, 255, 0.15);
+  --muted: #939bb5;
+  --muted-2: #5f6683;
 
   --brand-navy: #0c2651;
-  --brand-blue: #0d94fb;
-  --brand-blue-dark: #0b7fd9;
+  --brand-blue: #2f8fff;
+  --brand-blue-dark: #1c74e0;
+  --brand-blue-soft: rgba(47, 143, 255, 0.14);
 
-  --entity-agent: #0d6efd;
-  --entity-mandate: #8b5cf6;
-  --entity-transaction: #1f2430;
-  --entity-rule: #d97706;
-  --entity-customer: #16a34a;
+  --entity-agent: #4f9dff;
+  --entity-mandate: #a78bfa;
+  --entity-transaction: #e4e7f2;
+  --entity-rule: #f5b342;
+  --entity-customer: #34d399;
 
-  --decision-allow: #16a34a;
-  --decision-block: #dc2626;
-  --decision-escalate: #d97706;
-  --decision-reject: #7c3aed;
+  --decision-allow: #34d399;
+  --decision-block: #f87171;
+  --decision-escalate: #f5b342;
+  --decision-reject: #c084fc;
 
-  --shadow-card: 0 1px 2px 0 rgba(16, 24, 40, 0.04), 0 1px 0 0 rgba(255, 255, 255, 0.6) inset;
-  --shadow-card-lg: 0 8px 24px -12px rgba(16, 24, 40, 0.18), 0 2px 6px -2px rgba(16, 24, 40, 0.08);
+  --shadow-card: 0 1px 0 0 rgba(255, 255, 255, 0.04) inset, 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  --shadow-card-lg: 0 1px 0 0 rgba(255, 255, 255, 0.05) inset, 0 24px 48px -20px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
 @theme inline {
@@ -39,14 +41,15 @@
 }
 
 html {
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 body {
   color: var(--foreground);
   background:
-    radial-gradient(1000px 480px at 8% -8%, rgba(13, 148, 251, 0.07), transparent 60%),
-    radial-gradient(900px 460px at 100% 0%, rgba(139, 92, 246, 0.05), transparent 55%),
+    radial-gradient(1100px 560px at 10% -10%, rgba(47, 143, 255, 0.14), transparent 60%),
+    radial-gradient(900px 520px at 100% 0%, rgba(167, 139, 250, 0.1), transparent 55%),
+    radial-gradient(1000px 620px at 50% 115%, rgba(245, 179, 66, 0.05), transparent 60%),
     var(--background);
   background-attachment: fixed;
   position: relative;
@@ -58,17 +61,17 @@ body::before {
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  opacity: 0.6;
+  opacity: 0.5;
   background-image:
-    linear-gradient(to right, rgba(12, 38, 81, 0.028) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(12, 38, 81, 0.028) 1px, transparent 1px);
-  background-size: 56px 56px;
-  mask-image: radial-gradient(circle at 20% 0%, black, transparent 65%);
+    linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 60px 60px;
+  mask-image: radial-gradient(circle at 25% 0%, black, transparent 68%);
 }
 
 ::selection {
   background: var(--brand-blue);
-  color: #ffffff;
+  color: #05070d;
 }
 
 ::-webkit-scrollbar {
@@ -79,13 +82,13 @@ body::before {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(12, 38, 81, 0.14);
+  background: rgba(255, 255, 255, 0.12);
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(12, 38, 81, 0.24);
+  background: rgba(255, 255, 255, 0.22);
   background-clip: padding-box;
 }
 
@@ -113,4 +116,12 @@ body::before {
   background: var(--panel);
   border: 1px solid var(--panel-border);
   box-shadow: var(--shadow-card-lg);
+}
+
+.panel-glass {
+  background: rgba(13, 16, 24, 0.72);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }

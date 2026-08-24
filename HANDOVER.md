@@ -31,7 +31,7 @@ explains every decision by tracing a real graph.
 - 3D graph (react-three-fiber + postprocessing): entity hue, trust aura, decision rings, bloom/starfield/grid, hover inspect, fork/branch edges
 - Demo Checkout Agent script that signs its own requests and runs the full demo scenario
 - Seed / key-generation CLI scripts
-- Full visual pass: light "Razorpay-brand" shell (white/navy/`#0D94FB` blue) around a deliberately dark, bloom-lit 3D graph panel
+- Full visual pass: rich dark control-plane theme (deep navy/black, Razorpay-inspired blue `#2F8FFF` as the accent) with a bloom-lit, starfield-and-grid 3D graph panel as the centerpiece. (A light "white/navy" variant was tried first and reverted — dark read as more premium for this product; the CSS tokens in `globals.css` are the single place to flip it back if that changes again.)
 
 **Configured this session:**
 
@@ -149,8 +149,15 @@ Gemini's free tier wasn't usable during this build, so `explain()` and
 `draft_policy()` run on **Groq** instead (`src/lib/llm/client.ts`), via the
 `openai` npm SDK pointed at `https://api.groq.com/openai/v1` — Groq's chat
 completions API is OpenAI-compatible, so no Groq-specific SDK dependency was
-needed. Model: `llama-3.3-70b-versatile` (verified against
-console.groq.com/docs/models, not guessed).
+needed. Model: `openai/gpt-oss-120b`. Groq's own docs list
+`llama-3.3-70b-versatile` as a production model, but it 404'd ("does not exist
+or you do not have access to it") on this account — the catalog is
+account/region-gated in ways the docs don't reflect. Don't trust the docs list
+a second time; verify with `GET https://api.groq.com/openai/v1/models` against
+the actual configured key before picking a model. Note also that `gpt-oss-120b`
+is a reasoning model — it spends tokens on hidden chain-of-thought before
+`message.content`, so neither caller sets `max_tokens` (capping it low
+truncates the real answer before it's written).
 
 `draft_policy` uses Groq's broadly-supported `json_object` response format
 plus a Zod schema validated on our side, rather than Groq's model-gated

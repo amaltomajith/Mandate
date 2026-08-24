@@ -28,7 +28,7 @@ export function Panel({
           {icon && (
             <span
               className="flex h-7 w-7 items-center justify-center rounded-lg"
-              style={{ background: `color-mix(in srgb, ${accent ?? "var(--muted-2)"} 12%, white)`, color: accent ?? "var(--muted)" }}
+              style={{ background: `color-mix(in srgb, ${accent ?? "var(--muted-2)"} 16%, transparent)`, color: accent ?? "var(--muted)" }}
             >
               {icon}
             </span>

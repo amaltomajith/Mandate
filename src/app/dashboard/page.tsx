@@ -24,7 +24,7 @@ export default async function DashboardPage() {
     <div className="relative flex min-h-screen flex-col bg-[var(--background-2)]">
       <LiveRefresher />
 
-      <header className="sticky top-0 z-20 flex items-center justify-between border-b bg-white/90 px-6 py-3.5 backdrop-blur-sm" style={{ borderColor: "var(--panel-border)" }}>
+      <header className="panel-glass sticky top-0 z-20 flex items-center justify-between px-6 py-3.5" style={{ borderTop: "none", borderLeft: "none", borderRight: "none" }}>
         <div className="flex items-center gap-3">
           <MandateMark size={28} />
           <div>
