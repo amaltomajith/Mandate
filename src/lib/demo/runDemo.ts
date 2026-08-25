@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { generateKeyPair } from "../webBotAuth/keys";
-import { UPSELL_PAIRS, findItem, type CatalogItem } from "./catalog";
+import { applySeedProducts, fetchCatalog, findItem, type CatalogItem } from "./catalog";
+import { suggestCrossSell } from "./crossSell";
 import { MandateClient } from "./mandateClient";
 import { applySeedRules } from "./seedData";
 
@@ -30,11 +31,15 @@ interface ActionResult {
 }
 
 async function ensureSeedData(db: ReturnType<typeof createAdminClient>): Promise<DemoStep> {
-  const { created, migrated } = await applySeedRules(db);
+  const [{ created: rulesCreated, migrated }, { created: productsCreated }] = await Promise.all([
+    applySeedRules(db),
+    applySeedProducts(db),
+  ]);
   const parts: string[] = [];
   if (migrated) parts.push("updated the old rate-limit rule");
-  parts.push(created > 0 ? `created ${created} new rule(s)` : "rules already existed");
-  return { label: "Set up policy rules", status: "ok", detail: parts.join(", ") + "." };
+  parts.push(rulesCreated > 0 ? `created ${rulesCreated} new rule(s)` : "rules already existed");
+  parts.push(productsCreated > 0 ? `created ${productsCreated} new product(s)` : "catalog already existed");
+  return { label: "Set up policy rules & catalog", status: "ok", detail: parts.join(", ") + "." };
 }
 
 /**
@@ -88,6 +93,8 @@ export async function runDemoScript(): Promise<DemoStep[]> {
   const { id: agentId, secretKeyBase64, step: agentStep } = await ensureDemoAgent(db);
   steps.push(agentStep);
 
+  const catalog = await fetchCatalog(db);
+
   const client = new MandateClient(baseUrl, agentId, secretKeyBase64);
   await client.initialize("mandate-dashboard-demo");
 
@@ -108,33 +115,36 @@ export async function runDemoScript(): Promise<DemoStep[]> {
     return enforced;
   }
 
+  /** Buys `item`, then asks the LLM to reason over the real catalog for a
+   *  complementary cross-sell and buys that too if it suggests one — no
+   *  hardcoded pairing table. See src/lib/demo/crossSell.ts. */
+  async function buyWithCrossSell(item: CatalogItem): Promise<void> {
+    await buy(item, `AI buyer purchases: ${item.name}`, "purchase");
+
+    const suggestion = await suggestCrossSell(catalog, item.sku);
+    if (suggestion) {
+      await buy(suggestion.item, `Agent upsells: ${suggestion.item.name} — ${suggestion.pitch}`, "upsell");
+    } else {
+      steps.push({
+        label: "Cross-sell check",
+        status: "ok",
+        detail: `No complementary item in the catalog for ${item.name} — the agent didn't force one.`,
+        kind: "upsell",
+      });
+    }
+  }
+
   // The agent decides to buy a couple of things, and — because it's an agent
-  // meant to *grow* revenue, not just place orders — proposes a paired
+  // meant to *grow* revenue, not just place orders — reasons about a paired
   // cross-sell for each one straight after. This is the part that makes it
   // read as agentic commerce rather than a policy-rule test harness: same
   // gating underneath, but the agent is visibly deciding what to buy and why.
-  const mouse = findItem("mouse-01");
-  await buy(mouse, `AI buyer purchases: ${mouse.name}`, "purchase");
-
-  const mouseUpsell = UPSELL_PAIRS[mouse.sku];
-  if (mouseUpsell) {
-    const upsellItem = findItem(mouseUpsell.pairsWithSku);
-    await buy(upsellItem, `Agent upsells: ${upsellItem.name} — ${mouseUpsell.pitch}`, "upsell");
-  }
-
-  const stand = findItem("stand-01");
-  await buy(stand, `AI buyer purchases: ${stand.name}`, "purchase");
-
-  const standUpsell = UPSELL_PAIRS[stand.sku];
-  if (standUpsell) {
-    const upsellItem = findItem(standUpsell.pairsWithSku);
-    await buy(upsellItem, `Agent upsells: ${upsellItem.name} — ${standUpsell.pitch}`, "upsell");
-  }
+  await buyWithCrossSell(findItem(catalog, "mouse-01"));
+  await buyWithCrossSell(findItem(catalog, "stand-01"));
 
   // The graceful-failure beat: a big-ticket item over the step-up threshold —
   // escalated for a human's sign-off, not blocked outright.
-  const desk = findItem("desk-01");
-  await buy(desk, `AI buyer purchases: ${desk.name}`, "purchase");
+  await buy(findItem(catalog, "desk-01"), "AI buyer purchases: Premium Standing Desk", "purchase");
 
   // The live self-defense beat: a forged request, rejected before it ever
   // reaches the policy engine.

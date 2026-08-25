@@ -1,6 +1,7 @@
-// Hand-written to match supabase/migrations/0001_init.sql — there's no live Supabase
-// project to generate this from yet. Regenerate with `supabase gen types typescript`
-// once one exists, and diff against this file before replacing it.
+// Hand-written to match supabase/migrations/0001_init.sql and 0002_products.sql —
+// there's no live Supabase project to generate this from yet. Regenerate with
+// `supabase gen types typescript` once one exists, and diff against this file
+// before replacing it.
 //
 // `Relationships: []` on every table (rather than real foreign-key metadata) is
 // deliberate: it satisfies supabase-js's GenericTable constraint without opting
@@ -187,6 +188,28 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["alerts"]["Insert"]>;
         Relationships: [];
       };
+      products: {
+        Row: {
+          id: string;
+          sku: string;
+          name: string;
+          description: string;
+          price_paise: number;
+          category: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          sku: string;
+          name: string;
+          description: string;
+          price_paise: number;
+          category: string;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["products"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
@@ -200,3 +223,4 @@ export type Escalation = Database["public"]["Tables"]["escalations"]["Row"];
 export type Alert = Database["public"]["Tables"]["alerts"]["Row"];
 export type Customer = Database["public"]["Tables"]["customers"]["Row"];
 export type Mandate = Database["public"]["Tables"]["mandates"]["Row"];
+export type Product = Database["public"]["Tables"]["products"]["Row"];

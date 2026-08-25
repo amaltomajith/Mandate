@@ -27,9 +27,11 @@ explains every decision by tracing a real graph.
 - Web Bot Auth-style request signing and verification (Ed25519, RFC 9421-shaped headers) wired into every MCP call
 - Razorpay/RazorpayX integration code for orders, refunds, payouts, subscriptions
 - Trust score formula, computed and stored per agent
-- Merchant dashboard: Clerk login, a self-resolving onboarding banner, live-polling escalations/alerts/policy panels, Horizon trigger
-- 3D graph (react-three-fiber + postprocessing): entity hue, trust aura, decision rings, bloom/starfield/grid, hover inspect, fork/branch edges
-- Demo Checkout Agent script that signs its own requests and runs the full demo scenario
+- Merchant dashboard: Clerk login, a one-click "Run demo" button (§9), live-polling escalations/alerts/policy panels, Horizon trigger
+- 3D graph (react-three-fiber + postprocessing): entity hue, trust aura, decision rings, bloom/starfield/grid, hover inspect, fork/branch edges, an always-visible legend
+- Live alert toasts + a plain-language explainability pass (amounts render as "₹6,000" not raw paise, "order.create" renders as "New purchase order")
+- Real product catalog (Supabase `products` table) + LLM-reasoned cross-sell suggestions, grounded against hallucination — see §9a
+- Demo agent (dashboard button and CLI script, same implementation) that signs its own requests and runs the full demo scenario
 - Seed / key-generation CLI scripts
 - Full visual pass: rich dark control-plane theme (deep navy/black, Razorpay-inspired blue `#2F8FFF` as the accent) with a bloom-lit, starfield-and-grid 3D graph panel as the centerpiece. (A light "white/navy" variant was tried first and reverted — dark read as more premium for this product; the CSS tokens in `globals.css` are the single place to flip it back if that changes again.)
 
@@ -253,9 +255,12 @@ Every agent starts at a neutral 50. See `src/lib/trust/score.ts`.
 
 1. **Supabase**: create a project at supabase.com. Copy the project URL,
    anon/publishable key, and service_role/secret key into `.env.local` (copy
-   `.env.example` first). Run `supabase/migrations/0001_init.sql` against it
-   via the SQL Editor. *Free-tier projects auto-pause after 7 days of
-   inactivity — open the dashboard once beforehand if it's been idle.*
+   `.env.example` first). Run **both** `supabase/migrations/0001_init.sql`
+   **and** `0002_products.sql` against it via the SQL Editor — `0002` adds the
+   `products` table the demo's cross-sell reasoning (§9a) reads from; without
+   it, `runDemoScript` fails with a clear "table not found" error, not a
+   silent no-op. *Free-tier projects auto-pause after 7 days of inactivity —
+   open the dashboard once beforehand if it's been idle.*
 2. **Razorpay**: test-mode keys (Dashboard → Settings → API Keys) into
    `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET`. This alone is enough to run the
    demo script (§6 — it uses `order.create`, not RazorpayX payouts).
@@ -282,15 +287,18 @@ Every agent starts at a neutral 50. See `src/lib/trust/score.ts`.
 implementation), matching Track 1's bar *and* its actual ask — see the note
 below on why the catalog/upsell part exists at all.
 
-1. The agent buys a **Wireless Mouse** from a small catalog
-   (`src/lib/demo/catalog.ts`) — a real Razorpay test-mode order.
-2. It then proposes a **cross-sell**: a Mechanical Keyboard, "because
-   customers who buy this mouse usually complete the desk with this
-   keyboard" — a second real order, flagged distinctly in the UI as an
-   upsell. This is deliberate, not decoration: Track 01 asks for "an agent
-   that grows revenue," not just an agent that places orders, and the
-   original build had nothing that did this.
-3. A Laptop Stand purchase, and its own paired upsell (a USB-C Hub).
+1. The agent buys a **Wireless Mouse** from a real product catalog (the
+   `products` table, migration `0002_products.sql`, seeded by
+   `src/lib/demo/catalog.ts`) — a real Razorpay test-mode order.
+2. It then asks an LLM (Groq) to reason over the *actual* catalog and propose
+   a **cross-sell** — see §9a below. Today that's a Mechanical Keyboard,
+   "because customers who buy this mouse usually complete the desk with this
+   keyboard." A second real order, flagged distinctly in the UI as an upsell.
+   This is deliberate, not decoration: Track 01 asks for "an agent that grows
+   revenue," not just an agent that places orders, and the original build had
+   nothing that did this.
+3. A Laptop Stand purchase, and its own LLM-reasoned upsell (today, a USB-C
+   Hub).
 4. A **Premium Standing Desk** at ₹6,999, over the seeded ₹5,000 step-up rule
    → `escalate`, *not* blocked. Sits in the dashboard's Escalations panel with
    a plain-language reasoning string. This is the "one failure handled
@@ -310,12 +318,44 @@ explainable, bounded and gated... one failure handled gracefully"*) is
 close to a direct match for what this build does — that was the design
 center from the start. The track's other half — *"build an agent that grows
 revenue... or makes a merchant transactable by an AI buyer end to end"* — was
-thin before this catalog/upsell pass: the original demo agent placed
-fixed-amount orders purely to exercise policy rules, with no real "agentic
-commerce" behavior. It's better now, but still deliberately modest (a static
-2-item upsell map, not a real recommendation engine) — if you want it
-stronger, that's the honest next place to invest, not more control-plane
-depth.
+thin before this pass: the original demo agent placed fixed-amount orders
+purely to exercise policy rules, first with a hardcoded `{sku -> sku}`
+pairing map for cross-sells, neither of which is real "agentic commerce"
+behavior. §9a below is what actually closes that gap.
+
+### 9a. Cross-sell reasoning: right-sized "advanced," not theater
+
+The obvious over-engineered answers here were GraphRAG (built for reasoning
+across thousands of unstructured documents — absurd for a 5-item catalog) and
+a fifth MCP tool (`recommend_product` or similar — would have diluted
+Mandate's actual differentiator, which is "four tools, reused everywhere";
+recommendation is the *agent's* reasoning, not the *control plane's* job).
+Neither was built, on purpose.
+
+What's actually there (`src/lib/demo/crossSell.ts`): after a purchase, the
+agent sends the **real** catalog (from Supabase, not a fixture) plus the
+just-bought SKU to Groq, and asks it to pick the one complementary item a
+real shopper would plausibly also want, with a one-sentence reason. Two
+things make this "grounded" rather than "an LLM call that might hallucinate
+a product that doesn't exist":
+
+- The model's chosen SKU is checked against the real candidate list before
+  it's used for anything — an invented SKU is treated the same as "no
+  suggestion," never trusted.
+- A failed or malformed LLM response is never a reason to fail the purchase
+  it's attached to — `suggestCrossSell` returns `null` and the demo continues
+  with a plain "no complementary item found" step instead of crashing.
+
+**Why this doesn't use vector/embedding retrieval:** at 6 catalog rows, the
+entire catalog fits in a single prompt for pennies — a full-context prompt is
+exact, not approximate, and cheaper than building a retrieval pipeline for
+data that small. That stops being true once a real catalog runs into the
+hundreds or thousands of SKUs, at which point embeddings + a vector index
+(Supabase supports `pgvector`) become the correct choice, not an upgrade for
+its own sake. The `products` table's `description` column exists specifically
+so that upgrade path — embed each row, store the vector, do a similarity
+search before the LLM call instead of dumping the whole table — doesn't
+require a schema change when the catalog outgrows this approach.
 
 **Why the seeded velocity rule is 30/hour, not 5/hour:** it was originally
 5/hour, which meant one full "Run demo" click used the entire hourly quota
@@ -349,16 +389,18 @@ isn't built. None of these have a dead button in the UI.
 
 ```
 supabase/migrations/0001_init.sql     schema, RLS (now largely vestigial — see §5b)
+supabase/migrations/0002_products.sql product catalog (§9a's cross-sell reasoning reads from this)
 src/types/db.ts                       hand-written Database types
 src/lib/policy/                       rule types + pure evaluator
 src/lib/trust/score.ts                trust formula
 src/lib/webBotAuth/                   keys, canonical signing, sign, verify
 src/lib/razorpay/                     SDK client, RazorpayX REST client, action dispatch
 src/lib/mcp/                          schemas, server (4 tools), session store, trace helpers
-src/lib/llm/                          Groq client (explain, draft_policy)
+src/lib/llm/                          Groq client (explain, draft_policy, cross-sell reasoning)
 src/lib/actions/                      dashboard server actions (escalations, policy, horizon, demo)
-src/lib/demo/                         catalog/upsell data, seed data, MandateClient, runDemoScript —
-                                       shared by the dashboard's "Run demo" button AND the CLI scripts
+src/lib/demo/                         catalog.ts (products), crossSell.ts (LLM-reasoned upsells,
+                                       §9a), seedData.ts, MandateClient, runDemoScript — shared by
+                                       the dashboard's "Run demo" button AND the CLI scripts
 src/lib/supabase/admin.ts             the only Supabase client left — service role, storage-only
 src/proxy.ts                          Clerk middleware
 src/app/api/mcp/route.ts              the MCP endpoint (verify → session → transport)

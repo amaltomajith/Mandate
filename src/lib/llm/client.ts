@@ -1,5 +1,10 @@
-import "server-only";
 import OpenAI from "openai";
+
+// No `import "server-only"` — this is loaded both by real Next.js server code
+// (explain.ts, draftPolicy.ts) and by src/lib/demo/crossSell.ts, which in turn
+// is loaded directly by tsx via scripts/checkout-agent.ts. "server-only"
+// throws immediately outside Next's server bundling context. Still never
+// imported from client components in practice.
 
 let cached: OpenAI | null = null;
 
