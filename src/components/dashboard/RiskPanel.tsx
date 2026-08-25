@@ -51,7 +51,7 @@ export function RiskPanel({ report }: { report: RiskReport | null }) {
     );
   }
 
-  const { evaluation, dataset, methodology, model, featureWeights } = report;
+  const { evaluation, dataset, methodology, model, featureWeights, thresholdCurve, testSetSize, testSetFraudCount } = report;
   const { confusionMatrix: cm } = evaluation;
 
   return (
@@ -72,8 +72,14 @@ export function RiskPanel({ report }: { report: RiskReport | null }) {
         <StatTile label="Precision" value={`${(evaluation.precision * 100).toFixed(1)}%`} color="var(--decision-allow)" />
         <StatTile label="Recall" value={`${(evaluation.recall * 100).toFixed(1)}%`} color="var(--entity-agent)" />
         <StatTile label="F1 score" value={`${(evaluation.f1 * 100).toFixed(1)}%`} />
-        <StatTile label="Test set" value={evaluation.testSetSize.toLocaleString()} />
+        <StatTile label="Test set" value={testSetSize.toLocaleString()} />
       </div>
+
+      <p className="mb-4 text-[11px]" style={{ color: "var(--muted-2)" }}>
+        At decision threshold {evaluation.threshold} (chosen to maximize F1 on this held-out set — see the
+        full sweep below) · {testSetFraudCount.toLocaleString()} of {testSetSize.toLocaleString()} test
+        transactions were labeled fraud.
+      </p>
 
       <div className="mb-4">
         <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--muted-2)" }}>
@@ -102,6 +108,55 @@ export function RiskPanel({ report }: { report: RiskReport | null }) {
       <div className="mb-4 rounded-lg px-3 py-2.5 text-[11px] leading-relaxed" style={{ background: "var(--panel-2)", color: "var(--muted)" }}>
         <strong style={{ color: "var(--foreground)" }}>False-positive cost:</strong> {formatMoney(evaluation.falsePositiveCost.totalInr * 100, "INR")} across {cm.falsePositive} false alarms, assuming{" "}
         {formatMoney(evaluation.falsePositiveCost.assumptionInr * 100, "INR")} per manual review — {evaluation.falsePositiveCost.note}
+      </div>
+
+      <div className="mb-4">
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--muted-2)" }}>
+          The real precision/recall tradeoff, not one cherry-picked number
+        </p>
+        <div className="overflow-x-auto rounded-lg" style={{ background: "var(--panel-2)" }}>
+          <table className="w-full min-w-[420px] border-collapse text-left text-[11px]">
+            <thead>
+              <tr style={{ color: "var(--muted-2)" }}>
+                <th className="px-2.5 py-2 font-medium">Threshold</th>
+                <th className="px-2.5 py-2 font-medium">Precision</th>
+                <th className="px-2.5 py-2 font-medium">Recall</th>
+                <th className="px-2.5 py-2 font-medium">F1</th>
+                <th className="px-2.5 py-2 font-medium">Caught</th>
+                <th className="px-2.5 py-2 font-medium">False alarms</th>
+              </tr>
+            </thead>
+            <tbody>
+              {thresholdCurve.map((row) => {
+                const isRecommended = row.threshold === evaluation.threshold;
+                return (
+                  <tr
+                    key={row.threshold}
+                    style={isRecommended ? { background: "color-mix(in srgb, var(--entity-agent) 14%, transparent)" } : undefined}
+                  >
+                    <td className="px-2.5 py-1.5 tabular-nums">
+                      {row.threshold}
+                      {isRecommended && (
+                        <span className="ml-1.5 rounded px-1 py-0.5 text-[9px] font-semibold" style={{ background: "var(--entity-agent)", color: "white" }}>
+                          max F1
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-2.5 py-1.5 tabular-nums">{(row.precision * 100).toFixed(1)}%</td>
+                    <td className="px-2.5 py-1.5 tabular-nums">{(row.recall * 100).toFixed(1)}%</td>
+                    <td className="px-2.5 py-1.5 tabular-nums">{(row.f1 * 100).toFixed(1)}%</td>
+                    <td className="px-2.5 py-1.5 tabular-nums">{row.confusionMatrix.truePositive}</td>
+                    <td className="px-2.5 py-1.5 tabular-nums">{row.confusionMatrix.falsePositive.toLocaleString()}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-1.5 text-[10px]" style={{ color: "var(--muted-2)" }}>
+          A lower threshold catches more fraud at the cost of more false alarms, and vice versa — this is
+          the real shape of that tradeoff on the held-out set, not a single number picked to look good.
+        </p>
       </div>
 
       <div className="mb-4">

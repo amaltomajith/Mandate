@@ -2,22 +2,26 @@ import "server-only";
 import fs from "node:fs";
 import path from "node:path";
 
+export interface ThresholdEvaluation {
+  threshold: number;
+  confusionMatrix: { truePositive: number; falsePositive: number; trueNegative: number; falseNegative: number };
+  precision: number;
+  recall: number;
+  f1: number;
+  falsePositiveCost: { assumptionInr: number; totalInr: number; note: string };
+  fraudAmountCaughtInPaise: number;
+  fraudAmountMissedInPaise: number;
+}
+
 export interface RiskReport {
   trainedAt: string;
   dataset: { source: string; totalQualifyingRows: number; totalFraudRows: number; note: string };
   methodology: { trainFraction: number; trainNegativeCap: number; testNegativeCap: number; note: string };
-  model: { type: string; features: readonly string[]; epochs: number; positiveClassWeight: number; decisionThreshold: number };
-  evaluation: {
-    confusionMatrix: { truePositive: number; falsePositive: number; trueNegative: number; falseNegative: number };
-    precision: number;
-    recall: number;
-    f1: number;
-    falsePositiveCost: { assumptionInr: number; totalInr: number; note: string };
-    fraudAmountCaughtInPaise: number;
-    fraudAmountMissedInPaise: number;
-    testSetSize: number;
-    testSetFraudCount: number;
-  };
+  model: { type: string; features: readonly string[]; epochs: number; positiveClassWeight: number };
+  evaluation: ThresholdEvaluation;
+  thresholdCurve: ThresholdEvaluation[];
+  testSetSize: number;
+  testSetFraudCount: number;
   featureWeights: { name: string; weight: number }[];
 }
 
