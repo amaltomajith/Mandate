@@ -548,58 +548,14 @@ two commands" state if it's missing — never a fabricated number.
 
 ### What this deliberately doesn't do
 
-The model's features depend on PaySim's mobile-money account-balance fields
-(before/after balance on both sides of a transfer) — Razorpay's Orders API
-doesn't expose anything equivalent. Inventing plausible-looking values for
-those fields to feed a live transaction would be exactly the kind of
-fabrication this whole module was built to avoid — see §10a for how live
-scoring was eventually added *without* doing that.
-
-### 10a. Live scoring on PS1 traces — mean imputation, not invention
-
-Later ask: fold a flagged, clearly-labeled risk signal into the live
-dashboard (PS1) itself, ideally surfaced through the MCP tool responses so
-an agent calling `simulate_action`/`enforce_action` sees it too — without
-letting it anywhere near the actual allow/block/escalate decision, and
-without inventing the PaySim-only balance fields §10 says not to fake.
-
-**The technique**: mean imputation. `src/lib/risk/scoreLiveTransaction.ts`
-loads the trained model's stored `featureMeans`/`featureStds`, computes
-`logAmount` for real from the live transaction's amount (the only feature a
-Razorpay order actually has an equivalent for), and sets every other
-feature to its own training-set mean. After the model's standardization
-step (`(x - mean) / std`), a mean-imputed feature becomes exactly `0` in
-standardized space — it swings the score in neither direction. This is a
-real, standard statistical technique for "I don't have this input," not a
-guess dressed up as data: feeding literal `0`s instead would have been
-dishonest, since `0` happens to be the *meaningful* "no discrepancy" value
-for two of these features and one of the strongest "not fraud" signals in
-the training data — every live transaction would then score artificially
-low no matter what.
-
-**What it actually is, plainly**: an amount-only heuristic. Six of seven
-features contribute nothing. It is **not** the 83.6%/45.4%-grade PaySim
-model — that number describes performance with all seven real features
-present, and does not transfer here. This model's accuracy on live Mandate
-traffic has never been measured (there's no fraud ground truth for
-Mandate's own traces to measure it against), and every surface that shows
-this number says so:
-
-- `traces.illustrative_risk_score` (migration `0003_traces_risk_score.sql`)
-  — nullable, populated *after* the real policy decision, never read by
-  `src/lib/policy/engine.ts` or anything upstream of it.
-- `simulate_action`/`enforce_action`'s MCP JSON response carries it as
-  `illustrativeRisk: { score, basis: "amount-only", caveat }` — an added
-  field on the existing four tools, not a fifth tool, keeping the "four
-  tools, reused everywhere" architecture intact.
-- The 3D graph's trace tooltip and the Transactions view's expanded row
-  both show it with the same "amount-only, trained on external Kaggle data,
-  not used in this decision" caveat inline, not just in this document.
-
-Scoring runs in a `try/catch` in `runActionEvaluation`
-(`src/lib/mcp/tools/actionEvaluator.ts`) and returns `null` on any failure
-(including "model not trained yet") — a scoring problem must never be able
-to interrupt the real money-gating decision it's attached to.
+It does not score Mandate's own live transactions. The model's features
+depend on PaySim's mobile-money account-balance fields (before/after balance
+on both sides of a transfer) — Razorpay's Orders API doesn't expose anything
+equivalent, so applying this model to a live `order.create` trace would mean
+inventing input values to feed it, which is exactly the kind of fabrication
+this whole module was built to avoid. If a future data source actually
+carried comparable balance fields, wiring up live scoring would be a real
+next step; faking the inputs to do it today would not be.
 
 ## 11. Roadmap / explicitly cut (not built, not stubbed)
 

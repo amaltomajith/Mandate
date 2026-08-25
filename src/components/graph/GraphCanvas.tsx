@@ -217,11 +217,6 @@ function HoverPanel({ info }: { info: HoverInfo }) {
     title = actionTypeLabel(info.trace.action_type) + (p?.amount && p?.currency ? ` · ${formatMoney(p.amount, p.currency)}` : "");
     badge = { text: DECISION_LABELS[info.trace.decision], color: DECISION_COLORS[info.trace.decision] };
     lines = [info.trace.reasoning ?? ""];
-    if (info.trace.illustrative_risk_score !== null && info.trace.illustrative_risk_score !== undefined) {
-      lines.push(
-        `Illustrative risk score: ${(info.trace.illustrative_risk_score * 100).toFixed(0)}% — amount-only signal from a Kaggle-trained model, not used in this decision.`
-      );
-    }
   }
 
   return (

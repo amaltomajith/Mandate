@@ -73,7 +73,6 @@ export interface InsertTraceInput {
   ruleFiredId?: string | null;
   reasoning?: string | null;
   razorpayResponse?: Json | null;
-  illustrativeRiskScore?: number | null;
 }
 
 export async function insertTrace(input: InsertTraceInput) {
@@ -90,7 +89,6 @@ export async function insertTrace(input: InsertTraceInput) {
       rule_fired_id: input.ruleFiredId ?? null,
       reasoning: input.reasoning ?? null,
       razorpay_response: input.razorpayResponse ?? null,
-      illustrative_risk_score: input.illustrativeRiskScore ?? null,
     })
     .select()
     .single();
