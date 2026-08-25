@@ -48,4 +48,7 @@ async function main() {
   console.log(`\nAgent id (use as keyid when signing): ${data.id}`);
 }
 
-main();
+main().catch((err) => {
+  console.error("\ngen-agent-key failed:", err);
+  process.exit(1);
+});
