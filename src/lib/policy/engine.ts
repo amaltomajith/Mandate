@@ -9,6 +9,13 @@ import type {
   StepUpParams,
 } from "./types";
 
+/** Paise -> a reasoning string a merchant can actually read at a glance. */
+function formatMoney(amountPaise: number, currency: string): string {
+  const amount = amountPaise / 100;
+  const formatted = amount.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  return currency === "INR" ? `₹${formatted}` : `${formatted} ${currency}`;
+}
+
 /**
  * Pure policy evaluator. No DB access, no side effects — `simulate_action` and
  * `enforce_action` both call this with the same inputs and get the same decision;
@@ -33,7 +40,7 @@ export function evaluatePolicy(
       return {
         rule,
         decision: "block",
-        reasoning: `Category "${context.category}" is on the blocked list for rule "${rule.name}".`,
+        reasoning: `"${context.category}" is on the blocked category list for rule "${rule.name}".`,
       };
     }
   }
@@ -47,7 +54,7 @@ export function evaluatePolicy(
         return {
           rule,
           decision: "block",
-          reasoning: `Amount ${context.amount} ${context.currency} exceeds the per-transaction cap of ${params.max_amount} ${params.currency} set by rule "${rule.name}".`,
+          reasoning: `This action is ${formatMoney(context.amount, context.currency)}, over the per-transaction cap of ${formatMoney(params.max_amount, params.currency)} set by rule "${rule.name}".`,
         };
       }
     } else {
@@ -57,7 +64,7 @@ export function evaluatePolicy(
         return {
           rule,
           decision: "block",
-          reasoning: `This action would bring today's total to ${projected} ${context.currency}, over the daily cap of ${params.max_amount} ${params.currency} set by rule "${rule.name}".`,
+          reasoning: `This would bring today's total to ${formatMoney(projected, context.currency)}, over the daily cap of ${formatMoney(params.max_amount, params.currency)} set by rule "${rule.name}".`,
         };
       }
     }
@@ -67,10 +74,14 @@ export function evaluatePolicy(
     const params = rule.params as VelocityParams;
     const count = aggregates.velocityCounts[rule.id] ?? 0;
     if (count + 1 > params.max_count) {
+      const windowLabel =
+        params.window_seconds >= 3600
+          ? `${Math.round(params.window_seconds / 3600)}h`
+          : `${Math.round(params.window_seconds / 60)}m`;
       return {
         rule,
         decision: "block",
-        reasoning: `This would be action ${count + 1} within ${params.window_seconds}s, over the limit of ${params.max_count} set by rule "${rule.name}".`,
+        reasoning: `This would be action ${count + 1} within ${windowLabel}, over the limit of ${params.max_count} set by rule "${rule.name}".`,
       };
     }
   }
@@ -82,7 +93,7 @@ export function evaluatePolicy(
       return {
         rule,
         decision: "escalate",
-        reasoning: `Amount ${context.amount} ${context.currency} is at or above the step-up threshold of ${params.threshold_amount} ${params.currency} set by rule "${rule.name}" — a human needs to approve this one.`,
+        reasoning: `This action is ${formatMoney(context.amount, context.currency)}, at or above the ${formatMoney(params.threshold_amount, params.currency)} step-up threshold set by rule "${rule.name}" — a human needs to approve it.`,
       };
     }
   }

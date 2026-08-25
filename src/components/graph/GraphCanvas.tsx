@@ -8,6 +8,21 @@ import type * as THREE from "three";
 import type { Agent, PolicyRule, Trace } from "@/types/db";
 import { computeLayout, type Vec3 } from "./layout";
 import { DECISION_COLORS, ENTITY_COLORS } from "./colors";
+import { actionTypeLabel, formatMoney } from "@/lib/format";
+
+const RULE_TYPE_LABELS: Record<PolicyRule["type"], string> = {
+  cap: "Spend cap",
+  velocity: "Rate limit",
+  category_block: "Category block",
+  step_up: "Step-up (needs approval)",
+};
+
+const DECISION_LABELS: Record<Trace["decision"], string> = {
+  allow: "Allowed",
+  block: "Blocked",
+  escalate: "Escalated — needs approval",
+  protocol_reject: "Rejected — invalid signature",
+};
 
 type HoverInfo =
   | { kind: "agent"; agent: Agent; position: Vec3 }
@@ -138,17 +153,25 @@ function HoverPanel({ info }: { info: HoverInfo }) {
   if (!info) return null;
 
   let title = "";
+  let badge: { text: string; color: string } | null = null;
   let lines: string[] = [];
 
   if (info.kind === "agent") {
     title = info.agent.name;
-    lines = [`trust score: ${info.agent.trust_score.toFixed(0)}/100`, info.agent.description ?? "agent identity"];
+    badge = { text: "AI agent", color: ENTITY_COLORS.agent };
+    lines = [
+      `Trust score ${info.agent.trust_score.toFixed(0)}/100 — bigger, steadier glow means a cleaner track record.`,
+      info.agent.description ?? "",
+    ];
   } else if (info.kind === "rule") {
     title = info.rule.name;
-    lines = [`type: ${info.rule.type}`, info.rule.rationale ?? ""];
+    badge = { text: RULE_TYPE_LABELS[info.rule.type], color: ENTITY_COLORS.rule };
+    lines = [info.rule.rationale ?? "No extra detail recorded for this rule."];
   } else {
-    title = info.trace.action_type;
-    lines = [`decision: ${info.trace.decision}`, info.trace.reasoning ?? ""];
+    const p = info.trace.params as { amount?: number; currency?: string } | null;
+    title = actionTypeLabel(info.trace.action_type) + (p?.amount && p?.currency ? ` · ${formatMoney(p.amount, p.currency)}` : "");
+    badge = { text: DECISION_LABELS[info.trace.decision], color: DECISION_COLORS[info.trace.decision] };
+    lines = [info.trace.reasoning ?? ""];
   }
 
   return (
@@ -161,12 +184,20 @@ function HoverPanel({ info }: { info: HoverInfo }) {
       {/* Hardcoded dark colors, not the (light-theme) CSS vars — this tooltip
           floats over the graph's own dark canvas, not the light dashboard shell. */}
       <div
-        className="w-64 -translate-x-1/2 -translate-y-[calc(100%+14px)] rounded-xl border px-3.5 py-3 shadow-2xl backdrop-blur-md"
+        className="w-72 -translate-x-1/2 -translate-y-[calc(100%+14px)] rounded-xl border px-3.5 py-3 shadow-2xl backdrop-blur-md"
         style={{ background: "rgba(9,11,18,0.97)", borderColor: "rgba(255,255,255,0.14)", color: "#f3f5fb" }}
       >
         <p className="mb-1.5 text-[13px] font-semibold leading-snug">{title}</p>
+        {badge && (
+          <span
+            className="mb-1.5 inline-block rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+            style={{ background: `${badge.color}26`, color: badge.color }}
+          >
+            {badge.text}
+          </span>
+        )}
         {lines.filter(Boolean).map((line, i) => (
-          <p key={i} className="text-[12px] leading-relaxed" style={{ color: "#a4acc4" }}>
+          <p key={i} className="mt-1 text-[12px] leading-relaxed" style={{ color: "#a4acc4" }}>
             {line}
           </p>
         ))}

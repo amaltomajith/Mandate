@@ -2,11 +2,13 @@ import { getDashboardData } from "@/lib/dashboardData";
 import { LiveRefresher } from "@/components/dashboard/LiveRefresher";
 import { EscalationsPanel } from "@/components/dashboard/EscalationsPanel";
 import { AlertsPanel } from "@/components/dashboard/AlertsPanel";
+import { AlertToasts } from "@/components/dashboard/AlertToasts";
 import { PolicyRulesPanel } from "@/components/dashboard/PolicyRulesPanel";
 import { HorizonPanel } from "@/components/dashboard/HorizonPanel";
 import { SignOutButton } from "@/components/dashboard/SignOutButton";
 import { GettingStartedBanner } from "@/components/dashboard/GettingStartedBanner";
 import { GraphCanvas } from "@/components/graph/GraphCanvas";
+import { GraphLegend } from "@/components/graph/GraphLegend";
 import { MandateMark } from "@/components/brand/MandateMark";
 import type { Trace } from "@/types/db";
 
@@ -23,6 +25,7 @@ export default async function DashboardPage() {
   return (
     <div className="relative flex min-h-screen flex-col bg-[var(--background-2)]">
       <LiveRefresher />
+      <AlertToasts alerts={alerts} />
 
       <header className="panel-glass sticky top-0 z-20 flex items-center justify-between px-6 py-3.5" style={{ borderTop: "none", borderLeft: "none", borderRight: "none" }}>
         <div className="flex items-center gap-3">
@@ -65,9 +68,10 @@ export default async function DashboardPage() {
             />
             <div className="pointer-events-none absolute left-5 top-4 z-10">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-white/70">Entity graph</p>
-              <p className="mt-0.5 text-xs text-white/50">drag to orbit · hover to inspect</p>
+              <p className="mt-0.5 text-xs text-white/50">a live map of every agent, rule, and action</p>
             </div>
             <GraphCanvas agents={agents} rules={rules} traces={traces} />
+            <GraphLegend />
           </div>
 
           <div className="space-y-5">

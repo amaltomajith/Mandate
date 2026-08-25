@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { approveEscalation, denyEscalation } from "@/lib/actions/escalations";
 import type { Escalation, Trace } from "@/types/db";
-import { DangerButton, EmptyState, Icons, Panel, SuccessButton, relativeTime } from "./ui";
+import { actionTypeLabel, DangerButton, EmptyState, formatMoney, Icons, Panel, SuccessButton, relativeTime } from "./ui";
 
 export function EscalationsPanel({
   escalations,
@@ -62,7 +62,17 @@ export function EscalationsPanel({
               </div>
               {trace && (
                 <>
-                  <p className="mt-2 text-sm font-medium">{trace.action_type}</p>
+                  <div className="mt-2 flex items-baseline justify-between gap-2">
+                    <p className="text-sm font-medium">{actionTypeLabel(trace.action_type)}</p>
+                    {(() => {
+                      const p = trace.params as { amount?: number; currency?: string } | null;
+                      return p?.amount && p?.currency ? (
+                        <p className="text-sm font-semibold tabular-nums" style={{ color: "var(--decision-escalate)" }}>
+                          {formatMoney(p.amount, p.currency)}
+                        </p>
+                      ) : null;
+                    })()}
+                  </div>
                   <p className="mt-1 text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
                     {trace.reasoning}
                   </p>
