@@ -1,5 +1,6 @@
 import { getDashboardData } from "@/lib/dashboardData";
 import { auditPolicySet } from "@/lib/policy/audit";
+import { loadRiskReport } from "@/lib/risk/loadReport";
 import { LiveRefresher } from "@/components/dashboard/LiveRefresher";
 import { AlertToasts } from "@/components/dashboard/AlertToasts";
 import { AlertsBell } from "@/components/dashboard/AlertsBell";
@@ -18,6 +19,7 @@ export default async function DashboardPage() {
   const activeAgents = agents.length;
   const activeRules = rules.filter((r) => r.status === "active").length;
   const deterministicIssues = auditPolicySet(rules);
+  const riskReport = loadRiskReport();
 
   return (
     <div className="relative flex min-h-screen flex-col bg-[var(--background-2)]">
@@ -79,6 +81,7 @@ export default async function DashboardPage() {
           tracesById={tracesById}
           deterministicIssues={deterministicIssues}
           pendingCount={pendingEscalations}
+          riskReport={riskReport}
         />
       </div>
     </div>
