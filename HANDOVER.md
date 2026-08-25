@@ -27,8 +27,9 @@ explains every decision by tracing a real graph.
 - Web Bot Auth-style request signing and verification (Ed25519, RFC 9421-shaped headers) wired into every MCP call
 - Razorpay/RazorpayX integration code for orders, refunds, payouts, subscriptions
 - Trust score formula, computed and stored per agent
-- Merchant dashboard: Clerk login, a one-click "Run demo" button (§9), live-polling escalations/alerts/policy panels, Horizon trigger
-- 3D graph (react-three-fiber + postprocessing): entity hue, trust aura, decision rings, bloom/starfield/grid, hover inspect, fork/branch edges, an always-visible legend
+- Merchant dashboard, now three real sections (§9c): Overview (graph + "Run demo" + escalations/alerts), Transactions (every trace, filterable/searchable), Policies (rule management + audit + Horizon)
+- Policy governance (§9b): deactivate/reactivate any rule, conflict-aware approval, a deterministic gap/conflict checker (runs free on every load) plus an on-demand LLM review — labeled and never blended
+- 3D graph (react-three-fiber + postprocessing): entity hue, trust aura, decision rings, bloom/starfield/grid, hover inspect, fork/branch edges, an always-visible legend, a distinct block/reject shockwave effect, nodes that materialize in instead of popping (§9c)
 - Live alert toasts + a plain-language explainability pass (amounts render as "₹6,000" not raw paise, "order.create" renders as "New purchase order")
 - Real product catalog (Supabase `products` table) + LLM-reasoned cross-sell suggestions, grounded against hallucination — see §9a
 - Demo agent (dashboard button and CLI script, same implementation) that signs its own requests and runs the full demo scenario
@@ -366,6 +367,87 @@ so several repeat runs fit inside an hour. `src/lib/demo/seedData.ts` also
 migrates a pre-existing "Max 5 actions/hour per agent" row in place if it
 finds one, rather than leaving a stale duplicate active alongside the new one.
 
+### 9b. Policy governance: audit, management, conflict resolution
+
+Requested directly: "the structure is rigid... detect and flag me... let me
+play with policies... address the conflicts." Three real gaps, closed:
+
+**The rule set couldn't be edited, only approved.** `PolicyRulesPanel` used to
+only handle `pending_review` rules (approve/reject); an already-`active` rule
+was permanent. Now every active rule has a **Deactivate** button, and every
+deactivated one can be **Reactivate**d — it reuses the existing `superseded`
+status rather than adding a new one (`superseded_by` stays `null` for a
+manual deactivation, distinguishing it from "replaced by rule X" in the UI).
+See `src/lib/actions/policy.ts`.
+
+**Conflicts had no resolution path.** `draft_policy` already computed
+`conflictsWith` at draft time, but nothing let you *act* on it later. Now,
+approving a `pending_review` rule that shares a type with an existing active
+rule shows those conflicting rules with checkboxes — "retire this one when
+the new rule activates," left unchecked by default so keeping both is the
+explicit choice, not the accidental one.
+
+**Nothing checked the rule set for internal logic errors.** This is the part
+that's actually "detect and flag" — `src/lib/policy/audit.ts`, run
+automatically on every dashboard load (pure function, no API call, so a poll
+every 4s is free), finds things that are *provably true* given how
+`engine.ts` resolves priority:
+
+- A step-up rule whose threshold is at or above a per-transaction cap's
+  ceiling can **never fire** — the cap blocks first, every time, so the human
+  approval path it was meant to create is dead code. Caught this exact bug in
+  this project's own seed data while writing the checker (not contrived —
+  see the old vs. new step-up/cap numbers in the seed history).
+- Two caps in the same currency/scope where the looser one is **unreachable**
+  behind the stricter one.
+- Duplicate or overlapping category-block rules.
+- **No step-up rule configured at all** — nothing routes to a human, every
+  action is either allowed or hard-blocked.
+
+A second, separate LLM-driven layer (`src/lib/policy/semanticAudit.ts`, "Run
+AI review" button — on-demand, not automatic, because an LLM call on every 4s
+poll would be wasteful and slow) looks for softer, judgment-call gaps a
+deterministic checker structurally can't make ("no cap on payouts at all,"
+"this category list looks incomplete given what's already blocked").
+**Deliberately never blended with the deterministic findings** — the UI
+labels deterministic issues by real severity (critical/warning/info) and
+every LLM-sourced one as "worth reviewing," because they're not the same kind
+of claim and presenting them identically would overstate the LLM layer's
+certainty.
+
+### 9c. Transactions view, dashboard navigation, and better graph feedback
+
+**"I don't have any idea about all the transactions"** — there was no view of
+transaction history beyond what fit in the graph or the escalations panel.
+`TransactionsView` (a new "Transactions" tab) lists every trace with
+filter-by-decision and a text search, using the same `formatMoney`/
+`actionTypeLabel` helpers as everywhere else so amounts and action types read
+the same way here as they do in the graph and the toasts.
+
+**The dashboard was becoming one long, dense page.** Adding a transactions
+table and real policy management on top of the graph and side panels would
+have made that worse, not better. `DashboardTabs` splits it into three real
+sections — Overview (the graph + escalations/alerts), Transactions, and
+Policies (rule management + health audit + draft-a-policy) — instead of
+everything stacked into one scroll.
+
+**The 3D graph's "blocked" feedback was just a static red ring**, the same
+visual weight as every other outcome. Two real fixes in
+`src/components/graph/GraphCanvas.tsx`'s `TraceNode`:
+
+- A genuine bug: the fresh-decision pulse animation read the *scene's* shared
+  clock, not a per-node one — so a node that appeared a minute into a session
+  computed an elapsed time already far past its own animation window and
+  rendered pre-faded, never actually pulsing. Fixed by giving each node its
+  own local start time, captured on its first frame.
+- A `block`/`protocol_reject` decision now gets a second ring — a shockwave
+  that bursts outward and fades over ~1 second, distinct from the calm
+  allow/escalate pulse, so a blocked action reads as a stop, not just a
+  different color. Every node also now scales in from nothing over its first
+  ~0.35s instead of popping into existence, which is most of what makes the
+  graph read as a live simulation rather than a static picture that
+  occasionally redraws.
+
 ## 10. Roadmap / explicitly cut (not built, not stubbed)
 
 These have a real, working foundation underneath but the specific feature
@@ -384,6 +466,27 @@ isn't built. None of these have a dead button in the UI.
   agent/rule/transaction nodes only.
 - **True push-based Realtime.** Traded for a 4s poll when auth moved to Clerk
   — see §5b for why that's a deliberate tradeoff, not a shortcut.
+- **PaySim-calibrated background traffic generator** (from the original
+  plan's §7a): drive realistic transaction *volume* — varied amounts, varied
+  simulated identities, an occasional anomaly — through the real MCP path
+  continuously, instead of relying only on "Run demo" clicks for history.
+  Explicitly deferred this session, not forgotten: real enough to matter
+  (trust scores, the policy audit, and a transactions table all get more
+  meaningful with volume behind them), but sizable enough (rate-limit-aware
+  batching against a real Razorpay account, a calibration step) that bolting
+  it on here risked shipping everything else shallower. Natural next step
+  after this batch.
+- **The "greedy agent" scripted overreach scenario** (from the original
+  plan's §7): a demo path where the agent deliberately stacks too much
+  discount/spend and gets caught — a second, more adversarial "blocked" beat
+  alongside the existing step-up escalation. Same reasoning as above.
+- **Statistical anomaly flagging** (outlier amounts, sudden rate spikes) —
+  the honest reason this isn't built yet is that it needs real transaction
+  volume to mean anything, which is exactly what the traffic generator above
+  would provide. Building it against a handful of demo-run transactions would
+  produce a detector that's confidently wrong, not "advanced" — the same
+  judgment call as declining to use an RNN for policy-conflict detection
+  (§9a's reasoning applies here too: right-sized, not decorative).
 
 ## 11. Where things live
 
@@ -391,7 +494,8 @@ isn't built. None of these have a dead button in the UI.
 supabase/migrations/0001_init.sql     schema, RLS (now largely vestigial — see §5b)
 supabase/migrations/0002_products.sql product catalog (§9a's cross-sell reasoning reads from this)
 src/types/db.ts                       hand-written Database types
-src/lib/policy/                       rule types + pure evaluator
+src/lib/policy/                       rule types + pure evaluator + audit.ts (deterministic gap
+                                       checker) + semanticAudit.ts (LLM layer) — see §9b
 src/lib/trust/score.ts                trust formula
 src/lib/webBotAuth/                   keys, canonical signing, sign, verify
 src/lib/razorpay/                     SDK client, RazorpayX REST client, action dispatch
@@ -409,8 +513,10 @@ src/app/login/, src/app/sign-up/      Clerk auth routes
 src/app/dashboard/                    merchant UI
 src/components/auth/AuthShell.tsx     split-hero shell around Clerk's components (also the onboarding copy)
 src/components/brand/MandateMark.tsx  shared logo mark
-src/components/graph/                 3D graph + legend (layout.ts is the pure/testable part)
-src/components/dashboard/             panels, buttons, DemoRunner (the "Run demo" button), toasts, live poll refresher
+src/components/graph/                 3D graph + legend (layout.ts is the pure/testable part;
+                                       GraphCanvas.tsx has the block-shockwave/materialize-in effects)
+src/components/dashboard/             DashboardTabs (Overview/Transactions/Policies), TransactionsView,
+                                       PolicyHealthPanel, panels, buttons, DemoRunner, toasts, live poll refresher
 scripts/                              seed, gen-agent-key, checkout-agent — thin CLI wrappers around src/lib/demo/
 ```
 

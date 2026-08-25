@@ -100,29 +100,68 @@ function RuleNode({ rule, position, onHover }: { rule: PolicyRule; position: Vec
 }
 
 function TraceNode({ trace, position, onHover }: { trace: Trace; position: Vec3; onHover: (h: HoverInfo) => void }) {
+  const groupRef = useRef<THREE.Group>(null);
   const ringRef = useRef<THREE.Mesh>(null);
+  const shockwaveRef = useRef<THREE.Mesh>(null);
   // useState's lazy initializer is the sanctioned way to capture an impure value
   // like Date.now() exactly once at mount (a plain useRef(Date.now()) read during
   // render trips the react-hooks purity rule).
   const [mountedAt] = useState(() => Date.now());
   const isFresh = (mountedAt - new Date(trace.created_at).getTime()) / 1000 < 6;
   const decisionColor = DECISION_COLORS[trace.decision];
+  const isSevere = trace.decision === "block" || trace.decision === "protocol_reject";
+
+  // The scene clock is shared across every node and keeps running for the
+  // life of the Canvas — using it directly meant a node that mounted a minute
+  // into the session read an elapsed time already far past its own animation
+  // window, so its "fresh" pulse rendered pre-faded instead of playing. This
+  // ref captures each node's OWN start time on its first frame instead.
+  const localStartRef = useRef<number | null>(null);
 
   useFrame(({ clock }) => {
-    if (!ringRef.current) return;
-    const mat = ringRef.current.material as THREE.MeshBasicMaterial;
-    if (!isFresh) {
-      ringRef.current.scale.setScalar(1);
-      mat.opacity = 0.28;
-      return;
+    if (localStartRef.current === null) localStartRef.current = clock.getElapsedTime();
+    const localElapsed = clock.getElapsedTime() - localStartRef.current;
+
+    // Materialize-in: every node scales up from nothing on its first ~0.35s,
+    // fresh or not — this is what makes new activity read as something
+    // *appearing* in a live simulation rather than popping into existence.
+    if (groupRef.current) {
+      const growth = Math.min(localElapsed / 0.35, 1);
+      const eased = 1 - Math.pow(1 - growth, 3);
+      groupRef.current.scale.setScalar(eased);
     }
-    const t = Math.min(clock.getElapsedTime() / 2.2, 1);
-    ringRef.current.scale.setScalar(1.9 - t * 0.9);
-    mat.opacity = 0.9 - t * 0.62;
+
+    if (ringRef.current) {
+      const mat = ringRef.current.material as THREE.MeshBasicMaterial;
+      if (!isFresh) {
+        ringRef.current.scale.setScalar(1);
+        mat.opacity = 0.28;
+      } else {
+        const t = Math.min(localElapsed / 2.2, 1);
+        ringRef.current.scale.setScalar(1.9 - t * 0.9);
+        mat.opacity = 0.9 - t * 0.62;
+      }
+    }
+
+    // A block/rejection gets a second, bigger ring that bursts outward and
+    // fades — visually distinct from the calm allow/escalate pulse, so a
+    // blocked action reads as a stop, not just a different-colored dot.
+    if (shockwaveRef.current) {
+      if (isFresh && isSevere) {
+        const t = Math.min(localElapsed / 1.1, 1);
+        const mat = shockwaveRef.current.material as THREE.MeshBasicMaterial;
+        shockwaveRef.current.scale.setScalar(1 + t * 5);
+        mat.opacity = (1 - t) * 0.6;
+        shockwaveRef.current.visible = t < 1;
+      } else {
+        shockwaveRef.current.visible = false;
+      }
+    }
   });
 
   return (
     <group
+      ref={groupRef}
       position={position}
       onPointerOver={(e) => {
         e.stopPropagation();
@@ -141,6 +180,12 @@ function TraceNode({ trace, position, onHover }: { trace: Trace; position: Vec3;
         <ringGeometry args={[0.24, 0.3, 24]} />
         <meshBasicMaterial color={decisionColor} transparent opacity={0.5} depthWrite={false} side={2} />
       </mesh>
+      {isSevere && (
+        <mesh ref={shockwaveRef} rotation={[Math.PI / 2, 0, 0]} visible={false}>
+          <ringGeometry args={[0.32, 0.36, 32]} />
+          <meshBasicMaterial color={decisionColor} transparent opacity={0} depthWrite={false} side={2} />
+        </mesh>
+      )}
     </group>
   );
 }

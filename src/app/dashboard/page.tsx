@@ -1,14 +1,9 @@
 import { getDashboardData } from "@/lib/dashboardData";
+import { auditPolicySet } from "@/lib/policy/audit";
 import { LiveRefresher } from "@/components/dashboard/LiveRefresher";
-import { EscalationsPanel } from "@/components/dashboard/EscalationsPanel";
-import { AlertsPanel } from "@/components/dashboard/AlertsPanel";
 import { AlertToasts } from "@/components/dashboard/AlertToasts";
-import { PolicyRulesPanel } from "@/components/dashboard/PolicyRulesPanel";
-import { HorizonPanel } from "@/components/dashboard/HorizonPanel";
 import { SignOutButton } from "@/components/dashboard/SignOutButton";
-import { DemoRunner } from "@/components/dashboard/DemoRunner";
-import { GraphCanvas } from "@/components/graph/GraphCanvas";
-import { GraphLegend } from "@/components/graph/GraphLegend";
+import { DashboardTabs } from "@/components/dashboard/DashboardTabs";
 import { MandateMark } from "@/components/brand/MandateMark";
 import type { Trace } from "@/types/db";
 
@@ -21,6 +16,7 @@ export default async function DashboardPage() {
   const pendingEscalations = escalations.filter((e) => e.status === "pending").length;
   const activeAgents = agents.length;
   const activeRules = rules.filter((r) => r.status === "active").length;
+  const deterministicIssues = auditPolicySet(rules);
 
   return (
     <div className="relative flex min-h-screen flex-col bg-[var(--background-2)]">
@@ -45,6 +41,9 @@ export default async function DashboardPage() {
               value={pendingEscalations}
               tone={pendingEscalations > 0 ? "var(--decision-escalate)" : undefined}
             />
+            {deterministicIssues.length > 0 && (
+              <StatChip label="policy issues" value={deterministicIssues.length} tone="var(--decision-block)" />
+            )}
           </div>
         </div>
 
@@ -70,29 +69,16 @@ export default async function DashboardPage() {
           </div>
         )}
 
-        <DemoRunner />
-
-        <div className="grid flex-1 grid-cols-1 gap-5 lg:grid-cols-[1fr_390px]">
-          <div className="relative min-h-[560px] overflow-hidden rounded-2xl panel-card-lg">
-            <div
-              className="pointer-events-none absolute inset-x-0 top-0 z-10 h-24"
-              style={{ background: "linear-gradient(to bottom, rgba(5,6,10,0.6), transparent)" }}
-            />
-            <div className="pointer-events-none absolute left-5 top-4 z-10">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-white/70">Entity graph</p>
-              <p className="mt-0.5 text-xs text-white/50">a live map of every agent, rule, and action</p>
-            </div>
-            <GraphCanvas agents={agents} rules={rules} traces={traces} />
-            <GraphLegend />
-          </div>
-
-          <div className="space-y-5">
-            <EscalationsPanel escalations={escalations} tracesById={tracesById} />
-            <PolicyRulesPanel rules={rules} />
-            <HorizonPanel />
-            <AlertsPanel alerts={alerts} />
-          </div>
-        </div>
+        <DashboardTabs
+          agents={agents}
+          rules={rules}
+          traces={traces}
+          escalations={escalations}
+          alerts={alerts}
+          tracesById={tracesById}
+          deterministicIssues={deterministicIssues}
+          pendingCount={pendingEscalations}
+        />
       </div>
     </div>
   );
