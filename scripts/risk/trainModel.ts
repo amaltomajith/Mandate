@@ -27,8 +27,11 @@
  *      REVIEW_COST_PER_FALSE_POSITIVE below.
  *
  * Usage: npx tsx scripts/risk/trainModel.ts [path-to-csv]
- * Writes src/lib/risk/model.json (weights) and src/lib/risk/report.json
- * (the evaluation report the dashboard's Risk tab reads).
+ * Writes src/lib/risk/model.json (weights), report.json (the evaluation
+ * report the dashboard's Risk tab reads), and sample.json (a small, honest
+ * sample of the actual held-out test set — real scores, real outcomes — for
+ * the Risk tab's 3D visualization; never Mandate's own live traces, see
+ * HANDOVER.md §10 on why not).
  */
 import * as fs from "node:fs";
 import * as readline from "node:readline";
@@ -200,10 +203,68 @@ function evaluateSweep(model: TrainedModel, test: LabeledExample[], thresholds: 
   const curve = thresholds.map((t) => evaluateAtThreshold(scored, t));
   const recommended = curve.reduce((best, cur) => (cur.f1 > best.f1 ? cur : best), curve[0]);
   return {
+    scored,
     curve,
     recommended,
     testSetSize: test.length,
     testSetFraudCount: test.filter((e) => e.label === 1).length,
+  };
+}
+
+const TN_SAMPLE_CAP = 300;
+
+/**
+ * A small, honest sample of the ACTUAL held-out test set for the 3D
+ * visualization (Risk tab) — real transactions, real scores, real outcomes,
+ * never Mandate's own live traces (see HANDOVER.md §10 on why not). Every
+ * caught fraud, false alarm, and missed fraud is included in full (all three
+ * buckets are small enough); only the large "correctly cleared" bucket is
+ * capped, since a few hundred points make the same visual point as a few
+ * hundred thousand would.
+ */
+function buildVisualizationSample(scored: { prob: number; label: number; amount: number }[], threshold: number) {
+  type Outcome = "truePositive" | "falsePositive" | "falseNegative" | "trueNegative";
+  const buckets: Record<Outcome, { prob: number; label: number; amount: number }[]> = {
+    truePositive: [],
+    falsePositive: [],
+    falseNegative: [],
+    trueNegative: [],
+  };
+
+  for (const ex of scored) {
+    const predicted = ex.prob >= threshold ? 1 : 0;
+    if (predicted === 1 && ex.label === 1) buckets.truePositive.push(ex);
+    else if (predicted === 1 && ex.label === 0) buckets.falsePositive.push(ex);
+    else if (predicted === 0 && ex.label === 1) buckets.falseNegative.push(ex);
+    else buckets.trueNegative.push(ex);
+  }
+
+  // Reservoir-style: shuffle then slice is fine here, these arrays are
+  // already small (at most a few hundred thousand for trueNegative).
+  function sample(arr: typeof scored, cap: number) {
+    if (arr.length <= cap) return arr;
+    const copy = [...arr];
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy.slice(0, cap);
+  }
+
+  const points = [
+    ...buckets.truePositive.map((e) => ({ ...e, outcome: "truePositive" as const })),
+    ...buckets.falsePositive.map((e) => ({ ...e, outcome: "falsePositive" as const })),
+    ...buckets.falseNegative.map((e) => ({ ...e, outcome: "falseNegative" as const })),
+    ...sample(buckets.trueNegative, TN_SAMPLE_CAP).map((e) => ({ ...e, outcome: "trueNegative" as const })),
+  ];
+
+  return {
+    threshold,
+    points: points.map((p) => ({
+      prob: Math.round(p.prob * 1000) / 1000,
+      amount: p.amount,
+      outcome: p.outcome,
+    })),
   };
 }
 
@@ -248,10 +309,14 @@ async function main() {
     featureWeights: FEATURE_NAMES.map((name, i) => ({ name, weight: weights[i] })),
   };
 
+  const sample = buildVisualizationSample(sweep.scored, sweep.recommended.threshold);
+
   const modelPath = path.resolve(process.cwd(), "src/lib/risk/model.json");
   const reportPath = path.resolve(process.cwd(), "src/lib/risk/report.json");
+  const samplePath = path.resolve(process.cwd(), "src/lib/risk/sample.json");
   fs.writeFileSync(modelPath, JSON.stringify(model, null, 2));
   fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+  fs.writeFileSync(samplePath, JSON.stringify(sample));
 
   console.log("\n=== Held-out test set — threshold sweep ===");
   console.log("threshold | precision | recall | f1 | TP | FP | FN");
@@ -261,8 +326,10 @@ async function main() {
     );
   }
   console.log(`\nRecommended (max F1) threshold: ${sweep.recommended.threshold}`);
+  console.log(`Visualization sample: ${sample.points.length} real points (all TP/FP/FN, up to ${TN_SAMPLE_CAP} sampled TN)`);
   console.log(`\nWrote ${modelPath}`);
   console.log(`Wrote ${reportPath}`);
+  console.log(`Wrote ${samplePath}`);
 }
 
 main().catch((err) => {

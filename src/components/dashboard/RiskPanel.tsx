@@ -1,5 +1,14 @@
 import type { RiskReport } from "@/lib/risk/loadReport";
+import type { RiskSample } from "@/lib/risk/loadSample";
 import { formatMoney } from "@/lib/format";
+import { RiskScoreGraph } from "./RiskScoreGraph";
+
+const LEGEND_ITEMS: { color: string; label: string }[] = [
+  { color: "#34d399", label: "Caught fraud" },
+  { color: "#fbbf24", label: "False alarm" },
+  { color: "#f87171", label: "Missed fraud" },
+  { color: "#4b5566", label: "Correctly cleared (sampled)" },
+];
 
 function StatTile({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
@@ -26,7 +35,7 @@ const PositioningNote = () => (
   </div>
 );
 
-export function RiskPanel({ report }: { report: RiskReport | null }) {
+export function RiskPanel({ report, sample }: { report: RiskReport | null; sample: RiskSample | null }) {
   if (!report) {
     return (
       <div className="panel-card rounded-2xl p-5">
@@ -80,6 +89,39 @@ export function RiskPanel({ report }: { report: RiskReport | null }) {
         full sweep below) · {testSetFraudCount.toLocaleString()} of {testSetSize.toLocaleString()} test
         transactions were labeled fraud.
       </p>
+
+      {sample && (
+        <div className="mb-4">
+          <div className="relative h-[420px] overflow-hidden rounded-2xl panel-card-lg">
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-16" style={{ background: "linear-gradient(to bottom, rgba(5,6,10,0.6), transparent)" }} />
+            <div className="pointer-events-none absolute left-4 top-3 z-10">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-white/70">
+                {sample.points.length.toLocaleString()} real transactions from the held-out test set
+              </p>
+              <p className="mt-0.5 text-[11px] text-white/50">
+                x = model score (low → high) · y = transaction size · hover any point
+              </p>
+            </div>
+            <div
+              className="pointer-events-none absolute right-4 top-3 z-10 flex flex-col gap-1 rounded-lg px-2.5 py-2"
+              style={{ background: "rgba(9,11,18,0.7)" }}
+            >
+              {LEGEND_ITEMS.map((item) => (
+                <div key={item.label} className="flex items-center gap-1.5 text-[10px] text-white/70">
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: item.color, boxShadow: `0 0 6px ${item.color}` }} />
+                  {item.label}
+                </div>
+              ))}
+            </div>
+            <RiskScoreGraph sample={sample} />
+          </div>
+          <p className="mt-1.5 text-[10px]" style={{ color: "var(--muted-2)" }}>
+            This is the actual PaySim held-out test set, not Mandate&apos;s own transactions — a separate
+            Three.js scene from the Overview graph, only mounted here, so it never touches that graph&apos;s
+            performance.
+          </p>
+        </div>
+      )}
 
       <div className="mb-4">
         <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--muted-2)" }}>

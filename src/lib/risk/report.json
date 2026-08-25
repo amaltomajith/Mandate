@@ -1,5 +1,5 @@
 {
-  "trainedAt": "2026-08-25T07:23:44.143Z",
+  "trainedAt": "2026-08-25T16:57:21.709Z",
   "dataset": {
     "source": "PaySim (Kaggle: ealaxi/paysim1)",
     "totalQualifyingRows": 2770409,
@@ -29,244 +29,244 @@
   "evaluation": {
     "threshold": 0.9,
     "confusionMatrix": {
-      "truePositive": 726,
+      "truePositive": 801,
       "falsePositive": 142,
       "trueNegative": 299858,
-      "falseNegative": 874
+      "falseNegative": 899
     },
-    "precision": 0.836405529953917,
-    "recall": 0.45375,
-    "f1": 0.5883306320907616,
+    "precision": 0.8494167550371156,
+    "recall": 0.4711764705882353,
+    "f1": 0.6061293984108966,
     "falsePositiveCost": {
       "assumptionInr": 50,
       "totalInr": 7100,
       "note": "Illustrative assumption (₹50/manual review) — no real operating cost data available to this project. Stated explicitly, not presented as measured."
     },
-    "fraudAmountCaughtInPaise": 126576285875,
-    "fraudAmountMissedInPaise": 82176295736
+    "fraudAmountCaughtInPaise": 149482447612,
+    "fraudAmountMissedInPaise": 92966559257
   },
   "thresholdCurve": [
     {
       "threshold": 0.5,
       "confusionMatrix": {
-        "truePositive": 1558,
-        "falsePositive": 21044,
-        "trueNegative": 278956,
-        "falseNegative": 42
+        "truePositive": 1656,
+        "falsePositive": 21382,
+        "trueNegative": 278618,
+        "falseNegative": 44
       },
-      "precision": 0.06893195292451995,
-      "recall": 0.97375,
-      "f1": 0.12874969010825552,
+      "precision": 0.0718812396909454,
+      "recall": 0.9741176470588235,
+      "f1": 0.13388309483385885,
       "falsePositiveCost": {
         "assumptionInr": 50,
-        "totalInr": 1052200,
+        "totalInr": 1069100,
         "note": "Illustrative assumption (₹50/manual review) — no real operating cost data available to this project. Stated explicitly, not presented as measured."
       },
-      "fraudAmountCaughtInPaise": 207576813076,
-      "fraudAmountMissedInPaise": 1175768535
+      "fraudAmountCaughtInPaise": 240746832947,
+      "fraudAmountMissedInPaise": 1702173922
     },
     {
       "threshold": 0.6,
       "confusionMatrix": {
-        "truePositive": 1502,
-        "falsePositive": 12462,
-        "trueNegative": 287538,
-        "falseNegative": 98
+        "truePositive": 1604,
+        "falsePositive": 12790,
+        "trueNegative": 287210,
+        "falseNegative": 96
       },
-      "precision": 0.10756230306502435,
-      "recall": 0.93875,
-      "f1": 0.1930095091236186,
+      "precision": 0.1114353202723357,
+      "recall": 0.9435294117647058,
+      "f1": 0.19932894246302973,
       "falsePositiveCost": {
         "assumptionInr": 50,
-        "totalInr": 623100,
+        "totalInr": 639500,
         "note": "Illustrative assumption (₹50/manual review) — no real operating cost data available to this project. Stated explicitly, not presented as measured."
       },
-      "fraudAmountCaughtInPaise": 207333635899,
-      "fraudAmountMissedInPaise": 1418945712
+      "fraudAmountCaughtInPaise": 240002210972,
+      "fraudAmountMissedInPaise": 2446795897
     },
     {
       "threshold": 0.7,
       "confusionMatrix": {
-        "truePositive": 1363,
-        "falsePositive": 5429,
-        "trueNegative": 294571,
+        "truePositive": 1463,
+        "falsePositive": 5580,
+        "trueNegative": 294420,
         "falseNegative": 237
       },
-      "precision": 0.20067726737338046,
-      "recall": 0.851875,
-      "f1": 0.32483317445185894,
+      "precision": 0.20772398125798666,
+      "recall": 0.8605882352941177,
+      "f1": 0.33466773418734985,
       "falsePositiveCost": {
         "assumptionInr": 50,
-        "totalInr": 271450,
+        "totalInr": 279000,
         "note": "Illustrative assumption (₹50/manual review) — no real operating cost data available to this project. Stated explicitly, not presented as measured."
       },
-      "fraudAmountCaughtInPaise": 205753081359,
-      "fraudAmountMissedInPaise": 2999500252
+      "fraudAmountCaughtInPaise": 237459655016,
+      "fraudAmountMissedInPaise": 4989351853
     },
     {
       "threshold": 0.8,
       "confusionMatrix": {
-        "truePositive": 1121,
-        "falsePositive": 1643,
-        "trueNegative": 298357,
-        "falseNegative": 479
+        "truePositive": 1201,
+        "falsePositive": 1771,
+        "trueNegative": 298229,
+        "falseNegative": 499
       },
-      "precision": 0.40557163531114326,
-      "recall": 0.700625,
-      "f1": 0.5137488542621448,
+      "precision": 0.40410497981157467,
+      "recall": 0.7064705882352941,
+      "f1": 0.514126712328767,
       "falsePositiveCost": {
         "assumptionInr": 50,
-        "totalInr": 82150,
+        "totalInr": 88550,
         "note": "Illustrative assumption (₹50/manual review) — no real operating cost data available to this project. Stated explicitly, not presented as measured."
       },
-      "fraudAmountCaughtInPaise": 194799511384,
-      "fraudAmountMissedInPaise": 13953070227
+      "fraudAmountCaughtInPaise": 226937560539,
+      "fraudAmountMissedInPaise": 15511446330
     },
     {
       "threshold": 0.9,
       "confusionMatrix": {
-        "truePositive": 726,
+        "truePositive": 801,
         "falsePositive": 142,
         "trueNegative": 299858,
-        "falseNegative": 874
+        "falseNegative": 899
       },
-      "precision": 0.836405529953917,
-      "recall": 0.45375,
-      "f1": 0.5883306320907616,
+      "precision": 0.8494167550371156,
+      "recall": 0.4711764705882353,
+      "f1": 0.6061293984108966,
       "falsePositiveCost": {
         "assumptionInr": 50,
         "totalInr": 7100,
         "note": "Illustrative assumption (₹50/manual review) — no real operating cost data available to this project. Stated explicitly, not presented as measured."
       },
-      "fraudAmountCaughtInPaise": 126576285875,
-      "fraudAmountMissedInPaise": 82176295736
+      "fraudAmountCaughtInPaise": 149482447612,
+      "fraudAmountMissedInPaise": 92966559257
     },
     {
       "threshold": 0.95,
       "confusionMatrix": {
-        "truePositive": 448,
-        "falsePositive": 3,
-        "trueNegative": 299997,
-        "falseNegative": 1152
+        "truePositive": 518,
+        "falsePositive": 1,
+        "trueNegative": 299999,
+        "falseNegative": 1182
       },
-      "precision": 0.9933481152993349,
-      "recall": 0.28,
-      "f1": 0.4368600682593857,
+      "precision": 0.9980732177263969,
+      "recall": 0.30470588235294116,
+      "f1": 0.4668769716088328,
       "falsePositiveCost": {
         "assumptionInr": 50,
-        "totalInr": 150,
+        "totalInr": 50,
         "note": "Illustrative assumption (₹50/manual review) — no real operating cost data available to this project. Stated explicitly, not presented as measured."
       },
-      "fraudAmountCaughtInPaise": 98928518748,
-      "fraudAmountMissedInPaise": 109824062863
+      "fraudAmountCaughtInPaise": 115938066880,
+      "fraudAmountMissedInPaise": 126510939989
     },
     {
       "threshold": 0.97,
       "confusionMatrix": {
-        "truePositive": 328,
-        "falsePositive": 2,
-        "trueNegative": 299998,
-        "falseNegative": 1272
+        "truePositive": 368,
+        "falsePositive": 0,
+        "trueNegative": 300000,
+        "falseNegative": 1332
       },
-      "precision": 0.9939393939393939,
-      "recall": 0.205,
-      "f1": 0.33989637305699477,
+      "precision": 1,
+      "recall": 0.2164705882352941,
+      "f1": 0.3558994197292069,
       "falsePositiveCost": {
         "assumptionInr": 50,
-        "totalInr": 100,
+        "totalInr": 0,
         "note": "Illustrative assumption (₹50/manual review) — no real operating cost data available to this project. Stated explicitly, not presented as measured."
       },
-      "fraudAmountCaughtInPaise": 93984274477,
-      "fraudAmountMissedInPaise": 114768307134
+      "fraudAmountCaughtInPaise": 109904131716,
+      "fraudAmountMissedInPaise": 132544875153
     },
     {
       "threshold": 0.99,
       "confusionMatrix": {
-        "truePositive": 208,
+        "truePositive": 214,
         "falsePositive": 0,
         "trueNegative": 300000,
-        "falseNegative": 1392
+        "falseNegative": 1486
       },
       "precision": 1,
-      "recall": 0.13,
-      "f1": 0.23008849557522126,
+      "recall": 0.12588235294117647,
+      "f1": 0.22361546499477533,
       "falsePositiveCost": {
         "assumptionInr": 50,
         "totalInr": 0,
         "note": "Illustrative assumption (₹50/manual review) — no real operating cost data available to this project. Stated explicitly, not presented as measured."
       },
-      "fraudAmountCaughtInPaise": 83974636823,
-      "fraudAmountMissedInPaise": 124777944788
+      "fraudAmountCaughtInPaise": 95879424418,
+      "fraudAmountMissedInPaise": 146569582451
     },
     {
       "threshold": 0.995,
       "confusionMatrix": {
-        "truePositive": 159,
+        "truePositive": 156,
         "falsePositive": 0,
         "trueNegative": 300000,
-        "falseNegative": 1441
+        "falseNegative": 1544
       },
       "precision": 1,
-      "recall": 0.099375,
-      "f1": 0.1807845366685617,
+      "recall": 0.09176470588235294,
+      "f1": 0.16810344827586207,
       "falsePositiveCost": {
         "assumptionInr": 50,
         "totalInr": 0,
         "note": "Illustrative assumption (₹50/manual review) — no real operating cost data available to this project. Stated explicitly, not presented as measured."
       },
-      "fraudAmountCaughtInPaise": 76736711342,
-      "fraudAmountMissedInPaise": 132015870269
+      "fraudAmountCaughtInPaise": 86589362584,
+      "fraudAmountMissedInPaise": 155859644285
     },
     {
       "threshold": 0.999,
       "confusionMatrix": {
-        "truePositive": 97,
+        "truePositive": 100,
         "falsePositive": 0,
         "trueNegative": 300000,
-        "falseNegative": 1503
+        "falseNegative": 1600
       },
       "precision": 1,
-      "recall": 0.060625,
-      "f1": 0.11431938715380083,
+      "recall": 0.058823529411764705,
+      "f1": 0.1111111111111111,
       "falsePositiveCost": {
         "assumptionInr": 50,
         "totalInr": 0,
         "note": "Illustrative assumption (₹50/manual review) — no real operating cost data available to this project. Stated explicitly, not presented as measured."
       },
-      "fraudAmountCaughtInPaise": 62687373405,
-      "fraudAmountMissedInPaise": 146065208206
+      "fraudAmountCaughtInPaise": 72677827474,
+      "fraudAmountMissedInPaise": 169771179395
     }
   ],
-  "testSetSize": 301600,
-  "testSetFraudCount": 1600,
+  "testSetSize": 301700,
+  "testSetFraudCount": 1700,
   "featureWeights": [
     {
       "name": "logAmount",
-      "weight": 0.43057745809247666
+      "weight": 0.42300245137748543
     },
     {
       "name": "isTransfer",
-      "weight": 0.410482032879012
+      "weight": 0.4320604434811577
     },
     {
       "name": "errorBalanceOrig",
-      "weight": 0.9792034217174418
+      "weight": 0.9295636239581994
     },
     {
       "name": "errorBalanceDest",
-      "weight": 0.8315759533031116
+      "weight": 0.8537007525593604
     },
     {
       "name": "origEmptiedOut",
-      "weight": 1.4531859264279516
+      "weight": 1.458812496063713
     },
     {
       "name": "destWasZeroBefore",
-      "weight": 0.25659697936970316
+      "weight": 0.2465668222886909
     },
     {
       "name": "amountToOrigBalanceRatio",
-      "weight": -2.3109514733636844
+      "weight": -2.3244197555814092
     }
   ]
 }
