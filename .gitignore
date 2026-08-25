@@ -36,11 +36,7 @@ yarn-error.log*
 # vercel
 .vercel
 
-# risk-detector training data (PaySim, ~470MB) and Kaggle credentials —
-# never committed, see scripts/risk/
 /data/
-kaggle.json
-.kaggle/
 
 # typescript
 *.tsbuildinfo

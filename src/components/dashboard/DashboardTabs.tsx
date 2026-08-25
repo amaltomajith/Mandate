@@ -9,19 +9,15 @@ import { PolicyHealthPanel } from "./PolicyHealthPanel";
 import { HorizonPanel } from "./HorizonPanel";
 import { DemoRunner } from "./DemoRunner";
 import { TransactionsView } from "./TransactionsView";
-import { RiskPanel } from "./RiskPanel";
 import { GraphCanvas } from "@/components/graph/GraphCanvas";
 import { GraphLegend } from "@/components/graph/GraphLegend";
-import type { RiskReport } from "@/lib/risk/loadReport";
-import type { RiskSample } from "@/lib/risk/loadSample";
 
-type Tab = "overview" | "transactions" | "policies" | "risk";
+type Tab = "overview" | "transactions" | "policies";
 
 const TABS: { key: Tab; label: string; badge?: (props: Props) => number }[] = [
   { key: "overview", label: "Overview" },
   { key: "transactions", label: "Transactions", badge: (p) => p.traces.length },
   { key: "policies", label: "Policies", badge: (p) => p.pendingCount + p.deterministicIssues.length },
-  { key: "risk", label: "Risk" },
 ];
 
 interface Props {
@@ -32,8 +28,6 @@ interface Props {
   tracesById: Record<string, Trace>;
   deterministicIssues: PolicyIssue[];
   pendingCount: number;
-  riskReport: RiskReport | null;
-  riskSample: RiskSample | null;
 }
 
 /**
@@ -43,7 +37,7 @@ interface Props {
  * instead of stacking everything into one increasingly long scroll.
  */
 export function DashboardTabs(props: Props) {
-  const { agents, rules, traces, escalations, tracesById, deterministicIssues, riskReport, riskSample } = props;
+  const { agents, rules, traces, escalations, tracesById, deterministicIssues } = props;
   const [tab, setTab] = useState<Tab>("overview");
   const [highlightRuleId, setHighlightRuleId] = useState<string | null>(null);
 
@@ -123,8 +117,6 @@ export function DashboardTabs(props: Props) {
           </div>
         </div>
       )}
-
-      {tab === "risk" && <RiskPanel report={riskReport} sample={riskSample} />}
     </div>
   );
 }
