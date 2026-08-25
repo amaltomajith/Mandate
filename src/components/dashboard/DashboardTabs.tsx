@@ -1,10 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import type { Agent, Alert, Escalation, PolicyRule, Trace } from "@/types/db";
+import type { Agent, Escalation, PolicyRule, Trace } from "@/types/db";
 import type { PolicyIssue } from "@/lib/policy/audit";
 import { EscalationsPanel } from "./EscalationsPanel";
-import { AlertsPanel } from "./AlertsPanel";
 import { PolicyRulesPanel } from "./PolicyRulesPanel";
 import { PolicyHealthPanel } from "./PolicyHealthPanel";
 import { HorizonPanel } from "./HorizonPanel";
@@ -26,7 +25,6 @@ interface Props {
   rules: PolicyRule[];
   traces: Trace[];
   escalations: Escalation[];
-  alerts: Alert[];
   tracesById: Record<string, Trace>;
   deterministicIssues: PolicyIssue[];
   pendingCount: number;
@@ -39,8 +37,17 @@ interface Props {
  * instead of stacking everything into one increasingly long scroll.
  */
 export function DashboardTabs(props: Props) {
-  const { agents, rules, traces, escalations, alerts, tracesById, deterministicIssues } = props;
+  const { agents, rules, traces, escalations, tracesById, deterministicIssues } = props;
   const [tab, setTab] = useState<Tab>("overview");
+  const [highlightRuleId, setHighlightRuleId] = useState<string | null>(null);
+
+  function jumpToRule(ruleId: string) {
+    setTab("policies");
+    setHighlightRuleId(ruleId);
+    // Clear the highlight after a few seconds so it reads as "look here now,"
+    // not a permanent marker.
+    setTimeout(() => setHighlightRuleId((current) => (current === ruleId ? null : current)), 4000);
+  }
 
   return (
     <div className="flex flex-1 flex-col gap-5">
@@ -94,17 +101,16 @@ export function DashboardTabs(props: Props) {
 
             <div className="space-y-5">
               <EscalationsPanel escalations={escalations} tracesById={tracesById} />
-              <AlertsPanel alerts={alerts} />
             </div>
           </div>
         </div>
       )}
 
-      {tab === "transactions" && <TransactionsView traces={traces} agents={agents} />}
+      {tab === "transactions" && <TransactionsView traces={traces} agents={agents} rules={rules} onJumpToRule={jumpToRule} />}
 
       {tab === "policies" && (
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-          <PolicyRulesPanel rules={rules} />
+          <PolicyRulesPanel rules={rules} highlightRuleId={highlightRuleId} />
           <div className="space-y-5">
             <PolicyHealthPanel deterministicIssues={deterministicIssues} />
             <HorizonPanel />

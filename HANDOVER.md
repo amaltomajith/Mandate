@@ -427,9 +427,37 @@ the same way here as they do in the graph and the toasts.
 **The dashboard was becoming one long, dense page.** Adding a transactions
 table and real policy management on top of the graph and side panels would
 have made that worse, not better. `DashboardTabs` splits it into three real
-sections — Overview (the graph + escalations/alerts), Transactions, and
+sections — Overview (graph + "Run demo" + escalations), Transactions, and
 Policies (rule management + health audit + draft-a-policy) — instead of
-everything stacked into one scroll.
+everything stacked into one scroll. The Alerts panel moved out of Overview
+entirely, into a header bell (`AlertsBell`) with a dropdown — same
+information, "looks too cluttered" was the actual complaint, so it's now out
+of the way until someone wants to look, with a count badge so it's not
+invisible either. `AlertToasts` (transient, top-right, only for genuinely new
+alerts) is unrelated and stayed — it's a different job, a live "this just
+happened" nudge, not a persistent list.
+
+**A transaction that got blocked/escalated didn't show which rule did it,
+outside the 3D graph.** Clicking a row in `TransactionsView` now expands to
+show the full reasoning and, if a rule fired, a chip naming it that jumps to
+the Policies tab and highlights that exact rule for a few seconds.
+
+**Rules could be deactivated but not removed**, and issues found by the
+policy audit had no path to actually being fixed. Both closed:
+
+- **Delete**, alongside deactivate/reactivate, on every rule — but only
+  really permitted for a rule that's never fired: `deletePolicyRule` checks
+  `traces.rule_fired_id` first and refuses (with the reason, not a silent
+  no-op) if any real transaction depends on it, telling the caller to
+  deactivate instead. A rule with real history keeping its ability to explain
+  itself matters more than tidiness.
+- **"Suggest a fix"** on any flagged issue (`src/lib/policy/suggestFix.ts`) —
+  the LLM proposes a concrete parameter change for the specific rule(s)
+  involved, shown as a before/after diff with its rationale. Grounded the
+  same way as everywhere else the LLM proposes something concrete (crossSell,
+  draft_policy): it can only name a rule that's actually in the input, and
+  "suggest" never auto-applies — clicking "Apply this fix" is a second,
+  separate, explicit action.
 
 **The 3D graph's "blocked" feedback was just a static red ring**, the same
 visual weight as every other outcome. Two real fixes in
@@ -495,7 +523,8 @@ supabase/migrations/0001_init.sql     schema, RLS (now largely vestigial — see
 supabase/migrations/0002_products.sql product catalog (§9a's cross-sell reasoning reads from this)
 src/types/db.ts                       hand-written Database types
 src/lib/policy/                       rule types + pure evaluator + audit.ts (deterministic gap
-                                       checker) + semanticAudit.ts (LLM layer) — see §9b
+                                       checker) + semanticAudit.ts (LLM layer) + suggestFix.ts
+                                       (LLM-proposed, human-applied fixes) — see §9b
 src/lib/trust/score.ts                trust formula
 src/lib/webBotAuth/                   keys, canonical signing, sign, verify
 src/lib/razorpay/                     SDK client, RazorpayX REST client, action dispatch
@@ -516,7 +545,8 @@ src/components/brand/MandateMark.tsx  shared logo mark
 src/components/graph/                 3D graph + legend (layout.ts is the pure/testable part;
                                        GraphCanvas.tsx has the block-shockwave/materialize-in effects)
 src/components/dashboard/             DashboardTabs (Overview/Transactions/Policies), TransactionsView,
-                                       PolicyHealthPanel, panels, buttons, DemoRunner, toasts, live poll refresher
+                                       PolicyHealthPanel, AlertsBell (header dropdown, not a panel
+                                       anymore), panels, buttons, DemoRunner, toasts, live poll refresher
 scripts/                              seed, gen-agent-key, checkout-agent — thin CLI wrappers around src/lib/demo/
 ```
 

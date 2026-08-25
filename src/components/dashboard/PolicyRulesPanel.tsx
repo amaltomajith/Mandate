@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { approvePolicyRule, deactivatePolicyRule, reactivatePolicyRule, rejectPolicyRule } from "@/lib/actions/policy";
+import { approvePolicyRule, deactivatePolicyRule, deletePolicyRule, reactivatePolicyRule, rejectPolicyRule } from "@/lib/actions/policy";
 import type { PolicyRule } from "@/types/db";
 import { DangerButton, EmptyState, GhostButton, Icons, Panel, SuccessButton, relativeTime } from "./ui";
 
@@ -28,7 +28,7 @@ const TYPE_LABEL: Record<PolicyRule["type"], string> = {
   step_up: "Step-up",
 };
 
-export function PolicyRulesPanel({ rules }: { rules: PolicyRule[] }) {
+export function PolicyRulesPanel({ rules, highlightRuleId }: { rules: PolicyRule[]; highlightRuleId?: string | null }) {
   const active = rules.filter((r) => r.status === "active");
   const pendingReview = rules.filter((r) => r.status === "pending_review");
   const inactive = rules.filter((r) => r.status === "superseded");
@@ -50,6 +50,11 @@ export function PolicyRulesPanel({ rules }: { rules: PolicyRule[] }) {
         setBusyId(null);
       }
     });
+  }
+
+  function actWithConfirm(id: string, confirmMessage: string, fn: () => Promise<void>) {
+    if (!window.confirm(confirmMessage)) return;
+    act(id, fn);
   }
 
   function toggleSupersede(pendingId: string, conflictId: string) {
@@ -138,6 +143,12 @@ export function PolicyRulesPanel({ rules }: { rules: PolicyRule[] }) {
                   <DangerButton disabled={busy} onClick={() => act(rule.id, () => rejectPolicyRule(rule.id))} className="flex-1">
                     {busy ? "Working…" : "Reject"}
                   </DangerButton>
+                  <GhostButton
+                    disabled={busy}
+                    onClick={() => actWithConfirm(rule.id, `Permanently delete the draft "${rule.name}"? This can't be undone.`, () => deletePolicyRule(rule.id))}
+                  >
+                    {busy ? "…" : "Delete"}
+                  </GhostButton>
                 </div>
               </div>
             );
@@ -152,16 +163,28 @@ export function PolicyRulesPanel({ rules }: { rules: PolicyRule[] }) {
       <div className="mb-4 space-y-1">
         {active.map((rule) => {
           const busy = isPending && busyId === rule.id;
+          const highlighted = highlightRuleId === rule.id;
           return (
-            <div key={rule.id} className="group flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs hover:bg-[var(--panel-2)]">
+            <div
+              key={rule.id}
+              className="group flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs hover:bg-[var(--panel-2)]"
+              style={highlighted ? { background: "color-mix(in srgb, var(--entity-agent) 16%, transparent)", boxShadow: "inset 0 0 0 1px var(--entity-agent)" } : undefined}
+            >
               <span className="flex items-center gap-2 truncate">
                 <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "var(--decision-allow)" }} />
                 <span className="truncate">{rule.name}</span>
               </span>
               <span className="flex shrink-0 items-center gap-2">
-                <span className="opacity-0 transition-opacity group-hover:opacity-100">
+                <span className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                   <GhostButton disabled={busy} onClick={() => act(rule.id, () => deactivatePolicyRule(rule.id))} className="py-1! px-2! text-[10px]!">
                     {busy ? "…" : "Deactivate"}
+                  </GhostButton>
+                  <GhostButton
+                    disabled={busy}
+                    onClick={() => actWithConfirm(rule.id, `Permanently delete "${rule.name}"? This can't be undone — if it's ever fired, this will fail and tell you to deactivate instead.`, () => deletePolicyRule(rule.id))}
+                    className="py-1! px-2! text-[10px]!"
+                  >
+                    {busy ? "…" : "Delete"}
                   </GhostButton>
                 </span>
                 <span style={{ color: "var(--muted-2)" }}>{relativeTime(rule.created_at)}</span>
@@ -180,8 +203,13 @@ export function PolicyRulesPanel({ rules }: { rules: PolicyRule[] }) {
             {inactive.map((rule) => {
               const busy = isPending && busyId === rule.id;
               const supersededByName = rule.superseded_by ? rules.find((r) => r.id === rule.superseded_by)?.name : null;
+              const highlighted = highlightRuleId === rule.id;
               return (
-                <div key={rule.id} className="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs" style={{ opacity: 0.7 }}>
+                <div
+                  key={rule.id}
+                  className="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs"
+                  style={highlighted ? { boxShadow: "inset 0 0 0 1px var(--entity-agent)" } : { opacity: 0.7 }}
+                >
                   <span className="flex min-w-0 items-center gap-2">
                     <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "var(--muted-2)" }} />
                     <span className="truncate">
@@ -189,9 +217,18 @@ export function PolicyRulesPanel({ rules }: { rules: PolicyRule[] }) {
                       {supersededByName && <span style={{ color: "var(--muted-2)" }}> — replaced by &quot;{supersededByName}&quot;</span>}
                     </span>
                   </span>
-                  <GhostButton disabled={busy} onClick={() => act(rule.id, () => reactivatePolicyRule(rule.id))} className="py-1! px-2! text-[10px]! shrink-0">
-                    {busy ? "…" : "Reactivate"}
-                  </GhostButton>
+                  <span className="flex shrink-0 gap-1">
+                    <GhostButton disabled={busy} onClick={() => act(rule.id, () => reactivatePolicyRule(rule.id))} className="py-1! px-2! text-[10px]!">
+                      {busy ? "…" : "Reactivate"}
+                    </GhostButton>
+                    <GhostButton
+                      disabled={busy}
+                      onClick={() => actWithConfirm(rule.id, `Permanently delete "${rule.name}"? This can't be undone.`, () => deletePolicyRule(rule.id))}
+                      className="py-1! px-2! text-[10px]!"
+                    >
+                      {busy ? "…" : "Delete"}
+                    </GhostButton>
+                  </span>
                 </div>
               );
             })}

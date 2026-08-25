@@ -2,6 +2,7 @@ import { getDashboardData } from "@/lib/dashboardData";
 import { auditPolicySet } from "@/lib/policy/audit";
 import { LiveRefresher } from "@/components/dashboard/LiveRefresher";
 import { AlertToasts } from "@/components/dashboard/AlertToasts";
+import { AlertsBell } from "@/components/dashboard/AlertsBell";
 import { SignOutButton } from "@/components/dashboard/SignOutButton";
 import { DashboardTabs } from "@/components/dashboard/DashboardTabs";
 import { MandateMark } from "@/components/brand/MandateMark";
@@ -47,11 +48,12 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5 text-[11px]" style={{ color: "var(--muted)" }}>
             <span className="live-dot h-1.5 w-1.5 rounded-full" style={{ background: "var(--decision-allow)" }} />
             live
           </div>
+          <AlertsBell alerts={alerts} />
           <SignOutButton />
         </div>
       </header>
@@ -74,7 +76,6 @@ export default async function DashboardPage() {
           rules={rules}
           traces={traces}
           escalations={escalations}
-          alerts={alerts}
           tracesById={tracesById}
           deterministicIssues={deterministicIssues}
           pendingCount={pendingEscalations}
