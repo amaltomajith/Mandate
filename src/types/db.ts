@@ -132,6 +132,7 @@ export interface Database {
           rule_fired_id: string | null;
           reasoning: string | null;
           razorpay_response: Json | null;
+          illustrative_risk_score: number | null;
           created_at: string;
         };
         Insert: {
@@ -145,6 +146,7 @@ export interface Database {
           rule_fired_id?: string | null;
           reasoning?: string | null;
           razorpay_response?: Json | null;
+          illustrative_risk_score?: number | null;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["traces"]["Insert"]>;

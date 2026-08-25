@@ -10,6 +10,7 @@ import {
   insertTrace,
   recomputeTrust,
 } from "@/lib/mcp/traceHelpers";
+import { scoreLiveTransaction } from "@/lib/risk/scoreLiveTransaction";
 import type { Json } from "@/types/db";
 
 export interface EvaluationOutcome {
@@ -19,6 +20,7 @@ export interface EvaluationOutcome {
   traceId: string;
   wouldEscalate: boolean;
   razorpayResponse: Json | null;
+  illustrativeRisk: { score: number; basis: "amount-only"; caveat: string } | null;
 }
 
 /**
@@ -55,6 +57,8 @@ export async function runActionEvaluation(
     razorpayResponse = await executeRealAction(input);
   }
 
+  const illustrativeRisk = scoreLiveTransaction(input.amount);
+
   const trace = await insertTrace({
     parentTraceId: input.forkFrom ?? null,
     mode,
@@ -65,6 +69,7 @@ export async function runActionEvaluation(
     ruleFiredId: match?.rule.id ?? null,
     reasoning,
     razorpayResponse,
+    illustrativeRiskScore: illustrativeRisk?.score ?? null,
   });
 
   if (mode === "enforce") {
@@ -84,5 +89,6 @@ export async function runActionEvaluation(
     traceId: trace.id,
     wouldEscalate: decision === "escalate",
     razorpayResponse,
+    illustrativeRisk,
   };
 }

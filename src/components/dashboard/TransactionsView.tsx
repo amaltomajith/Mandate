@@ -170,6 +170,15 @@ export function TransactionsView({
                               No specific rule fired — {t.decision === "allow" ? "allowed by default, nothing matched." : "resolved at the protocol layer, before the policy engine."}
                             </p>
                           )}
+                          {t.illustrative_risk_score !== null && t.illustrative_risk_score !== undefined && (
+                            <p
+                              className="mt-2 text-[11px]"
+                              style={{ color: "var(--muted-2)" }}
+                              title="Amount-only signal from a model trained on external Kaggle data (PaySim), most of whose real inputs aren't available here. Never used by the policy engine."
+                            >
+                              Illustrative risk score: {(t.illustrative_risk_score * 100).toFixed(0)}% — amount-only, trained on external Kaggle data, not a decision input.
+                            </p>
+                          )}
                           <p className="mt-2 font-mono text-[10px]" style={{ color: "var(--muted-2)" }}>
                             trace {t.id} · mode: {t.mode}
                           </p>
