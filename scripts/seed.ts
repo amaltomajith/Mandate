@@ -1,16 +1,18 @@
 /**
  * Seeds the four starter policy rules the demo script (HANDOVER.md "Demo script")
- * depends on, plus one sample customer. Safe to re-run — it upserts by rule name.
+ * depends on, plus one sample customer. Safe to re-run — it upserts by rule name
+ * and migrates the one rule that was renamed early on (see seedData.ts).
  *
- * Shares its rule/customer definitions with src/lib/demo/runDemo.ts (the
- * dashboard's one-click "Run demo" button) via src/lib/demo/seedData.ts, so
- * the CLI and the button can't seed different data.
+ * Shares its rule/customer definitions and upsert logic with
+ * src/lib/demo/runDemo.ts (the dashboard's one-click "Run demo" button) via
+ * src/lib/demo/seedData.ts, so the CLI and the button can't drift into
+ * seeding different data.
  *
  * Usage: npx tsx scripts/seed.ts
  */
 import "./lib/loadEnv";
 import { createClient } from "@supabase/supabase-js";
-import { SEED_CUSTOMER, SEED_RULES } from "../src/lib/demo/seedData";
+import { applySeedRules } from "../src/lib/demo/seedData";
 
 // See scripts/gen-agent-key.ts for why this doesn't import src/lib/supabase/admin.ts.
 function createAdminClient() {
@@ -22,31 +24,10 @@ function createAdminClient() {
 
 async function main() {
   const db = createAdminClient();
+  const { created, migrated } = await applySeedRules(db);
 
-  for (const rule of SEED_RULES) {
-    const { data: existing } = await db.from("policy_rules").select("id").eq("name", rule.name).maybeSingle();
-    if (existing) {
-      console.log(`Rule "${rule.name}" already exists (${existing.id}) — skipping.`);
-      continue;
-    }
-    const { data, error } = await db
-      .from("policy_rules")
-      .insert({ type: rule.type, name: rule.name, params: rule.params, status: "active", source: "human", rationale: rule.rationale })
-      .select()
-      .single();
-    if (error) throw error;
-    console.log(`Created rule "${data.name}" (${data.id})`);
-  }
-
-  const { data: existingCustomer } = await db.from("customers").select("id").eq("name", SEED_CUSTOMER.name).maybeSingle();
-  if (!existingCustomer) {
-    const { data, error } = await db.from("customers").insert(SEED_CUSTOMER).select().single();
-    if (error) throw error;
-    console.log(`Created customer "${data.name}" (${data.id})`);
-  } else {
-    console.log(`Customer "${SEED_CUSTOMER.name}" already exists (${existingCustomer.id}) — skipping.`);
-  }
-
+  if (migrated) console.log('Migrated the old "Max 5 actions/hour per agent" rule to the new 30/hour limit.');
+  console.log(created > 0 ? `Created ${created} new rule(s).` : "All rules already existed — nothing to create.");
   console.log("\nSeed complete.");
 }
 

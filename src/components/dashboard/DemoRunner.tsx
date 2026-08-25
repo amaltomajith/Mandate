@@ -44,9 +44,9 @@ export function DemoRunner() {
         <div>
           <p className="text-sm font-semibold">See it work</p>
           <p className="mt-0.5 text-xs" style={{ color: "var(--muted)" }}>
-            One click runs a few purchases, one that gets escalated for your approval, and one
-            forged request that gets rejected before it ever reaches the policy engine — all real,
-            signed MCP calls against this app.
+            One click runs an AI buyer agent through a small catalog — a purchase, a proposed
+            upsell, another purchase over the approval threshold, and one forged request rejected
+            before it ever reaches the policy engine. All real, signed MCP calls against this app.
           </p>
         </div>
         <PrimaryButton onClick={run} disabled={isPending} className="shrink-0 px-5">
@@ -70,7 +70,17 @@ export function DemoRunner() {
                   <meta.Icon size={14} />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-medium">{step.label}</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-[13px] font-medium">{step.label}</p>
+                    {step.kind === "upsell" && (
+                      <span
+                        className="rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide"
+                        style={{ background: "color-mix(in srgb, var(--entity-mandate) 20%, transparent)", color: "var(--entity-mandate)" }}
+                      >
+                        Upsell
+                      </span>
+                    )}
+                  </div>
                   <p className="text-[11px] leading-snug" style={{ color: "var(--muted)" }}>
                     {step.detail}
                   </p>

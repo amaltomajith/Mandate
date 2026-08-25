@@ -267,35 +267,64 @@ Every agent starts at a neutral 50. See `src/lib/trust/score.ts`.
 5. **Clerk**: create an application at clerk.com, copy the publishable and
    secret keys into `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY`.
 6. `npm install`.
-7. `npm run seed` — the four starter policy rules the demo script depends on,
-   plus one sample customer.
-8. `npm run gen-agent-key -- "Checkout Agent"` — prints an agent id and secret
-   key; put them in `.env.local` as `CHECKOUT_AGENT_ID` /
-   `CHECKOUT_AGENT_SECRET_KEY`.
-9. `npm run dev`, sign up at `/sign-up` (Clerk, self-serve).
-10. `npm run demo:checkout` — runs the full demo script against the running
-    dev server (`MANDATE_APP_URL`, default `http://localhost:3000`).
+7. `npm run dev`, sign up at `/sign-up` (Clerk, self-serve).
+8. On the dashboard, click **"Run demo"** — it seeds the policy rules, sets up
+   an agent identity, and runs the full scenario (§9) in one click. No further
+   CLI steps needed. (The CLI equivalents — `npm run seed`, `npm run
+   gen-agent-key -- "Checkout Agent"`, `npm run demo:checkout` — still work
+   individually if you want more control, and share the same underlying code
+   via `src/lib/demo/`.)
 
-The dashboard itself shows a "Get the graph moving" banner tracking steps 7–10
-and disappears once all three are done — it's reading the same data you are.
+## 9. Demo script (the "one failure handled gracefully" beat, and closing the Track 01 gap)
 
-## 9. Demo script (the "one failure handled gracefully" beat)
+`src/lib/demo/runDemo.ts` (the dashboard's "Run demo" button and
+`scripts/checkout-agent.ts` are both thin wrappers around this one
+implementation), matching Track 1's bar *and* its actual ask — see the note
+below on why the catalog/upsell part exists at all.
 
-`scripts/checkout-agent.ts`, matching Track 1's bar exactly:
-
-1. Three normal purchases (`order.create`) under every threshold — calm, all
-   `allow`. Each is a real Razorpay test-mode order — check your dashboard.
-2. One purchase at ₹6,000, over the seeded ₹5,000 step-up rule → `escalate`,
-   *not* blocked. Sits in the dashboard's Escalations panel with a
-   plain-language reasoning string.
-3. Approve it in the dashboard (`approveEscalation` server action) — the real
+1. The agent buys a **Wireless Mouse** from a small catalog
+   (`src/lib/demo/catalog.ts`) — a real Razorpay test-mode order.
+2. It then proposes a **cross-sell**: a Mechanical Keyboard, "because
+   customers who buy this mouse usually complete the desk with this
+   keyboard" — a second real order, flagged distinctly in the UI as an
+   upsell. This is deliberate, not decoration: Track 01 asks for "an agent
+   that grows revenue," not just an agent that places orders, and the
+   original build had nothing that did this.
+3. A Laptop Stand purchase, and its own paired upsell (a USB-C Hub).
+4. A **Premium Standing Desk** at ₹6,999, over the seeded ₹5,000 step-up rule
+   → `escalate`, *not* blocked. Sits in the dashboard's Escalations panel with
+   a plain-language reasoning string. This is the "one failure handled
+   gracefully" beat.
+5. Approve it in the dashboard (`approveEscalation` server action) — the real
    Razorpay order-create call executes only now, driven by the human through
    Clerk, not Web Bot Auth (see §5b's "two auth layers").
-4. A deliberately tampered signed request → rejected at the protocol layer,
-   logged as `protocol_reject`, never reaches the policy engine.
-5. Optional, if there's time: the dashboard's "Simulate Horizon finding an
+6. A deliberately tampered signed request → rejected at the protocol layer,
+   logged as `protocol_reject`, never reaches the policy engine. The "live
+   self-defense" beat.
+7. Optional, if there's time: the dashboard's "Simulate Horizon finding an
    update" button → real `draft_policy` pipeline → backtested candidate rule
    sitting in pending review.
+
+**Track 01 fit, honestly assessed:** "The Bar" quote (*"every money action
+explainable, bounded and gated... one failure handled gracefully"*) is
+close to a direct match for what this build does — that was the design
+center from the start. The track's other half — *"build an agent that grows
+revenue... or makes a merchant transactable by an AI buyer end to end"* — was
+thin before this catalog/upsell pass: the original demo agent placed
+fixed-amount orders purely to exercise policy rules, with no real "agentic
+commerce" behavior. It's better now, but still deliberately modest (a static
+2-item upsell map, not a real recommendation engine) — if you want it
+stronger, that's the honest next place to invest, not more control-plane
+depth.
+
+**Why the seeded velocity rule is 30/hour, not 5/hour:** it was originally
+5/hour, which meant one full "Run demo" click used the entire hourly quota
+for that agent — clicking "Run again" (the whole point of making the button
+repeatable, e.g. for a live pitch) would then get blocked by the rate limiter
+instead of showing the intended escalate/allow/reject outcomes. Bumped to 30
+so several repeat runs fit inside an hour. `src/lib/demo/seedData.ts` also
+migrates a pre-existing "Max 5 actions/hour per agent" row in place if it
+finds one, rather than leaving a stale duplicate active alongside the new one.
 
 ## 10. Roadmap / explicitly cut (not built, not stubbed)
 
@@ -327,7 +356,9 @@ src/lib/webBotAuth/                   keys, canonical signing, sign, verify
 src/lib/razorpay/                     SDK client, RazorpayX REST client, action dispatch
 src/lib/mcp/                          schemas, server (4 tools), session store, trace helpers
 src/lib/llm/                          Groq client (explain, draft_policy)
-src/lib/actions/                      dashboard server actions (escalations, policy, horizon)
+src/lib/actions/                      dashboard server actions (escalations, policy, horizon, demo)
+src/lib/demo/                         catalog/upsell data, seed data, MandateClient, runDemoScript —
+                                       shared by the dashboard's "Run demo" button AND the CLI scripts
 src/lib/supabase/admin.ts             the only Supabase client left — service role, storage-only
 src/proxy.ts                          Clerk middleware
 src/app/api/mcp/route.ts              the MCP endpoint (verify → session → transport)
@@ -336,9 +367,9 @@ src/app/login/, src/app/sign-up/      Clerk auth routes
 src/app/dashboard/                    merchant UI
 src/components/auth/AuthShell.tsx     split-hero shell around Clerk's components (also the onboarding copy)
 src/components/brand/MandateMark.tsx  shared logo mark
-src/components/graph/                 3D graph (layout.ts is the pure/testable part)
-src/components/dashboard/             panels, buttons, the getting-started banner, live poll refresher
-scripts/                              seed, gen-agent-key, checkout-agent demo
+src/components/graph/                 3D graph + legend (layout.ts is the pure/testable part)
+src/components/dashboard/             panels, buttons, DemoRunner (the "Run demo" button), toasts, live poll refresher
+scripts/                              seed, gen-agent-key, checkout-agent — thin CLI wrappers around src/lib/demo/
 ```
 
 ## 12. Resuming in Antigravity

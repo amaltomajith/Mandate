@@ -1,14 +1,26 @@
-import "server-only";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { generateKeyPair } from "@/lib/webBotAuth/keys";
-import type { Json } from "@/types/db";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { generateKeyPair } from "../webBotAuth/keys";
+import { UPSELL_PAIRS, findItem, type CatalogItem } from "./catalog";
 import { MandateClient } from "./mandateClient";
-import { SEED_CUSTOMER, SEED_RULES } from "./seedData";
+import { applySeedRules } from "./seedData";
+
+// Relative imports and a locally-built admin client, not `@/lib/supabase/admin`
+// — same reasoning as mandateClient.ts: this module is loaded both by Next's
+// bundler (the dashboard's "Run demo" server action) and directly by tsx
+// (scripts/checkout-agent.ts), and the guarded admin client's `import
+// "server-only"` throws immediately outside Next's server context.
+function createAdminClient(): SupabaseClient {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set.");
+  return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+}
 
 export interface DemoStep {
   label: string;
   status: "ok" | "escalated" | "blocked" | "rejected" | "error";
   detail: string;
+  kind?: "purchase" | "upsell";
 }
 
 interface ActionResult {
@@ -17,40 +29,21 @@ interface ActionResult {
   traceId: string;
 }
 
-/** Same idempotent upsert scripts/seed.ts does, so clicking the button when
- *  the CLI has already been run is a safe no-op, not a duplicate. */
 async function ensureSeedData(db: ReturnType<typeof createAdminClient>): Promise<DemoStep> {
-  let created = 0;
-  for (const rule of SEED_RULES) {
-    const { data: existing } = await db.from("policy_rules").select("id").eq("name", rule.name).maybeSingle();
-    if (existing) continue;
-    const { error } = await db
-      .from("policy_rules")
-      .insert({ type: rule.type, name: rule.name, params: rule.params as unknown as Json, status: "active", source: "human", rationale: rule.rationale });
-    if (error) throw error;
-    created++;
-  }
-
-  const { data: existingCustomer } = await db.from("customers").select("id").eq("name", SEED_CUSTOMER.name).maybeSingle();
-  if (!existingCustomer) {
-    const { error } = await db.from("customers").insert(SEED_CUSTOMER);
-    if (error) throw error;
-  }
-
-  return {
-    label: "Set up policy rules",
-    status: "ok",
-    detail: created > 0 ? `Created ${created} new rule(s).` : "Rules already existed — nothing to do.",
-  };
+  const { created, migrated } = await applySeedRules(db);
+  const parts: string[] = [];
+  if (migrated) parts.push("updated the old rate-limit rule");
+  parts.push(created > 0 ? `created ${created} new rule(s)` : "rules already existed");
+  return { label: "Set up policy rules", status: "ok", detail: parts.join(", ") + "." };
 }
 
 /**
  * Reuses CHECKOUT_AGENT_ID/SECRET_KEY if they're already configured (e.g. from
- * `npm run gen-agent-key`). Otherwise registers a fresh, uniquely-named agent
- * on the spot and uses its secret immediately, in-memory, for this run only —
- * gen-agent-key's secret is deliberately never stored anywhere, so there's
- * nothing to "reuse" for a same-named agent that already exists; making a new
- * one avoids a unique-name collision instead of erroring.
+ * `npm run gen-agent-key`) — deliberately, so the same identity's trust score
+ * keeps accumulating across repeated "Run demo" clicks instead of resetting
+ * every time. Otherwise registers a fresh, uniquely-named agent on the spot
+ * and uses its secret immediately, in-memory, for this run only — an
+ * already-seeded agent's secret is never stored anywhere to "reuse."
  */
 async function ensureDemoAgent(db: ReturnType<typeof createAdminClient>): Promise<{ id: string; secretKeyBase64: string; step: DemoStep }> {
   const envId = process.env.CHECKOUT_AGENT_ID;
@@ -82,6 +75,10 @@ async function ensureDemoAgent(db: ReturnType<typeof createAdminClient>): Promis
   };
 }
 
+function moneyLabel(paise: number): string {
+  return `₹${(paise / 100).toLocaleString("en-IN")}`;
+}
+
 export async function runDemoScript(): Promise<DemoStep[]> {
   const db = createAdminClient();
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
@@ -94,32 +91,53 @@ export async function runDemoScript(): Promise<DemoStep[]> {
   const client = new MandateClient(baseUrl, agentId, secretKeyBase64);
   await client.initialize("mandate-dashboard-demo");
 
-  async function purchase(label: string, amountPaise: number): Promise<void> {
+  async function buy(item: CatalogItem, label: string, kind: "purchase" | "upsell"): Promise<ActionResult> {
     const args = {
       actionType: "order.create",
-      amount: amountPaise,
+      amount: item.priceInPaise,
       currency: "INR",
-      category: "restock",
-      params: { receipt: `mandate-demo-${Date.now()}`, notes: { label } },
+      category: item.category,
+      params: { receipt: `mandate-demo-${Date.now()}`, notes: { sku: item.sku, label } },
     };
     await client.callTool<ActionResult>("simulate_action", args);
     const enforced = await client.callTool<ActionResult>("enforce_action", args);
 
-    const amountLabel = `₹${(amountPaise / 100).toLocaleString("en-IN")}`;
-    if (enforced.decision === "allow") {
-      steps.push({ label: `${label} (${amountLabel})`, status: "ok", detail: enforced.reasoning });
-    } else if (enforced.decision === "escalate") {
-      steps.push({ label: `${label} (${amountLabel})`, status: "escalated", detail: enforced.reasoning });
-    } else {
-      steps.push({ label: `${label} (${amountLabel})`, status: "blocked", detail: enforced.reasoning });
-    }
+    const priceLabel = moneyLabel(item.priceInPaise);
+    const status = enforced.decision === "allow" ? "ok" : enforced.decision === "escalate" ? "escalated" : "blocked";
+    steps.push({ label: `${label} (${priceLabel})`, status, detail: enforced.reasoning, kind });
+    return enforced;
   }
 
-  await purchase("Restock order #1", 100000);
-  await purchase("Restock order #2", 150000);
-  await purchase("Restock order #3", 200000);
-  await purchase("Large restock order", 600000);
+  // The agent decides to buy a couple of things, and — because it's an agent
+  // meant to *grow* revenue, not just place orders — proposes a paired
+  // cross-sell for each one straight after. This is the part that makes it
+  // read as agentic commerce rather than a policy-rule test harness: same
+  // gating underneath, but the agent is visibly deciding what to buy and why.
+  const mouse = findItem("mouse-01");
+  await buy(mouse, `AI buyer purchases: ${mouse.name}`, "purchase");
 
+  const mouseUpsell = UPSELL_PAIRS[mouse.sku];
+  if (mouseUpsell) {
+    const upsellItem = findItem(mouseUpsell.pairsWithSku);
+    await buy(upsellItem, `Agent upsells: ${upsellItem.name} — ${mouseUpsell.pitch}`, "upsell");
+  }
+
+  const stand = findItem("stand-01");
+  await buy(stand, `AI buyer purchases: ${stand.name}`, "purchase");
+
+  const standUpsell = UPSELL_PAIRS[stand.sku];
+  if (standUpsell) {
+    const upsellItem = findItem(standUpsell.pairsWithSku);
+    await buy(upsellItem, `Agent upsells: ${upsellItem.name} — ${standUpsell.pitch}`, "upsell");
+  }
+
+  // The graceful-failure beat: a big-ticket item over the step-up threshold —
+  // escalated for a human's sign-off, not blocked outright.
+  const desk = findItem("desk-01");
+  await buy(desk, `AI buyer purchases: ${desk.name}`, "purchase");
+
+  // The live self-defense beat: a forged request, rejected before it ever
+  // reaches the policy engine.
   const tampered = await client.sendTamperedRequest();
   steps.push({
     label: "Tampered request (live self-defense)",
