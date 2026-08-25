@@ -2,10 +2,15 @@
  * Seeds the four starter policy rules the demo script (HANDOVER.md "Demo script")
  * depends on, plus one sample customer. Safe to re-run — it upserts by rule name.
  *
+ * Shares its rule/customer definitions with src/lib/demo/runDemo.ts (the
+ * dashboard's one-click "Run demo" button) via src/lib/demo/seedData.ts, so
+ * the CLI and the button can't seed different data.
+ *
  * Usage: npx tsx scripts/seed.ts
  */
 import "./lib/loadEnv";
 import { createClient } from "@supabase/supabase-js";
+import { SEED_CUSTOMER, SEED_RULES } from "../src/lib/demo/seedData";
 
 // See scripts/gen-agent-key.ts for why this doesn't import src/lib/supabase/admin.ts.
 function createAdminClient() {
@@ -18,34 +23,7 @@ function createAdminClient() {
 async function main() {
   const db = createAdminClient();
 
-  const rules = [
-    {
-      type: "step_up" as const,
-      name: "Step-up above ₹5,000",
-      params: { threshold_amount: 500000, currency: "INR" },
-      rationale: "Payouts and orders at or above ₹5,000 need a human's sign-off before they execute.",
-    },
-    {
-      type: "cap" as const,
-      name: "Per-transaction cap ₹20,000",
-      params: { max_amount: 2000000, currency: "INR", scope: "per_transaction" },
-      rationale: "No single action should ever exceed ₹20,000 — an absolute ceiling regardless of who approves it.",
-    },
-    {
-      type: "velocity" as const,
-      name: "Max 5 actions/hour per agent",
-      params: { max_count: 5, window_seconds: 3600, scope: "per_agent" },
-      rationale: "Caps how fast any one agent identity can act, independent of amount — protects against a runaway loop.",
-    },
-    {
-      type: "category_block" as const,
-      name: "Blocked categories",
-      params: { categories: ["gambling", "crypto"] },
-      rationale: "Categories this merchant has decided no agent may transact in, at any amount.",
-    },
-  ];
-
-  for (const rule of rules) {
+  for (const rule of SEED_RULES) {
     const { data: existing } = await db.from("policy_rules").select("id").eq("name", rule.name).maybeSingle();
     if (existing) {
       console.log(`Rule "${rule.name}" already exists (${existing.id}) — skipping.`);
@@ -60,17 +38,13 @@ async function main() {
     console.log(`Created rule "${data.name}" (${data.id})`);
   }
 
-  const { data: existingCustomer } = await db.from("customers").select("id").eq("name", "Demo Customer").maybeSingle();
+  const { data: existingCustomer } = await db.from("customers").select("id").eq("name", SEED_CUSTOMER.name).maybeSingle();
   if (!existingCustomer) {
-    const { data, error } = await db
-      .from("customers")
-      .insert({ name: "Demo Customer", email: "demo-customer@example.com" })
-      .select()
-      .single();
+    const { data, error } = await db.from("customers").insert(SEED_CUSTOMER).select().single();
     if (error) throw error;
     console.log(`Created customer "${data.name}" (${data.id})`);
   } else {
-    console.log(`Customer "Demo Customer" already exists (${existingCustomer.id}) — skipping.`);
+    console.log(`Customer "${SEED_CUSTOMER.name}" already exists (${existingCustomer.id}) — skipping.`);
   }
 
   console.log("\nSeed complete.");

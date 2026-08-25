@@ -1,4 +1,15 @@
-import { signRequest } from "../../src/lib/webBotAuth/sign";
+import { signRequest } from "../webBotAuth/sign";
+
+// Relative import, not the `@/` alias, on purpose — this module is loaded
+// both by Next's bundler (server actions) and directly by tsx (the CLI
+// script), and tsx doesn't reliably resolve tsconfig path aliases the way
+// Next's bundler does.
+//
+// No `import "server-only"` here on purpose — this module is imported both by
+// scripts/checkout-agent.ts (plain tsx, no Next.js bundler present) and by
+// src/lib/demo/runDemo.ts (a real server action). "server-only" throws
+// immediately outside Next's server bundling context, which would break the
+// CLI script. It's still never imported from client components in practice.
 
 /**
  * Minimal hand-rolled MCP Streamable HTTP client — deliberately not the
@@ -8,6 +19,9 @@ import { signRequest } from "../../src/lib/webBotAuth/sign";
  * speaks the wire protocol directly rather than trusting a client SDK to do it
  * "correctly" underneath — the whole point of the demo is showing that protocol
  * surface being checked.
+ *
+ * Shared between `scripts/checkout-agent.ts` (CLI) and the dashboard's one-click
+ * "Run demo" button (`src/lib/demo/runDemo.ts`) — same client, two callers.
  */
 export class MandateClient {
   private sessionId: string | null = null;

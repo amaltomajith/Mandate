@@ -24,7 +24,7 @@
  * Usage: npx tsx scripts/checkout-agent.ts
  */
 import "./lib/loadEnv";
-import { MandateClient } from "./lib/mandateClient";
+import { MandateClient } from "../src/lib/demo/mandateClient";
 
 const BASE_URL = process.env.MANDATE_APP_URL ?? "http://localhost:3000";
 const AGENT_ID = process.env.CHECKOUT_AGENT_ID;

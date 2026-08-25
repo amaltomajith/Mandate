@@ -6,7 +6,7 @@ import { AlertToasts } from "@/components/dashboard/AlertToasts";
 import { PolicyRulesPanel } from "@/components/dashboard/PolicyRulesPanel";
 import { HorizonPanel } from "@/components/dashboard/HorizonPanel";
 import { SignOutButton } from "@/components/dashboard/SignOutButton";
-import { GettingStartedBanner } from "@/components/dashboard/GettingStartedBanner";
+import { DemoRunner } from "@/components/dashboard/DemoRunner";
 import { GraphCanvas } from "@/components/graph/GraphCanvas";
 import { GraphLegend } from "@/components/graph/GraphLegend";
 import { MandateMark } from "@/components/brand/MandateMark";
@@ -15,7 +15,7 @@ import type { Trace } from "@/types/db";
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const { agents, rules, traces, escalations, alerts } = await getDashboardData();
+  const { agents, rules, traces, escalations, alerts, loadError } = await getDashboardData();
   const tracesById: Record<string, Trace> = Object.fromEntries(traces.map((t) => [t.id, t]));
 
   const pendingEscalations = escalations.filter((e) => e.status === "pending").length;
@@ -58,7 +58,19 @@ export default async function DashboardPage() {
       </header>
 
       <div className="relative z-10 flex flex-1 flex-col gap-5 p-5">
-        <GettingStartedBanner hasAgents={activeAgents > 0} hasRules={activeRules > 0} hasTraces={traces.length > 0} />
+        {loadError && (
+          <div
+            className="rounded-2xl border px-4 py-3 text-sm"
+            style={{ borderColor: "var(--decision-block)", color: "var(--decision-block)", background: "color-mix(in srgb, var(--decision-block) 10%, transparent)" }}
+          >
+            <strong>Couldn&apos;t load live data from Supabase:</strong> {loadError}. The panels below
+            may be showing stale or empty data. This is usually a network/TLS issue between this
+            server and Supabase, not an app bug — check the terminal running <code>npm run dev</code>{" "}
+            for the full error.
+          </div>
+        )}
+
+        <DemoRunner />
 
         <div className="grid flex-1 grid-cols-1 gap-5 lg:grid-cols-[1fr_390px]">
           <div className="relative min-h-[560px] overflow-hidden rounded-2xl panel-card-lg">
