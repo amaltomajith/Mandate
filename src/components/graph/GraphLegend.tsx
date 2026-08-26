@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import { DECISION_COLORS, ENTITY_COLORS } from "./colors";
 
 const ENTITY_ITEMS = [
@@ -29,15 +32,40 @@ function Swatch({ color, shape }: { color: string; shape: "circle" | "diamond" }
 }
 
 /**
- * The graph's whole point is legibility to someone who didn't build it — this
- * is the difference between "a pretty visualization" and something a merchant
- * can actually read a decision off of. Always visible, not tucked behind a
- * button; a legend nobody opens doesn't do its job.
+ * The graph's whole point is legibility to someone who didn't build it — but
+ * an always-open panel permanently covered a chunk of the graph itself,
+ * which is a worse tradeoff once a viewer already knows how to read it.
+ * Collapsed by default behind a small "?" button; one click opens the same
+ * content, one click (or the same button) closes it again.
  */
 export function GraphLegend() {
+  const [open, setOpen] = useState(false);
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        aria-label="Show legend"
+        className="absolute bottom-4 left-4 z-10 flex h-9 w-9 items-center justify-center rounded-full border text-[15px] font-semibold text-white/80 backdrop-blur-md transition-colors hover:text-white"
+        style={{ background: "rgba(9,11,18,0.82)", borderColor: "rgba(255,255,255,0.14)" }}
+      >
+        ?
+      </button>
+    );
+  }
+
   return (
-    <div className="pointer-events-none absolute bottom-4 left-4 z-10 w-64 rounded-xl border p-3.5 text-white backdrop-blur-md" style={{ background: "rgba(9,11,18,0.82)", borderColor: "rgba(255,255,255,0.1)" }}>
-      <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-white/50">What you&apos;re looking at</p>
+    <div className="absolute bottom-4 left-4 z-10 w-64 rounded-xl border p-3.5 text-white backdrop-blur-md" style={{ background: "rgba(9,11,18,0.82)", borderColor: "rgba(255,255,255,0.1)" }}>
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-white/50">What you&apos;re looking at</p>
+        <button
+          onClick={() => setOpen(false)}
+          aria-label="Hide legend"
+          className="-mr-1 -mt-1 flex h-6 w-6 items-center justify-center rounded-md text-white/50 transition-colors hover:bg-white/10 hover:text-white"
+        >
+          ✕
+        </button>
+      </div>
 
       <div className="space-y-1.5">
         {ENTITY_ITEMS.map((item) => (

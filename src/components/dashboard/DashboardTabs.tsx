@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { Agent, Customer, Escalation, Mandate, PolicyRule, Trace } from "@/types/db";
 import type { PolicyIssue } from "@/lib/policy/audit";
 import { EscalationsPanel } from "./EscalationsPanel";
+import { AgentTrustPanel } from "./AgentTrustPanel";
 import { PolicyRulesPanel } from "./PolicyRulesPanel";
 import { PolicyHealthPanel } from "./PolicyHealthPanel";
 import { HorizonPanel } from "./HorizonPanel";
@@ -105,6 +106,7 @@ export function DashboardTabs(props: Props) {
 
             <div className="space-y-5">
               <EscalationsPanel escalations={escalations} tracesById={tracesById} />
+              <AgentTrustPanel agents={agents} />
             </div>
           </div>
         </div>
