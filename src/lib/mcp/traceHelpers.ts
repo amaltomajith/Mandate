@@ -5,13 +5,27 @@ import type { CapParams, VelocityParams } from "@/lib/policy/types";
 import { computeTrustScore } from "@/lib/trust/score";
 import type { Database, Decision, Json, Mandate, TraceMode } from "@/types/db";
 
+/**
+ * A Supabase `PostgrestError` is a plain object, not an `Error` instance —
+ * `throw error` on one worked fine for a dashboard server action (whose
+ * callers already guard with `err instanceof Error ? err.message :
+ * "Action failed."`), but an MCP tool handler's thrown error goes through
+ * the SDK's own `error instanceof Error ? error.message : String(error)`
+ * fallback, and `String()` on a plain object is the literal text
+ * "[object Object]" — a real bug that surfaced as a genuinely useless error
+ * message the first time a Supabase call inside a tool handler failed.
+ */
+function assertNoSupabaseError(error: { message: string } | null): asserts error is null {
+  if (error) throw new Error(error.message);
+}
+
 export async function getActiveRules(): Promise<EngineRule[]> {
   const db = createAdminClient();
   const { data, error } = await db
     .from("policy_rules")
     .select("id, type, name, params")
     .eq("status", "active");
-  if (error) throw error;
+  assertNoSupabaseError(error);
   return data ?? [];
 }
 
@@ -35,7 +49,7 @@ export async function getAggregates(
       .eq("agent_id", agentId)
       .eq("mode", "enforce")
       .gte("created_at", since);
-    if (error) throw error;
+    assertNoSupabaseError(error);
     velocityCounts[rule.id] = count ?? 0;
   }
 
@@ -52,7 +66,7 @@ export async function getAggregates(
       .eq("mode", "enforce")
       .eq("decision", "allow")
       .gte("created_at", todayStart.toISOString());
-    if (error) throw error;
+    assertNoSupabaseError(error);
     dailyAmountSoFar[rule.id] = (data ?? []).reduce((sum, row) => {
       const p = row.params as { amount?: number; currency?: string } | null;
       if (p?.currency !== currency) return sum;
@@ -89,7 +103,7 @@ export async function checkMandateGate(agentId: string, customerId: string): Pro
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (error) throw error;
+  assertNoSupabaseError(error);
 
   if (!data || data.status === "active") return { blocked: false, mandate: data, reasoning: null };
 
@@ -123,7 +137,7 @@ export async function recordMandateFromSubscription(
     razorpay_ref: razorpayRef,
     raw_payload: rawPayload,
   });
-  if (error) throw error;
+  assertNoSupabaseError(error);
 }
 
 export interface InsertTraceInput {
@@ -155,14 +169,14 @@ export async function insertTrace(input: InsertTraceInput) {
     })
     .select()
     .single();
-  if (error) throw error;
+  assertNoSupabaseError(error);
   return data;
 }
 
 export async function createEscalationForTrace(traceId: string) {
   const db = createAdminClient();
   const { error } = await db.from("escalations").insert({ trace_id: traceId });
-  if (error) throw error;
+  assertNoSupabaseError(error);
 }
 
 export async function createAlert(
@@ -172,7 +186,7 @@ export async function createAlert(
 ) {
   const db = createAdminClient();
   const { error } = await db.from("alerts").insert({ trace_id: traceId, severity, message });
-  if (error) throw error;
+  assertNoSupabaseError(error);
 }
 
 /** Recomputes and persists an agent's trust score from its enforce-mode trace history. */
@@ -204,7 +218,7 @@ export async function recomputeTrust(agentId: string) {
     .from("agents")
     .update({ trust_score: components.score, trust_components: components as unknown as Json })
     .eq("id", agentId);
-  if (error) throw error;
+  assertNoSupabaseError(error);
 
   return components;
 }

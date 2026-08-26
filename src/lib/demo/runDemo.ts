@@ -28,6 +28,7 @@ interface ActionResult {
   decision: "allow" | "block" | "escalate";
   reasoning: string;
   traceId: string;
+  razorpayResponse?: { simulated?: boolean; note?: string } | null;
 }
 
 async function ensureSeedData(db: ReturnType<typeof createAdminClient>): Promise<DemoStep> {
@@ -130,11 +131,13 @@ export async function runDemoScript(): Promise<DemoStep[]> {
     return enforced;
   }
 
-  /** Real, server-to-server: creates an actual Razorpay Plan + Subscription
-   *  (the standard-keys API, not RazorpayX — see HANDOVER.md §6), which
-   *  `runActionEvaluation` then records as a `mandates` row because a
-   *  `customerId` is attached. This is the standing authorization every
-   *  purchase above and below actually checks against. */
+  /** Attempts a real, server-to-server Razorpay Plan + Subscription call
+   *  (the standard-keys API, not RazorpayX). Falls back to a clearly-labeled
+   *  simplified mandate object if Razorpay's Subscriptions product isn't
+   *  activated on this account — see HANDOVER.md §6. Either way,
+   *  `runActionEvaluation` records it as a `mandates` row because a
+   *  `customerId` is attached — the standing authorization every purchase
+   *  above and below actually checks against. */
   async function establishMandate(): Promise<void> {
     const args = {
       actionType: "subscription.create",
@@ -145,10 +148,16 @@ export async function runDemoScript(): Promise<DemoStep[]> {
     };
     await client.callTool<ActionResult>("simulate_action", args);
     const enforced = await client.callTool<ActionResult>("enforce_action", args);
+    const simulated = enforced.razorpayResponse?.simulated === true;
     steps.push({
       label: "Agent establishes a UPI Autopay mandate with the customer",
       status: enforced.decision === "allow" ? "ok" : enforced.decision === "escalate" ? "escalated" : "blocked",
-      detail: enforced.decision === "allow" ? "Real Razorpay subscription created — now visible and revocable in the Mandates tab." : enforced.reasoning,
+      detail:
+        enforced.decision !== "allow"
+          ? enforced.reasoning
+          : simulated
+            ? "Razorpay Subscriptions isn't activated on this test account, so this is a simplified mandate object, not a real subscription — but it's still a real row in the Mandates tab, and pause/revoke below still genuinely gate the agent's next action."
+            : "Real Razorpay subscription created — now visible and revocable in the Mandates tab.",
     });
   }
 

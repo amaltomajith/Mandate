@@ -238,6 +238,51 @@ in your test-mode Orders dashboard. The `payout.create` code path in
 untouched; `enforce_action` already supports it. If RazorpayX access shows up
 later, swap the demo script's action type back — no engine changes needed.
 
+### Subscriptions/Plans need the same kind of account activation as RazorpayX
+
+Found the same way as the RazorpayX gate above: the first time
+`subscription.create` was actually exercised end-to-end (establishing a
+mandate in §9d's new demo flow — it was written but never actually called
+before that), `rzp.plans.create` returned `{statusCode: 401, error:
+"Unauthorized"}`. Confirmed by direct diagnostic that it's not a
+credentials problem — the *exact same* key pair succeeds immediately on
+`orders.create`. Razorpay gates the Subscriptions/Plans product behind
+account activation, test mode included, same category of constraint as
+RazorpayX payouts.
+
+**Consequence, matching this project's own established precedent (§6's
+"real if the API cooperates, else a clearly-labeled simplified mandate
+object," which was written into the plan before this was ever hit):**
+`executeRealAction`'s `subscription.create` case now tries the real Plan +
+Subscription call first, and only on that specific 401 falls back to a
+locally-recorded object (`{plan: null, subscription: {id: "sim_sub_..."},
+simulated: true, note: "..."}`) — any other failure still throws normally.
+The mandate this produces is still a real row in `mandates`, and the part
+that actually matters — a merchant revoking it blocking the agent's very
+next action — doesn't depend on whether the subscription underneath it was
+genuinely from Razorpay. The demo script's own step detail says outright
+when it's the fallback path, not just this document. If Subscriptions
+access shows up later, no code changes needed — the real path already
+works and simply stops hitting the `catch`.
+
+### A masked-error bug this surfaced: MCP tool errors showing "[object Object]"
+
+The 401 above should have shown up as a clear error. Instead the demo
+failed with `Tool enforce_action returned an error: [object Object]` —
+genuinely useless for debugging. Root cause: a Supabase `PostgrestError` (and
+apparently some Razorpay SDK errors) are plain objects, not `Error`
+instances. `throw error` on one is fine for a dashboard server action — the
+UI's `catch` blocks already guard with `err instanceof Error ? err.message :
+"Action failed."` — but an MCP tool handler's thrown error passes through
+the `@modelcontextprotocol/sdk`'s own fallback, `error instanceof Error ?
+error.message : String(error)`, and `String()` on a plain object is
+literally the text "[object Object]". Fixed at the one place this actually
+mattered: every Supabase call inside `src/lib/mcp/traceHelpers.ts` (the
+helpers every MCP tool handler goes through) now runs through
+`assertNoSupabaseError`, a small `asserts error is null` helper that throws
+a real `Error` with the original message preserved, instead of the raw
+Postgrest object.
+
 ## 7. Trust score
 
 ```

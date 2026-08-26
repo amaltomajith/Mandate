@@ -1,8 +1,24 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 import type { ActionInput } from "@/lib/mcp/schemas";
 import { getRazorpay } from "./client";
 import { createContact, createPayout, createVpaFundAccount } from "./x";
 import type { Json } from "@/types/db";
+
+/** Razorpay's Plans/Subscriptions API returns a plain 401 when the
+ *  "Subscriptions" product isn't activated on the account — the same
+ *  category of test-mode gate as RazorpayX needing a registered business
+ *  (§6). Confirmed by direct diagnostic: the exact same key pair that
+ *  succeeds on `orders.create` gets `{statusCode: 401, error:
+ *  "Unauthorized"}` on `plans.create` alone — not a credentials problem. */
+function isSubscriptionsNotActivated(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "statusCode" in err &&
+    (err as { statusCode: unknown }).statusCode === 401
+  );
+}
 
 /**
  * The only place real money-moving Razorpay/RazorpayX calls happen. Called by
@@ -58,21 +74,39 @@ export async function executeRealAction(input: ActionInput): Promise<Json> {
 
     case "subscription.create": {
       const rzp = getRazorpay();
-      const plan = await rzp.plans.create({
-        period: input.params.period,
-        interval: input.params.interval,
-        item: {
-          name: input.params.planName,
-          amount: input.amount,
-          currency: input.currency,
-        },
-      });
-      const subscription = await rzp.subscriptions.create({
-        plan_id: plan.id,
-        total_count: input.params.totalCount,
-        customer_notify: input.params.customerNotify ? 1 : 0,
-      });
-      return { plan, subscription } as unknown as Json;
+      try {
+        const plan = await rzp.plans.create({
+          period: input.params.period,
+          interval: input.params.interval,
+          item: {
+            name: input.params.planName,
+            amount: input.amount,
+            currency: input.currency,
+          },
+        });
+        const subscription = await rzp.subscriptions.create({
+          plan_id: plan.id,
+          total_count: input.params.totalCount,
+          customer_notify: input.params.customerNotify ? 1 : 0,
+        });
+        return { plan, subscription } as unknown as Json;
+      } catch (err) {
+        if (!isSubscriptionsNotActivated(err)) throw err;
+        // Falls back to a locally-recorded, clearly-labeled mandate object
+        // rather than failing the whole action — exactly the "real if the
+        // API cooperates, else a clearly-labeled simplified mandate object"
+        // scope decision this project already made for UPI Autopay (§6).
+        // The part this actually demonstrates — a merchant revoking a
+        // mandate blocking the agent's next action — doesn't depend on the
+        // subscription object underneath it being genuinely from Razorpay.
+        const subscriptionId = `sim_sub_${randomUUID()}`;
+        return {
+          plan: null,
+          subscription: { id: subscriptionId, status: "created" },
+          simulated: true,
+          note: "Razorpay's Subscriptions API isn't activated on this test account (see HANDOVER.md §6) — recorded as a simplified mandate object instead of a real Razorpay subscription.",
+        } as unknown as Json;
+      }
     }
   }
 }
