@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Agent, Escalation, PolicyRule, Trace } from "@/types/db";
+import type { Agent, Customer, Escalation, Mandate, PolicyRule, Trace } from "@/types/db";
 import type { PolicyIssue } from "@/lib/policy/audit";
 import { EscalationsPanel } from "./EscalationsPanel";
 import { PolicyRulesPanel } from "./PolicyRulesPanel";
@@ -9,15 +9,17 @@ import { PolicyHealthPanel } from "./PolicyHealthPanel";
 import { HorizonPanel } from "./HorizonPanel";
 import { DemoRunner } from "./DemoRunner";
 import { TransactionsView } from "./TransactionsView";
+import { MandatesPanel } from "./MandatesPanel";
 import { GraphCanvas } from "@/components/graph/GraphCanvas";
 import { GraphLegend } from "@/components/graph/GraphLegend";
 
-type Tab = "overview" | "transactions" | "policies";
+type Tab = "overview" | "transactions" | "policies" | "mandates";
 
 const TABS: { key: Tab; label: string; badge?: (props: Props) => number }[] = [
   { key: "overview", label: "Overview" },
   { key: "transactions", label: "Transactions", badge: (p) => p.traces.length },
   { key: "policies", label: "Policies", badge: (p) => p.pendingCount + p.deterministicIssues.length },
+  { key: "mandates", label: "Mandates", badge: (p) => p.mandates.filter((m) => m.status === "paused").length },
 ];
 
 interface Props {
@@ -28,6 +30,8 @@ interface Props {
   tracesById: Record<string, Trace>;
   deterministicIssues: PolicyIssue[];
   pendingCount: number;
+  mandates: Mandate[];
+  customers: Customer[];
 }
 
 /**
@@ -37,7 +41,7 @@ interface Props {
  * instead of stacking everything into one increasingly long scroll.
  */
 export function DashboardTabs(props: Props) {
-  const { agents, rules, traces, escalations, tracesById, deterministicIssues } = props;
+  const { agents, rules, traces, escalations, tracesById, deterministicIssues, mandates, customers } = props;
   const [tab, setTab] = useState<Tab>("overview");
   const [highlightRuleId, setHighlightRuleId] = useState<string | null>(null);
 
@@ -95,7 +99,7 @@ export function DashboardTabs(props: Props) {
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-white/70">Entity graph</p>
                 <p className="mt-0.5 text-xs text-white/50">a live map of every agent, rule, and action</p>
               </div>
-              <GraphCanvas agents={agents} rules={rules} traces={traces} />
+              <GraphCanvas agents={agents} rules={rules} traces={traces} mandates={mandates} customers={customers} />
               <GraphLegend />
             </div>
 
@@ -117,6 +121,8 @@ export function DashboardTabs(props: Props) {
           </div>
         </div>
       )}
+
+      {tab === "mandates" && <MandatesPanel mandates={mandates} agents={agents} customers={customers} />}
     </div>
   );
 }

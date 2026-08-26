@@ -44,9 +44,11 @@ export function DemoRunner() {
         <div>
           <p className="text-sm font-semibold">See it work</p>
           <p className="mt-0.5 text-xs" style={{ color: "var(--muted)" }}>
-            One click runs an AI buyer agent through a small catalog — a purchase, a proposed
-            upsell, another purchase over the approval threshold, and one forged request rejected
-            before it ever reaches the policy engine. All real, signed MCP calls against this app.
+            One click runs an AI buyer agent through a small catalog — a real mandate established,
+            a purchase, a proposed upsell, another purchase over the approval threshold, the
+            mandate revoked (blocking the agent&apos;s very next action), and one forged request
+            rejected before it ever reaches the policy engine. All real, signed MCP calls against
+            this app.
           </p>
         </div>
         <PrimaryButton onClick={run} disabled={isPending} className="shrink-0 px-5">

@@ -3,7 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { PolicyRule as EngineRule, EvaluationAggregates } from "@/lib/policy/types";
 import type { CapParams, VelocityParams } from "@/lib/policy/types";
 import { computeTrustScore } from "@/lib/trust/score";
-import type { Database, Decision, Json, TraceMode } from "@/types/db";
+import type { Database, Decision, Json, Mandate, TraceMode } from "@/types/db";
 
 export async function getActiveRules(): Promise<EngineRule[]> {
   const db = createAdminClient();
@@ -61,6 +61,69 @@ export async function getAggregates(
   }
 
   return { velocityCounts, dailyAmountSoFar };
+}
+
+export interface MandateGateResult {
+  blocked: boolean;
+  mandate: Mandate | null;
+  reasoning: string | null;
+}
+
+/**
+ * A mandate is a standing authorization for one agent to act on one
+ * customer's behalf — the thing "Mandate" is named for. This is a separate,
+ * more fundamental gate than the per-transaction policy engine: a merchant
+ * revoking (or pausing) an agent's mandate must stop that agent cold on its
+ * very next action, regardless of what any cap/velocity/category rule would
+ * otherwise have allowed. Only ever checked for actions carrying a
+ * `customerId` — an action with no customer to attribute a mandate to
+ * simply isn't gated by one.
+ */
+export async function checkMandateGate(agentId: string, customerId: string): Promise<MandateGateResult> {
+  const db = createAdminClient();
+  const { data, error } = await db
+    .from("mandates")
+    .select("*")
+    .eq("agent_id", agentId)
+    .eq("customer_id", customerId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+
+  if (!data || data.status === "active") return { blocked: false, mandate: data, reasoning: null };
+
+  const reason =
+    data.status === "revoked"
+      ? "The merchant has revoked this agent's mandate for this customer — no further actions are authorized."
+      : data.status === "paused"
+        ? "The merchant has paused this agent's mandate for this customer — actions are on hold until it's resumed."
+        : "This agent's mandate for this customer has expired.";
+
+  return { blocked: true, mandate: data, reasoning: reason };
+}
+
+/** Called after a real `subscription.create` succeeds — this is what actually
+ *  turns a Razorpay subscription into a Mandate row the merchant can see,
+ *  pause, or revoke. Silently no-ops without a customerId: a subscription
+ *  with nobody to attribute it to isn't a governable mandate. */
+export async function recordMandateFromSubscription(
+  agentId: string,
+  customerId: string | null | undefined,
+  razorpayRef: string,
+  rawPayload: Json
+): Promise<void> {
+  if (!customerId) return;
+  const db = createAdminClient();
+  const { error } = await db.from("mandates").insert({
+    agent_id: agentId,
+    customer_id: customerId,
+    type: "upi_autopay",
+    status: "active",
+    razorpay_ref: razorpayRef,
+    raw_payload: rawPayload,
+  });
+  if (error) throw error;
 }
 
 export interface InsertTraceInput {

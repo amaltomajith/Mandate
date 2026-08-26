@@ -27,7 +27,7 @@ explains every decision by tracing a real graph.
 - Web Bot Auth-style request signing and verification (Ed25519, RFC 9421-shaped headers) wired into every MCP call
 - Razorpay/RazorpayX integration code for orders, refunds, payouts, subscriptions
 - Trust score formula, computed and stored per agent
-- Merchant dashboard, three real sections (§9c): Overview (graph + "Run demo" + escalations/alerts), Transactions (every trace, filterable/searchable), Policies (rule management + audit + Horizon)
+- Merchant dashboard, four real sections (§9c, §9d): Overview (graph + "Run demo" + escalations/alerts), Transactions (every trace, filterable/searchable), Policies (rule management + audit + Horizon), Mandates (pause/resume/revoke an agent's standing authorization — enforced live, not cosmetic)
 - Policy governance (§9b): deactivate/reactivate any rule, conflict-aware approval, a deterministic gap/conflict checker (runs free on every load) plus an on-demand LLM review — labeled and never blended
 - 3D graph (react-three-fiber + postprocessing): entity hue, trust aura, decision rings, bloom/starfield/grid, hover inspect, fork/branch edges, an always-visible legend, a distinct block/reject shockwave effect, nodes that materialize in instead of popping (§9c)
 - Live alert toasts + a plain-language explainability pass (amounts render as "₹6,000" not raw paise, "order.create" renders as "New purchase order")
@@ -476,6 +476,59 @@ visual weight as every other outcome. Two real fixes in
   graph read as a live simulation rather than a static picture that
   occasionally redraws.
 
+### 9d. Mandate lifecycle: the product's own namesake, made real
+
+Prompted by a direct question: with time left before the deadline, what
+addition is most genuinely on-thesis for Track 01, not just more surface
+area? The `mandates` table (`agent_id`, `customer_id`, `type`, `status`)
+had existed in the schema since §Data model, and `ENTITY_COLORS.mandate`/
+`--entity-mandate` had existed in the graph's color system since the very
+first pass — but nothing ever wrote to the table, checked its status, or
+rendered it. The single noun this product is named for was the one core
+concept that wasn't actually end-to-end. This closes that gap:
+
+- **Creation is real, not simulated.** `subscription.create` already made a
+  genuine Razorpay Plan + Subscription call (see §6). Now, whenever that
+  call succeeds *and* the request carries a `customerId`,
+  `recordMandateFromSubscription` (`src/lib/mcp/traceHelpers.ts`) inserts a
+  `mandates` row — `status: "active"`, the real subscription id as
+  `razorpay_ref`. No customer attached, no mandate recorded: a subscription
+  with nobody to attribute it to isn't a governable mandate.
+- **The gate is a separate, more fundamental check than the policy engine,
+  not a rule bolted onto it.** `runActionEvaluation`
+  (`src/lib/mcp/tools/actionEvaluator.ts`) checks `checkMandateGate(agentId,
+  customerId)` *before* `evaluatePolicy` runs at all, for any action that
+  carries a `customerId`. A `paused` or `revoked` mandate short-circuits
+  straight to `decision: "block"` with a mandate-specific reasoning string —
+  the cap/velocity/category_block/step_up rules never even get evaluated.
+  That ordering is deliberate: a revoked authorization is a more basic "this
+  agent isn't allowed to act right now" fact than any per-transaction spend
+  rule, and should win regardless of what those rules would otherwise say.
+- **The merchant controls it live, from a real "Mandates" tab.** Pause
+  (reversible), Resume (only from paused), and Revoke (deliberately
+  terminal — a real UPI Autopay revocation isn't something a merchant
+  undoes; the agent would need an entirely fresh mandate) —
+  `src/lib/actions/mandates.ts`, mirroring the existing policy-rule
+  activate/deactivate action pattern. Every action is a Clerk-gated server
+  action, same as policy approval.
+- **The graph shows it as a real third entity**, not just agents/rules/
+  transactions. Mandate nodes orbit their agent (`computeLayout` in
+  `src/components/graph/layout.ts`) with a status-colored ring — active/
+  paused/revoked mapped to the same green/amber/red used for decision rings
+  everywhere else — and an edge back to the agent that holds it. Hovering
+  shows which customer it's for and what pausing/revoking actually does.
+- **The demo script proves it, not just implements it.**
+  `src/lib/demo/runDemo.ts` now: establishes a real mandate before any
+  purchase happens, attributes every purchase to that same demo customer so
+  the mandate genuinely governs them, then — after the existing step-up
+  escalation beat — revokes the mandate directly (simulating the merchant's
+  own dashboard click) and immediately attempts one more purchase under it.
+  That purchase is blocked, live, in the same run — proof that revocation
+  isn't a status flag nobody checks, demonstrated in <1 second right after
+  the escalation beat, before the tampered-request self-defense beat closes
+  the script. Three distinct control-plane demonstrations in one click now,
+  not two.
+
 ## 10. Track 02 bonus (built, then removed)
 
 A real, from-scratch fraud-spike detector (logistic regression, trained and
@@ -518,9 +571,10 @@ isn't built. None of these have a dead button in the UI.
   constellation/Agent Trust Index zoom view.** Not built.
 - **A second full demo agent (Recovery Agent).** The policy engine already
   supports it; it's just not wrapped as a second scripted demo agent.
-- **Mandate/customer graph nodes.** Schema-ready (`mandates`, `customers`
-  tables), not populated by the demo flow, so the 3D graph renders
-  agent/rule/transaction nodes only.
+- **Customer nodes in the graph.** Mandate nodes are real now (§9d); a
+  customer is currently just a name looked up for a mandate's tooltip, not
+  its own node/edge in the 3D graph. A natural, small next step, not a gap
+  in the mandate enforcement itself.
 - **True push-based Realtime.** Traded for a 4s poll when auth moved to Clerk
   — see §5b for why that's a deliberate tradeoff, not a shortcut.
 - **PaySim-calibrated background traffic generator** (from the original
@@ -559,7 +613,7 @@ src/lib/webBotAuth/                   keys, canonical signing, sign, verify
 src/lib/razorpay/                     SDK client, RazorpayX REST client, action dispatch
 src/lib/mcp/                          schemas, server (4 tools), session store, trace helpers
 src/lib/llm/                          Groq client (explain, draft_policy, cross-sell reasoning)
-src/lib/actions/                      dashboard server actions (escalations, policy, horizon, demo)
+src/lib/actions/                      dashboard server actions (escalations, policy, mandates, horizon, demo)
 src/lib/demo/                         catalog.ts (products), crossSell.ts (LLM-reasoned upsells,
                                        §9a), seedData.ts, MandateClient, runDemoScript — shared by
                                        the dashboard's "Run demo" button AND the CLI scripts
@@ -573,9 +627,10 @@ src/components/auth/AuthShell.tsx     split-hero shell around Clerk's components
 src/components/brand/MandateMark.tsx  shared logo mark
 src/components/graph/                 3D graph + legend (layout.ts is the pure/testable part;
                                        GraphCanvas.tsx has the block-shockwave/materialize-in effects)
-src/components/dashboard/             DashboardTabs (Overview/Transactions/Policies), TransactionsView,
-                                       PolicyHealthPanel, AlertsBell (header dropdown, not a panel
-                                       anymore), panels, buttons, DemoRunner, toasts, live poll refresher
+src/components/dashboard/             DashboardTabs (Overview/Transactions/Policies/Mandates),
+                                       TransactionsView, MandatesPanel (§9d), PolicyHealthPanel,
+                                       AlertsBell (header dropdown, not a panel anymore), panels,
+                                       buttons, DemoRunner, toasts, live poll refresher
 scripts/                              seed, gen-agent-key, checkout-agent — thin CLI wrappers around src/lib/demo/
 ```
 

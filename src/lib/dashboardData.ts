@@ -13,15 +13,17 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export async function getDashboardData() {
   const supabase = createAdminClient();
 
-  const [agents, rules, traces, escalations, alerts] = await Promise.all([
+  const [agents, rules, traces, escalations, alerts, mandates, customers] = await Promise.all([
     supabase.from("agents").select("*").order("trust_score", { ascending: false }),
     supabase.from("policy_rules").select("*").order("created_at", { ascending: false }),
     supabase.from("traces").select("*").order("created_at", { ascending: false }).limit(300),
     supabase.from("escalations").select("*").order("created_at", { ascending: false }).limit(50),
     supabase.from("alerts").select("*").order("created_at", { ascending: false }).limit(50),
+    supabase.from("mandates").select("*").order("created_at", { ascending: false }),
+    supabase.from("customers").select("*").order("created_at", { ascending: false }),
   ]);
 
-  const errors = [agents, rules, traces, escalations, alerts]
+  const errors = [agents, rules, traces, escalations, alerts, mandates, customers]
     .map((r) => r.error)
     .filter((e): e is NonNullable<typeof e> => e !== null);
 
@@ -35,6 +37,8 @@ export async function getDashboardData() {
     traces: traces.data ?? [],
     escalations: escalations.data ?? [],
     alerts: alerts.data ?? [],
+    mandates: mandates.data ?? [],
+    customers: customers.data ?? [],
     loadError: errors[0]?.message ?? null,
   };
 }

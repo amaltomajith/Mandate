@@ -3,6 +3,7 @@ import { DECISION_COLORS, ENTITY_COLORS } from "./colors";
 const ENTITY_ITEMS = [
   { color: ENTITY_COLORS.agent, shape: "circle" as const, label: "AI agent", hint: "glow size = trust score" },
   { color: ENTITY_COLORS.rule, shape: "diamond" as const, label: "Policy rule", hint: "the guardrail that fired" },
+  { color: ENTITY_COLORS.mandate, shape: "diamond" as const, label: "Mandate", hint: "ring = active/paused/revoked" },
   { color: ENTITY_COLORS.transaction, shape: "circle" as const, label: "Action taken", hint: "one order, refund, or payout" },
 ];
 

@@ -1,9 +1,11 @@
 /**
  * The Checkout/Upsell Agent demo — runs the exact scenario from HANDOVER.md's
- * "Demo script": an AI buyer purchasing from a small catalog and proposing
- * cross-sells (the part that makes this read as agentic *commerce*, not just
- * a policy-rule test harness), one purchase that breaches the step-up
- * threshold and gets escalated (not blocked), then a deliberately tampered
+ * "Demo script": an AI buyer that establishes a real UPI Autopay mandate,
+ * purchases from a small catalog and proposes cross-sells (the part that
+ * makes this read as agentic *commerce*, not just a policy-rule test
+ * harness), one purchase that breaches the step-up threshold and gets
+ * escalated (not blocked), a merchant revoking the mandate that immediately
+ * blocks the agent's next action, and finally a deliberately tampered
  * request that gets caught at the protocol layer before it ever reaches the
  * policy engine.
  *
@@ -28,7 +30,9 @@ import { runDemoScript } from "../src/lib/demo/runDemo";
 const ICONS = { ok: "✅", escalated: "🟠", blocked: "⛔", rejected: "🛡️", error: "❌" } as const;
 
 async function main() {
-  console.log("Running the Mandate demo (seed → agent → catalog purchases + upsells → escalation → tampered request)...\n");
+  console.log(
+    "Running the Mandate demo (seed → agent → mandate → catalog purchases + upsells → escalation → mandate revoked → tampered request)...\n"
+  );
 
   const steps = await runDemoScript();
   for (const step of steps) {

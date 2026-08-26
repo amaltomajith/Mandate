@@ -5,7 +5,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { Grid, Html, Line, OrbitControls, Stars } from "@react-three/drei";
 import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import type * as THREE from "three";
-import type { Agent, PolicyRule, Trace } from "@/types/db";
+import type { Agent, Customer, Mandate, PolicyRule, Trace } from "@/types/db";
 import { computeLayout, type Vec3 } from "./layout";
 import { DECISION_COLORS, ENTITY_COLORS } from "./colors";
 import { actionTypeLabel, formatMoney } from "@/lib/format";
@@ -24,10 +24,30 @@ const DECISION_LABELS: Record<Trace["decision"], string> = {
   protocol_reject: "Rejected — invalid signature",
 };
 
+const MANDATE_TYPE_LABELS: Record<Mandate["type"], string> = {
+  upi_autopay: "UPI Autopay mandate",
+  ap2_style: "AP2-style mandate",
+};
+
+const MANDATE_STATUS_COLORS: Record<Mandate["status"], string> = {
+  active: DECISION_COLORS.allow,
+  paused: DECISION_COLORS.escalate,
+  revoked: DECISION_COLORS.block,
+  expired: "#6b7280",
+};
+
+const MANDATE_STATUS_LABELS: Record<Mandate["status"], string> = {
+  active: "Active — authorized",
+  paused: "Paused by merchant",
+  revoked: "Revoked — no longer authorized",
+  expired: "Expired",
+};
+
 type HoverInfo =
   | { kind: "agent"; agent: Agent; position: Vec3 }
   | { kind: "rule"; rule: PolicyRule; position: Vec3 }
   | { kind: "trace"; trace: Trace; position: Vec3 }
+  | { kind: "mandate"; mandate: Mandate; customerName: string; position: Vec3 }
   | null;
 
 const MAX_VISIBLE_TRACES = 120;
@@ -96,6 +116,45 @@ function RuleNode({ rule, position, onHover }: { rule: PolicyRule; position: Vec
       <octahedronGeometry args={[0.4]} />
       <meshStandardMaterial color={ENTITY_COLORS.rule} emissive={ENTITY_COLORS.rule} emissiveIntensity={0.5} />
     </mesh>
+  );
+}
+
+function MandateNode({
+  mandate,
+  customerName,
+  position,
+  onHover,
+}: {
+  mandate: Mandate;
+  customerName: string;
+  position: Vec3;
+  onHover: (h: HoverInfo) => void;
+}) {
+  const statusColor = MANDATE_STATUS_COLORS[mandate.status];
+  return (
+    <group
+      position={position}
+      onPointerOver={(e) => {
+        e.stopPropagation();
+        onHover({ kind: "mandate", mandate, customerName, position });
+      }}
+      onPointerOut={(e) => {
+        e.stopPropagation();
+        onHover(null);
+      }}
+    >
+      <mesh scale={0.24}>
+        <icosahedronGeometry args={[1, 0]} />
+        <meshStandardMaterial color={ENTITY_COLORS.mandate} emissive={ENTITY_COLORS.mandate} emissiveIntensity={0.5} />
+      </mesh>
+      {/* A colored ring keyed to status (active/paused/revoked) — same visual
+          grammar as a trace's decision ring, so "this mandate isn't active
+          anymore" reads the same way "this action was blocked" does. */}
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.36, 0.42, 24]} />
+        <meshBasicMaterial color={statusColor} transparent opacity={0.85} depthWrite={false} side={2} />
+      </mesh>
+    </group>
   );
 }
 
@@ -212,6 +271,14 @@ function HoverPanel({ info }: { info: HoverInfo }) {
     title = info.rule.name;
     badge = { text: RULE_TYPE_LABELS[info.rule.type], color: ENTITY_COLORS.rule };
     lines = [info.rule.rationale ?? "No extra detail recorded for this rule."];
+  } else if (info.kind === "mandate") {
+    title = `${MANDATE_TYPE_LABELS[info.mandate.type]} · ${info.customerName}`;
+    badge = { text: MANDATE_STATUS_LABELS[info.mandate.status], color: MANDATE_STATUS_COLORS[info.mandate.status] };
+    lines = [
+      info.mandate.status === "active"
+        ? "This agent is authorized to act on this customer's behalf. Pause or revoke it from the Mandates tab."
+        : "Every action this agent attempts under this mandate is now blocked, regardless of what policy would otherwise allow.",
+    ];
   } else {
     const p = info.trace.params as { amount?: number; currency?: string } | null;
     title = actionTypeLabel(info.trace.action_type) + (p?.amount && p?.currency ? ` · ${formatMoney(p.amount, p.currency)}` : "");
@@ -251,10 +318,23 @@ function HoverPanel({ info }: { info: HoverInfo }) {
   );
 }
 
-function Scene({ agents, rules, traces }: { agents: Agent[]; rules: PolicyRule[]; traces: Trace[] }) {
+function Scene({
+  agents,
+  rules,
+  traces,
+  mandates,
+  customers,
+}: {
+  agents: Agent[];
+  rules: PolicyRule[];
+  traces: Trace[];
+  mandates: Mandate[];
+  customers: Customer[];
+}) {
   const [hover, setHover] = useState<HoverInfo>(null);
   const visibleTraces = useMemo(() => traces.slice(0, MAX_VISIBLE_TRACES), [traces]);
-  const layout = useMemo(() => computeLayout(agents, rules, visibleTraces), [agents, rules, visibleTraces]);
+  const layout = useMemo(() => computeLayout(agents, rules, visibleTraces, mandates), [agents, rules, visibleTraces, mandates]);
+  const customerNameById = useMemo(() => new Map(customers.map((c) => [c.id, c.name])), [customers]);
 
   const tracePositionById = useMemo(
     () => new Map(layout.traces.map((t) => [t.trace.id, t.position])),
@@ -292,6 +372,16 @@ function Scene({ agents, rules, traces }: { agents: Agent[]; rules: PolicyRule[]
     return edges;
   }, [layout, tracePositionById]);
 
+  const mandateEdges = useMemo(() => {
+    const edges: { from: Vec3; to: Vec3; color: string }[] = [];
+    for (const m of layout.mandates) {
+      const agentPos = m.mandate.agent_id ? layout.agentPositionById[m.mandate.agent_id] : null;
+      if (!agentPos) continue;
+      edges.push({ from: agentPos, to: m.position, color: MANDATE_STATUS_COLORS[m.mandate.status] });
+    }
+    return edges;
+  }, [layout]);
+
   return (
     <>
       <ambientLight intensity={0.45} />
@@ -322,12 +412,24 @@ function Scene({ agents, rules, traces }: { agents: Agent[]; rules: PolicyRule[]
       {forkEdges.map((e, i) => (
         <Edge key={`fe-${i}`} from={e.from} to={e.to} color="#ffffff" opacity={0.3} dashed />
       ))}
+      {mandateEdges.map((e, i) => (
+        <Edge key={`me-${i}`} from={e.from} to={e.to} color={e.color} opacity={0.4} />
+      ))}
 
       {layout.agents.map((p) => (
         <AgentNode key={p.agent.id} agent={p.agent} position={p.position} onHover={setHover} />
       ))}
       {layout.rules.map((p) => (
         <RuleNode key={p.rule.id} rule={p.rule} position={p.position} onHover={setHover} />
+      ))}
+      {layout.mandates.map((p) => (
+        <MandateNode
+          key={p.mandate.id}
+          mandate={p.mandate}
+          customerName={p.mandate.customer_id ? customerNameById.get(p.mandate.customer_id) ?? "Unknown customer" : "Unknown customer"}
+          position={p.position}
+          onHover={setHover}
+        />
       ))}
       {layout.traces.map((p) => (
         <TraceNode key={p.trace.id} trace={p.trace} position={p.position} onHover={setHover} />
@@ -350,12 +452,24 @@ function Scene({ agents, rules, traces }: { agents: Agent[]; rules: PolicyRule[]
   );
 }
 
-export function GraphCanvas({ agents, rules, traces }: { agents: Agent[]; rules: PolicyRule[]; traces: Trace[] }) {
+export function GraphCanvas({
+  agents,
+  rules,
+  traces,
+  mandates = [],
+  customers = [],
+}: {
+  agents: Agent[];
+  rules: PolicyRule[];
+  traces: Trace[];
+  mandates?: Mandate[];
+  customers?: Customer[];
+}) {
   return (
     <Canvas camera={{ position: [9, 7, 9], fov: 50 }} className="h-full w-full" dpr={[1, 1.75]}>
       <color attach="background" args={["#05060a"]} />
       <fog attach="fog" args={["#05060a", 14, 34]} />
-      <Scene agents={agents} rules={rules} traces={traces} />
+      <Scene agents={agents} rules={rules} traces={traces} mandates={mandates} customers={customers} />
     </Canvas>
   );
 }

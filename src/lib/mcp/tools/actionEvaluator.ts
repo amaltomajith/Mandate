@@ -3,12 +3,14 @@ import { evaluatePolicy } from "@/lib/policy/engine";
 import { executeRealAction } from "@/lib/razorpay/actions";
 import type { ActionInput } from "@/lib/mcp/schemas";
 import {
+  checkMandateGate,
   createAlert,
   createEscalationForTrace,
   getActiveRules,
   getAggregates,
   insertTrace,
   recomputeTrust,
+  recordMandateFromSubscription,
 } from "@/lib/mcp/traceHelpers";
 import type { Json } from "@/types/db";
 
@@ -31,28 +33,48 @@ export async function runActionEvaluation(
   input: ActionInput,
   mode: "simulate" | "enforce"
 ): Promise<EvaluationOutcome> {
-  const rules = await getActiveRules();
-  const aggregates = await getAggregates(agentId, rules, input.currency);
+  // The mandate gate runs before the policy engine, not alongside it: a
+  // revoked/paused mandate is a more fundamental "this agent isn't
+  // authorized at all right now" check, and should short-circuit spend
+  // rules rather than compete with them. Only actions attributed to a
+  // customer can be gated by a mandate at all.
+  const mandateGate = input.customerId ? await checkMandateGate(agentId, input.customerId) : null;
 
-  const match = evaluatePolicy(
-    {
-      actionType: input.actionType,
-      amount: input.amount,
-      currency: input.currency,
-      category: input.category,
-      agentId,
-      customerId: input.customerId,
-    },
-    rules,
-    aggregates
-  );
+  let match: ReturnType<typeof evaluatePolicy> = null;
+  let decision: "allow" | "block" | "escalate";
+  let reasoning: string;
 
-  const decision = match?.decision ?? "allow";
-  const reasoning = match?.reasoning ?? "No policy rule matched — allowed by default.";
+  if (mandateGate?.blocked) {
+    decision = "block";
+    reasoning = mandateGate.reasoning ?? "Blocked: this agent's mandate is not active.";
+  } else {
+    const rules = await getActiveRules();
+    const aggregates = await getAggregates(agentId, rules, input.currency);
+    match = evaluatePolicy(
+      {
+        actionType: input.actionType,
+        amount: input.amount,
+        currency: input.currency,
+        category: input.category,
+        agentId,
+        customerId: input.customerId,
+      },
+      rules,
+      aggregates
+    );
+    decision = match?.decision ?? "allow";
+    reasoning = match?.reasoning ?? "No policy rule matched — allowed by default.";
+  }
 
   let razorpayResponse: Json | null = null;
   if (mode === "enforce" && decision === "allow") {
     razorpayResponse = await executeRealAction(input);
+    if (input.actionType === "subscription.create") {
+      const subscriptionId = (razorpayResponse as { subscription?: { id?: string } } | null)?.subscription?.id;
+      if (subscriptionId) {
+        await recordMandateFromSubscription(agentId, input.customerId, subscriptionId, razorpayResponse);
+      }
+    }
   }
 
   const trace = await insertTrace({

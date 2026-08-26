@@ -167,7 +167,12 @@ export function TransactionsView({
                             </button>
                           ) : (
                             <p className="mt-2 text-[11px]" style={{ color: "var(--muted-2)" }}>
-                              No specific rule fired — {t.decision === "allow" ? "allowed by default, nothing matched." : "resolved at the protocol layer, before the policy engine."}
+                              No specific rule fired —{" "}
+                              {t.decision === "allow"
+                                ? "allowed by default, nothing matched."
+                                : t.decision === "protocol_reject"
+                                  ? "resolved at the protocol layer, before the policy engine."
+                                  : "resolved by a mandate-status check, before the policy engine ran."}
                             </p>
                           )}
                           <p className="mt-2 font-mono text-[10px]" style={{ color: "var(--muted-2)" }}>

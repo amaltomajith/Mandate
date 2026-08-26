@@ -1,4 +1,4 @@
-import type { Agent, PolicyRule, Trace } from "@/types/db";
+import type { Agent, Mandate, PolicyRule, Trace } from "@/types/db";
 
 export type Vec3 = [number, number, number];
 
@@ -14,11 +14,16 @@ export interface PositionedTrace {
   trace: Trace;
   position: Vec3;
 }
+export interface PositionedMandate {
+  mandate: Mandate;
+  position: Vec3;
+}
 
 export interface GraphLayout {
   agents: PositionedAgent[];
   rules: PositionedRule[];
   traces: PositionedTrace[];
+  mandates: PositionedMandate[];
   agentPositionById: Record<string, Vec3>;
   rulePositionById: Record<string, Vec3>;
 }
@@ -29,7 +34,12 @@ export interface GraphLayout {
  * own transactions spiraling below/around it) so the type-hue channel and the
  * spatial layout reinforce each other instead of fighting.
  */
-export function computeLayout(agents: Agent[], rules: PolicyRule[], traces: Trace[]): GraphLayout {
+export function computeLayout(
+  agents: Agent[],
+  rules: PolicyRule[],
+  traces: Trace[],
+  mandates: Mandate[] = []
+): GraphLayout {
   const activeRules = rules.filter((r) => r.status === "active");
 
   const RULE_RADIUS = 6;
@@ -74,10 +84,35 @@ export function computeLayout(agents: Agent[], rules: PolicyRule[], traces: Trac
     });
   }
 
+  // Mandates orbit close above their agent — a standing authorization, not a
+  // one-off event like a transaction, so it reads visually as "attached to"
+  // the agent rather than spiraling away below it like the trace history.
+  const byAgentMandates = new Map<string, Mandate[]>();
+  for (const mandate of mandates) {
+    const key = mandate.agent_id ?? "__unassigned__";
+    const list = byAgentMandates.get(key) ?? [];
+    list.push(mandate);
+    byAgentMandates.set(key, list);
+  }
+
+  const positionedMandates: PositionedMandate[] = [];
+  for (const [agentId, agentMandates] of byAgentMandates) {
+    const base = agentPositionById[agentId] ?? [0, 0, 0];
+    agentMandates.forEach((mandate, i) => {
+      const angle = (i / Math.max(agentMandates.length, 1)) * Math.PI * 2;
+      const radius = 1.5;
+      positionedMandates.push({
+        mandate,
+        position: [base[0] + Math.cos(angle) * radius, base[1] + 1.15, base[2] + Math.sin(angle) * radius],
+      });
+    });
+  }
+
   return {
     agents: positionedAgents,
     rules: positionedRules,
     traces: positionedTraces,
+    mandates: positionedMandates,
     agentPositionById,
     rulePositionById,
   };
