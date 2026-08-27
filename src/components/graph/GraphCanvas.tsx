@@ -314,9 +314,11 @@ function HoverPanel({ info }: { info: HoverInfo }) {
       ...info.domain.match_action_types.map((t) => actionTypeLabel(t)),
       ...info.domain.match_categories.map((c) => `category "${c}"`),
     ].join(" · ");
+    // Description OR the generic fallback, never both — the seeded domains'
+    // own descriptions already say "catch-all," so showing the generic
+    // line too was pure duplication, not extra information.
     lines = [
-      info.domain.description ?? "",
-      info.domain.is_default ? "Governs anything no other domain claims." : routing ? `Routes here on: ${routing}` : "",
+      info.domain.description || (info.domain.is_default ? "Governs anything no other domain claims." : routing ? `Routes here on: ${routing}` : ""),
       `${info.ruleCount} active rule${info.ruleCount === 1 ? "" : "s"} of its own — independent of every other domain's.`,
     ];
   } else if (info.kind === "mandate") {
@@ -342,9 +344,15 @@ function HoverPanel({ info }: { info: HoverInfo }) {
     // regardless of zoom, which is what a hover label needs to be.
     <Html position={info.position} style={{ pointerEvents: "none" }} zIndexRange={[100, 0]}>
       {/* Hardcoded dark colors, not the (light-theme) CSS vars — this tooltip
-          floats over the graph's own dark canvas, not the light dashboard shell. */}
+          floats over the graph's own dark canvas, not the light dashboard shell.
+          Domains sit at the topmost tier of the layout (see layout.ts) — a
+          tooltip that always opens upward has no headroom left above them and
+          runs off the top of the canvas. Opens downward for domains only;
+          every lower tier still has room to open upward as before. */}
       <div
-        className="w-72 -translate-x-1/2 -translate-y-[calc(100%+14px)] rounded-xl border px-3.5 py-3 shadow-2xl backdrop-blur-md"
+        className={`w-72 -translate-x-1/2 rounded-xl border px-3.5 py-3 shadow-2xl backdrop-blur-md ${
+          info.kind === "domain" ? "translate-y-[14px]" : "-translate-y-[calc(100%+14px)]"
+        }`}
         style={{ background: "rgba(9,11,18,0.97)", borderColor: "rgba(255,255,255,0.14)", color: "#f3f5fb" }}
       >
         <p className="mb-1.5 text-[13px] font-semibold leading-snug">{title}</p>
