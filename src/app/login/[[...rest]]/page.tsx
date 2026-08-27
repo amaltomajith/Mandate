@@ -12,7 +12,12 @@ export default function LoginPage() {
         appearance={{
           elements: {
             rootBox: "w-full",
-            card: "shadow-none border-0 p-0 w-full",
+            cardBox: "w-full",
+            // A plain className string here loses the cascade fight against
+            // Clerk's own internal card styles (its box-shadow won regardless
+            // of a `shadow-none` class) — the object form applies as real
+            // inline-priority styles instead, which actually wins.
+            card: { boxShadow: "none", border: "none", backgroundColor: "transparent" },
           },
         }}
       />

@@ -60,7 +60,14 @@ export function AuthShell({ children }: { children: ReactNode }) {
             <MandateMark size={36} />
             <span className="text-xl font-semibold tracking-tight">Mandate</span>
           </div>
-          <div className="panel-card-lg rounded-2xl p-6 sm:p-8">{children}</div>
+          {/* No wrapper box here on purpose — Clerk's <SignIn>/<SignUp> already
+              render their own card (border, shadow, rounded corners). Wrapping
+              that in a second panel-card-lg box created a visibly mismatched
+              nested-box look (the two didn't share a padding/radius, so the
+              outer one peeked out unevenly around the inner one). Clerk's own
+              card is themed to match via ClerkProvider's `appearance` in
+              layout.tsx — one real box, not two. */}
+          {children}
         </div>
       </div>
     </div>

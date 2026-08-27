@@ -12,7 +12,8 @@ export default function SignUpPage() {
         appearance={{
           elements: {
             rootBox: "w-full",
-            card: "shadow-none border-0 p-0 w-full",
+            cardBox: "w-full",
+            card: { boxShadow: "none", border: "none", backgroundColor: "transparent" },
           },
         }}
       />
