@@ -206,6 +206,33 @@ that changed:
 - `scripts/create-dashboard-user.ts` is gone — Clerk's own `/sign-up` page
   handles account creation now, self-serve, no CLI step required.
 
+### 5c. A transient Supabase error: "JWT issued at future"
+
+Hit twice live: the dashboard's Supabase queries occasionally fail with
+`"JWT issued at future"`. Traced (not guessed) to Supabase's newer
+`sb_secret_...` API key format: unlike a legacy static JWT, this key type
+has an internal gateway mint a fresh JWT per request in front of PostgREST,
+and this message means whichever internal Supabase service minted it and
+whichever verified it disagreed about the time by even a moment — a
+platform-side clock race, not a credentials or app-config problem. Confirmed
+by a direct out-of-band probe with the exact same URL/key moments after
+hitting it live: clean `200`, real data back. It comes and goes on its own.
+
+**Fix**: `src/lib/dashboardData.ts`'s `withRetry` retries a query up to
+twice more (short backoff) specifically when the error text matches this
+pattern — any other error still fails immediately, same as before, so a
+real problem still surfaces rather than being silently retried away. If
+this class of error ever shows up from `src/lib/mcp/traceHelpers.ts` (the
+MCP-tool-facing queries) instead of just the dashboard load, the same
+`withRetry` pattern is the one to reuse there.
+
+A more permanent fix, if this keeps recurring: Supabase project settings
+still expose "Legacy API Keys" for most projects — swapping
+`SUPABASE_SERVICE_ROLE_KEY` for the legacy JWT-format service_role key
+removes the per-request minting step entirely (a legacy JWT is already
+pre-signed, nothing to race against), at the cost of it being the key
+format Supabase is gradually deprecating.
+
 ## 6. Razorpay integration: what's real S2S vs what isn't
 
 Verified against Razorpay's actual API docs during this build (not assumed):
