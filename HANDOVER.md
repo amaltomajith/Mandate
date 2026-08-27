@@ -598,8 +598,41 @@ concept that wasn't actually end-to-end. This closes that gap:
   That purchase is blocked, live, in the same run — proof that revocation
   isn't a status flag nobody checks, demonstrated in <1 second right after
   the escalation beat, before the tampered-request self-defense beat closes
-  the script. Three distinct control-plane demonstrations in one click now,
-  not two.
+  the script.
+
+### 9e. The "greedy agent" scenario: structuring around a threshold, caught anyway
+
+The escalation beat (§9) proves the step-up rule works when an agent's
+honest about a big purchase. It doesn't prove anything about an agent that
+*isn't* — the original plan's §7 asked for exactly that second, more
+adversarial beat, and it was cut for time (§11) until now.
+
+**The scenario**: instead of one ₹7,200 purchase (which would trip the
+₹5,000 step-up threshold and need a human's sign-off), the demo agent
+splits it into six rapid ₹1,200 chunks — each individually well under that
+threshold, each carrying no signal that would make `evaluatePolicy`'s
+`cap`/`category_block`/`step_up` checks blink. What actually catches it is
+a new seeded velocity rule ("Rapid-repeat guard: 10 actions / 5 min per
+agent," `src/lib/demo/seedData.ts`) — amount-blind by design, it counts
+actions, not their size, so splitting one big action into many small ones
+doesn't evade it; it's exactly what trips it. `src/lib/demo/runDemo.ts`'s
+`attemptStructuredEvasion` fires the chunks one at a time and stops at the
+first non-`"allow"` result, which — given the mandate/purchase/upsell beats
+already ahead of it in the same run consume most of that rule's headroom —
+is typically partway through the burst, not the very first chunk: some
+chunks succeed, then one gets blocked, same as a real rate limiter would.
+
+This is also the concrete example of why the policy engine evaluates *all*
+active rules of each type, not just one: `daily_spend_limit` (cap) and
+`Step-up above ₹5,000` (step_up) don't fire on any individual ₹1,200 chunk,
+but a rule of a completely different type — velocity — still catches the
+pattern. Gaming one rule doesn't get an agent past the system; the rules
+compose.
+
+Four distinct control-plane demonstrations in one click now: an honest
+step-up escalation, a dishonest structuring attempt caught by rate-limiting,
+a merchant's mandate revocation enforced live, and a forged request
+rejected before it reaches any of the above.
 
 ## 10. Track 02 bonus (built, then removed)
 
@@ -659,10 +692,6 @@ isn't built. None of these have a dead button in the UI.
   batching against a real Razorpay account, a calibration step) that bolting
   it on here risked shipping everything else shallower. Natural next step
   after this batch.
-- **The "greedy agent" scripted overreach scenario** (from the original
-  plan's §7): a demo path where the agent deliberately stacks too much
-  discount/spend and gets caught — a second, more adversarial "blocked" beat
-  alongside the existing step-up escalation. Same reasoning as above.
 - **Statistical anomaly flagging** (outlier amounts, sudden rate spikes) —
   the honest reason this isn't built yet is that it needs real transaction
   volume to mean anything, which is exactly what the traffic generator above

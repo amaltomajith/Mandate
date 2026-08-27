@@ -196,6 +196,39 @@ export async function runDemoScript(): Promise<DemoStep[]> {
     await buy(findItem(catalog, "mouse-01"), "AI buyer attempts another purchase — mandate now revoked", "purchase");
   }
 
+  /** The adversarial beat: instead of one honest ₹7,200 purchase (which
+   *  would trip the ₹5,000 step-up threshold and need a human's sign-off),
+   *  the agent tries splitting it into six rapid ₹1,200 chunks — each
+   *  individually well under the threshold. Demonstrates that gaming one
+   *  rule doesn't get an agent past the system: the velocity rule (rate of
+   *  actions, blind to their size) catches the pattern instead. Stops at
+   *  the first non-"allow" result — the point's made once it's caught, no
+   *  need to keep firing chunks that'll all get the same answer. */
+  async function attemptStructuredEvasion(): Promise<void> {
+    const chunkAmount = 120000;
+    const chunkCount = 6;
+
+    steps.push({
+      label: "Greedy agent tries to structure around the step-up threshold",
+      status: "ok",
+      detail: `Splitting a ${moneyLabel(chunkAmount * chunkCount)}-equivalent purchase into ${chunkCount} rapid ${moneyLabel(chunkAmount)} chunks — each individually under the ₹5,000 threshold that would otherwise require approval.`,
+    });
+
+    for (let i = 1; i <= chunkCount; i++) {
+      const args = {
+        actionType: "order.create",
+        amount: chunkAmount,
+        currency: "INR",
+        params: { receipt: `mandate-demo-structuring-${i}-${Date.now()}`, notes: { structuring_attempt: "true", chunk: String(i) } },
+      };
+      await client.callTool<ActionResult>("simulate_action", args);
+      const enforced = await client.callTool<ActionResult>("enforce_action", args);
+      const status = enforced.decision === "allow" ? "ok" : enforced.decision === "escalate" ? "escalated" : "blocked";
+      steps.push({ label: `Structured chunk ${i}/${chunkCount} (${moneyLabel(chunkAmount)})`, status, detail: enforced.reasoning });
+      if (enforced.decision !== "allow") break;
+    }
+  }
+
   /** Buys `item`, then asks the LLM to reason over the real catalog for a
    *  complementary cross-sell and buys that too if it suggests one — no
    *  hardcoded pairing table. See src/lib/demo/crossSell.ts. */
@@ -231,6 +264,12 @@ export async function runDemoScript(): Promise<DemoStep[]> {
   // The graceful-failure beat: a big-ticket item over the step-up threshold —
   // escalated for a human's sign-off, not blocked outright.
   await buy(findItem(catalog, "desk-01"), "AI buyer purchases: Premium Standing Desk", "purchase");
+
+  // The adversarial beat: caught trying to structure around that same
+  // threshold instead of accepting the escalation — a second, sharper
+  // "blocked" moment than the step-up above, showing the guardrails compose
+  // rather than being individually gameable.
+  await attemptStructuredEvasion();
 
   // The second control-plane beat: the merchant revokes the agent's mandate,
   // and its very next attempted action is blocked immediately — proving

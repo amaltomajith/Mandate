@@ -4,7 +4,9 @@
  * purchases from a small catalog and proposes cross-sells (the part that
  * makes this read as agentic *commerce*, not just a policy-rule test
  * harness), one purchase that breaches the step-up threshold and gets
- * escalated (not blocked), a merchant revoking the mandate that immediately
+ * escalated (not blocked), an attempt to structure around that same
+ * threshold by splitting a purchase into rapid small chunks (caught by a
+ * rate-limit rule instead), a merchant revoking the mandate that immediately
  * blocks the agent's next action, and finally a deliberately tampered
  * request that gets caught at the protocol layer before it ever reaches the
  * policy engine.
@@ -31,7 +33,7 @@ const ICONS = { ok: "✅", escalated: "🟠", blocked: "⛔", rejected: "🛡️
 
 async function main() {
   console.log(
-    "Running the Mandate demo (seed → agent → mandate → catalog purchases + upsells → escalation → mandate revoked → tampered request)...\n"
+    "Running the Mandate demo (seed → agent → mandate → catalog purchases + upsells → escalation → structuring attempt caught → mandate revoked → tampered request)...\n"
   );
 
   const steps = await runDemoScript();

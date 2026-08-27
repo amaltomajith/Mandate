@@ -39,6 +39,13 @@ export const SEED_RULES: SeedRule[] = [
     params: { categories: ["gambling", "crypto"] },
     rationale: "Categories this merchant has decided no agent may transact in, at any amount.",
   },
+  {
+    type: "velocity",
+    name: "Rapid-repeat guard: 10 actions / 5 min per agent",
+    params: { max_count: 10, window_seconds: 300, scope: "per_agent" },
+    rationale:
+      "A tighter, short-window companion to the 30/hour safety net above — catches an agent trying to structure around the step-up threshold (many small actions fired rapidly instead of one that would've required approval), not just a runaway loop. Amount-blind, like all velocity rules: it's the rate that's suspicious here, not any single action's size.",
+  },
 ];
 
 export const SEED_CUSTOMER = { name: "Demo Customer", email: "demo-customer@example.com" };
