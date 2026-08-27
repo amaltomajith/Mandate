@@ -27,7 +27,7 @@ explains every decision by tracing a real graph.
 - Web Bot Auth-style request signing and verification (Ed25519, RFC 9421-shaped headers) wired into every MCP call
 - Razorpay/RazorpayX integration code for orders, refunds, payouts, subscriptions
 - Trust score formula, computed and stored per agent
-- Merchant dashboard, four real sections (§9c, §9d): Overview (graph + "Run demo" + escalations/alerts), Transactions (every trace, filterable/searchable), Policies (rule management + audit + Horizon), Mandates (pause/resume/revoke an agent's standing authorization — enforced live, not cosmetic)
+- Merchant dashboard, five real sections (§9c, §9d, §9g): Overview (graph + "Run demo" + escalations/alerts), Transactions (every trace, filterable/searchable), Policies (rule management + audit + Horizon), Domains (merchant-defined policy domains on a draggable canvas — not hardcoded, see §9g), Mandates (pause/resume/revoke an agent's standing authorization — enforced live, not cosmetic)
 - Policy governance (§9b): deactivate/reactivate any rule, conflict-aware approval, a deterministic gap/conflict checker (runs free on every load) plus an on-demand LLM review — labeled and never blended
 - 3D graph (react-three-fiber + postprocessing): entity hue, trust aura, decision rings, bloom/starfield/grid, hover inspect, fork/branch edges, an always-visible legend, a distinct block/reject shockwave effect, nodes that materialize in instead of popping (§9c)
 - Live alert toasts + a plain-language explainability pass (amounts render as "₹6,000" not raw paise, "order.create" renders as "New purchase order")
@@ -672,8 +672,101 @@ alert does — no separate results list, the existing toast/escalations
 panels already do that job.
 
 **What this deliberately doesn't do**: run on its own without a click. See
-§11 — the generation logic is real and reusable from a scheduled route,
-but there's no deployed instance yet to schedule it against.
+§11 — the generation logic is real and reusable from a scheduled route; now
+that the app is deployed (§9h has the URL), wiring an actual Vercel Cron job
+to hit it periodically is a real, small next step, not a hypothetical one.
+
+### 9g. Policy domains: merchant-defined, not hardcoded
+
+The user's own framing, close to verbatim: instead of one fixed pipeline,
+design **nodes** — each a business domain with its own data, constraints,
+and policy; incoming requests route to the relevant node; each node's AI
+reasons within its own rules when something doesn't cleanly comply; human-
+in-the-loop per node; all visually inspectable and reconfigurable, not
+fixed. A full research/strategy pass on this (comparing it honestly against
+prior art — Open Policy Agent for policy-as-code, LangGraph/CrewAI/Dify for
+graph-based agent orchestration) is preserved as a planning artifact; the
+short version of that research: nothing combines *visual, multi-domain,
+human-in-the-loop policy* with *a real payment rail underneath the first
+domain* the way this does. That's the honest differentiation — not "a
+node-based policy engine" (OPA already is one) or "a multi-agent
+orchestrator" (LangGraph already is one).
+
+**What's real, not a mockup:**
+
+- **`policy_domains`** (migration `0004_policy_domains.sql`) — actual rows,
+  not a hardcoded list. Each domain has a name, description, routing rules
+  (`match_action_types[]`, `match_categories[]`), a canvas position, and a
+  color. Exactly one domain is flagged `is_default` — the catch-all every
+  merchant needs so an action always resolves to *some* domain, never falls
+  through ungoverned.
+- **Routing is content-based, computed at evaluation time** (`resolveDomain`
+  in `src/lib/policy/domains.ts`), not literal drawn wires between nodes: an
+  action belongs to a domain if its action type or category matches that
+  domain's rules. `runActionEvaluation` (`src/lib/mcp/tools/actionEvaluator.ts`)
+  resolves the domain, then filters *both* the active policy rules *and* the
+  velocity/cap aggregates (`getAggregates` in `src/lib/mcp/traceHelpers.ts`)
+  down to that one domain before the evaluator ever runs — a mandate action
+  can never count toward a purchases-domain velocity limit, or vice versa.
+- **Two domains ship seeded** (`applySeedDomains` in `src/lib/demo/seedData.ts`):
+  "Purchases" (order/refund/payout, the default) and "Recurring Mandates"
+  (subscription.create only), each with its own independently-tuned rules —
+  purchases escalates above ₹5,000, mandates above ₹1,000, on purpose:
+  a mandate is a standing future liability, not a single bounded
+  transaction, so it's governed more tightly. Deliberately *not* split
+  around refund.create/payout.create instead (which the original research
+  pass considered) — neither is genuinely exercisable end-to-end here yet
+  (no captured payment exists anywhere in this system to refund; payouts
+  still need the RazorpayX business registration §6 covers), so that split
+  would have produced two empty, unconvincing domain cards instead of two
+  real ones.
+- **A merchant can add real new domains** ("Logistics," anything) from the
+  **Domains** tab (`src/components/dashboard/PolicyDomainsCanvas.tsx`):
+  name it, tell it which action types or categories belong to it, and it
+  immediately starts governing matching traffic with its own (initially
+  empty) rule set — `src/lib/actions/domains.ts` has the CRUD. Cards are
+  draggable (native pointer events, no new dependency) and the position
+  persists on drop.
+- **Cross-domain false positives got fixed, not just avoided.** The
+  deterministic policy audit (`src/lib/policy/audit.ts`) and the pending-
+  rule conflict check (`PolicyRulesPanel.tsx`) both used to compare *every*
+  active rule of the same type against every other, globally. Once two
+  domains can have independently different thresholds of the same rule
+  type, that comparison produces real false positives (a mandates-domain
+  ₹1,000 step-up would look like it "kills" the purchases-domain ₹5,000
+  step-up, purely because the checker didn't know they never actually
+  compete). Both now scope every comparison to rules sharing the same
+  `domain_id` first.
+- **Domain assignment for a drafted rule is a human decision, not the
+  model's.** `draft_policy` (`src/lib/mcp/tools/draftPolicy.ts`) always
+  lands a new rule in the default domain; a domain dropdown on the pending-
+  review card (`PolicyRulesPanel.tsx`) lets a human move it before or after
+  approving, via a new `setRuleDomain` action — not a keyword-guessing
+  heuristic at draft time, which would be silently wrong instead of just
+  unreviewed.
+
+**What this deliberately doesn't do** (said out loud, not blurred): the
+canvas drag is arrangement only, not a literal wiring diagram of live
+execution — there's no drawn connection line you rewire to change routing;
+routing rules are edited via a small form on each card instead. There's
+also no per-domain trust score yet (trust is still per-agent, §7) and no
+UI for merging/splitting domains after the fact. Both are natural next
+steps, not gaps in what's already real.
+
+### 9h. Live deployment
+
+Pushed to [github.com/amaltomajith/Mandate](https://github.com/amaltomajith/Mandate) and deployed on Vercel
+(`https://mandate-amaltomajiths-projects.vercel.app`), Git-linked so every
+push to `master` auto-deploys. Supabase is the same project used in local
+dev — one database, not a separate prod copy, so `npm run dev` locally and
+the deployed instance share live data (a mandate created via one shows up
+in the other). Still using Clerk's development-instance keys (the visible
+"Development mode" badge and console warning are real, not a bug); a
+production Clerk instance is a real next step, not done here, since it
+needs its own domain verification. `.vercelignore` excludes the local
+PaySim CSV (§10) from *uploads* specifically — it's already gitignored
+from commits, but Vercel's CLI still tried to upload it on the first
+deploy attempt and hit the platform's 100MB file-size limit.
 
 ## 10. Track 02 bonus (built, then removed)
 
@@ -744,17 +837,19 @@ isn't built. None of these have a dead button in the UI.
 ```
 supabase/migrations/0001_init.sql     schema, RLS (now largely vestigial — see §5b)
 supabase/migrations/0002_products.sql product catalog (§9a's cross-sell reasoning reads from this)
+supabase/migrations/0004_policy_domains.sql  policy_domains table + policy_rules.domain_id (§9g)
 src/types/db.ts                       hand-written Database types
 src/lib/policy/                       rule types + pure evaluator + audit.ts (deterministic gap
-                                       checker) + semanticAudit.ts (LLM layer) + suggestFix.ts
-                                       (LLM-proposed, human-applied fixes) — see §9b
+                                       checker, domain-scoped) + semanticAudit.ts (LLM layer) +
+                                       suggestFix.ts (LLM-proposed, human-applied fixes, §9b) +
+                                       domains.ts (domain resolution/matching, §9g)
 src/lib/trust/score.ts                trust formula
 src/lib/webBotAuth/                   keys, canonical signing, sign, verify
 src/lib/razorpay/                     SDK client, RazorpayX REST client, action dispatch
 src/lib/mcp/                          schemas, server (4 tools), session store, trace helpers
 src/lib/llm/                          Groq client (explain, draft_policy, cross-sell reasoning)
-src/lib/actions/                      dashboard server actions (escalations, policy, mandates, horizon,
-                                       demo, backgroundTraffic)
+src/lib/actions/                      dashboard server actions (escalations, policy, mandates,
+                                       domains (§9g), horizon, demo, backgroundTraffic)
 src/lib/demo/                         catalog.ts (products), crossSell.ts (LLM-reasoned upsells,
                                        §9a), seedData.ts, MandateClient, runDemoScript — shared by
                                        the dashboard's "Run demo" button AND the CLI scripts;
@@ -770,8 +865,9 @@ src/components/auth/AuthShell.tsx     split-hero shell around Clerk's components
 src/components/brand/MandateMark.tsx  shared logo mark
 src/components/graph/                 3D graph + legend (layout.ts is the pure/testable part;
                                        GraphCanvas.tsx has the block-shockwave/materialize-in effects)
-src/components/dashboard/             DashboardTabs (Overview/Transactions/Policies/Mandates),
-                                       TransactionsView, MandatesPanel (§9d), AgentTrustPanel,
+src/components/dashboard/             DashboardTabs (Overview/Transactions/Policies/Domains/Mandates),
+                                       TransactionsView, MandatesPanel (§9d),
+                                       PolicyDomainsCanvas (§9g), AgentTrustPanel,
                                        PolicyHealthPanel, AlertsBell (header dropdown, not a panel
                                        anymore), panels, buttons, DemoRunner, BackgroundTrafficButton
                                        (§9f), toasts, live poll refresher

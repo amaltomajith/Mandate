@@ -6,17 +6,20 @@ import {
   checkMandateGate,
   createAlert,
   createEscalationForTrace,
+  getActiveDomains,
   getActiveRules,
   getAggregates,
   insertTrace,
   recomputeTrust,
   recordMandateFromSubscription,
 } from "@/lib/mcp/traceHelpers";
+import { resolveDomain } from "@/lib/policy/domains";
 import type { Json } from "@/types/db";
 
 export interface EvaluationOutcome {
   decision: "allow" | "block" | "escalate";
   ruleFired: { id: string; name: string; type: string } | null;
+  domain: { id: string; name: string } | null;
   reasoning: string;
   traceId: string;
   wouldEscalate: boolean;
@@ -52,13 +55,26 @@ export async function runActionEvaluation(
   let match: ReturnType<typeof evaluatePolicy> = null;
   let decision: "allow" | "block" | "escalate";
   let reasoning: string;
+  let resolvedDomain: { id: string; name: string } | null = null;
 
   if (mandateGate?.blocked) {
     decision = "block";
     reasoning = mandateGate.reasoning ?? "Blocked: this agent's mandate is not active.";
   } else {
-    const rules = await getActiveRules();
-    const aggregates = await getAggregates(agentId, rules, input.currency);
+    // Each policy domain is governed independently (see
+    // src/lib/policy/domains.ts) — a mandate action only ever gets checked
+    // against the mandates domain's own rules, never the purchases domain's,
+    // and vice versa. Domains are merchant-defined rows, resolved here by
+    // content (action type / category), not a hardcoded map.
+    const domains = await getActiveDomains();
+    const domain = resolveDomain(input.actionType, input.category, domains);
+    resolvedDomain = domain ? { id: domain.id, name: domain.name } : null;
+
+    const allRules = await getActiveRules();
+    const rules = domain ? allRules.filter((r) => r.domain_id === domain.id) : [];
+    const aggregates = domain
+      ? await getAggregates(agentId, rules, input.currency, domain)
+      : { velocityCounts: {}, dailyAmountSoFar: {} };
     match = evaluatePolicy(
       {
         actionType: input.actionType,
@@ -111,6 +127,7 @@ export async function runActionEvaluation(
   return {
     decision,
     ruleFired: match ? { id: match.rule.id, name: match.rule.name, type: match.rule.type } : null,
+    domain: resolvedDomain,
     reasoning,
     traceId: trace.id,
     wouldEscalate: decision === "escalate",

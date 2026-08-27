@@ -3,7 +3,8 @@ import { z } from "zod";
 import { getLLM, LLM_MODEL } from "@/lib/llm/client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { evaluatePolicy } from "@/lib/policy/engine";
-import { getActiveRules } from "@/lib/mcp/traceHelpers";
+import { getActiveDomains, getActiveRules } from "@/lib/mcp/traceHelpers";
+import { resolveDomain } from "@/lib/policy/domains";
 import type { PolicyRuleType } from "@/types/db";
 import type { Json } from "@/types/db";
 
@@ -79,9 +80,17 @@ export async function draftPolicy(
   if (!params) throw new Error(`draft_policy: model chose type "${draft.type}" but didn't include its params object.`);
 
   const db = createAdminClient();
-  const existingRules = await getActiveRules();
+  const [existingRules, domains] = await Promise.all([getActiveRules(), getActiveDomains()]);
+
+  // Domain assignment is a merchant policy decision, not something to leave
+  // to the model — every drafted rule lands in the catch-all default domain
+  // (reviewable/reassignable like everything else `pending_review` produces,
+  // see HANDOVER.md §9g). Not doing keyword-guessing at draft-time on
+  // purpose: a wrong guess here would be silently wrong, not just unreviewed.
+  const defaultDomain = domains.find((d) => d.is_default) ?? null;
+
   const conflictsWith = existingRules
-    .filter((r) => r.type === draft.type)
+    .filter((r) => r.type === draft.type && r.domain_id === (defaultDomain?.id ?? null))
     .map((r) => ({ id: r.id, name: r.name, type: r.type }));
 
   const { data: inserted, error } = await db
@@ -89,6 +98,7 @@ export async function draftPolicy(
     .insert({
       type: draft.type,
       name: draft.name,
+      domain_id: defaultDomain?.id ?? null,
       params: params as unknown as Json,
       status: "pending_review",
       source,
@@ -110,7 +120,12 @@ export async function draftPolicy(
 
   let wouldHaveChangedDecision = 0;
   for (const t of recentTraces ?? []) {
+    // Only replay against traces in the candidate rule's own domain — a
+    // rule drafted for one domain backtested against a different domain's
+    // trace would produce a number that doesn't mean anything.
     const p = t.params as { amount?: number; currency?: string; category?: string } | null;
+    const traceDomain = resolveDomain(t.action_type, p?.category, domains);
+    if (traceDomain?.id !== inserted.domain_id) continue;
     if (!p?.amount || !p?.currency) continue;
     const candidateMatch = evaluatePolicy(
       {
@@ -120,7 +135,7 @@ export async function draftPolicy(
         category: p.category,
         agentId: t.agent_id ?? "",
       },
-      [{ id: inserted.id, type: inserted.type, name: inserted.name, params: inserted.params }],
+      [{ id: inserted.id, type: inserted.type, name: inserted.name, domain_id: inserted.domain_id, params: inserted.params }],
       { velocityCounts: {}, dailyAmountSoFar: {} }
     );
     const candidateDecision = candidateMatch?.decision ?? "allow";

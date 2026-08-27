@@ -2,8 +2,9 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { PolicyRule as EngineRule, EvaluationAggregates } from "@/lib/policy/types";
 import type { CapParams, VelocityParams } from "@/lib/policy/types";
+import { matchesDomain } from "@/lib/policy/domains";
 import { computeTrustScore } from "@/lib/trust/score";
-import type { Database, Decision, Json, Mandate, TraceMode } from "@/types/db";
+import type { Database, Decision, Json, Mandate, PolicyDomain, TraceMode } from "@/types/db";
 
 /**
  * A Supabase `PostgrestError` is a plain object, not an `Error` instance —
@@ -23,17 +24,34 @@ export async function getActiveRules(): Promise<EngineRule[]> {
   const db = createAdminClient();
   const { data, error } = await db
     .from("policy_rules")
-    .select("id, type, name, params")
+    .select("id, type, name, domain_id, params")
     .eq("status", "active");
   assertNoSupabaseError(error);
   return data ?? [];
 }
 
-/** Pre-computes what the pure policy evaluator needs but can't fetch itself. */
+/** Every merchant-defined policy domain — real rows, not a hardcoded list.
+ *  See src/lib/policy/domains.ts for how an action resolves to one of these. */
+export async function getActiveDomains(): Promise<PolicyDomain[]> {
+  const db = createAdminClient();
+  const { data, error } = await db.from("policy_domains").select("*");
+  assertNoSupabaseError(error);
+  return data ?? [];
+}
+
+/** Pre-computes what the pure policy evaluator needs but can't fetch itself.
+ *  Scoped to the SAME resolved domain as the action being evaluated (see
+ *  src/lib/policy/domains.ts) by filtering traces with `matchesDomain` in
+ *  application code — domains route on action type OR category, and
+ *  category lives inside a trace's `params` JSON, not an indexed column, so
+ *  this can't be pushed down as a simple `.in()` filter. Without this scope,
+ *  a mandate action would count toward a purchases-domain velocity limit
+ *  and vice versa, which would make "independently governed domains" a lie. */
 export async function getAggregates(
   agentId: string,
   rules: EngineRule[],
-  currency: string
+  currency: string,
+  domain: PolicyDomain
 ): Promise<EvaluationAggregates> {
   const db = createAdminClient();
   const velocityCounts: Record<string, number> = {};
@@ -43,14 +61,17 @@ export async function getAggregates(
   for (const rule of velocityRules) {
     const params = rule.params as VelocityParams;
     const since = new Date(Date.now() - params.window_seconds * 1000).toISOString();
-    const { count, error } = await db
+    const { data, error } = await db
       .from("traces")
-      .select("id", { count: "exact", head: true })
+      .select("action_type, params")
       .eq("agent_id", agentId)
       .eq("mode", "enforce")
       .gte("created_at", since);
     assertNoSupabaseError(error);
-    velocityCounts[rule.id] = count ?? 0;
+    velocityCounts[rule.id] = (data ?? []).filter((t) => {
+      const p = t.params as { category?: string } | null;
+      return matchesDomain(t.action_type, p?.category, domain);
+    }).length;
   }
 
   const capRules = rules.filter((r) => r.type === "cap");
@@ -61,15 +82,16 @@ export async function getAggregates(
     if (params.scope !== "per_day" || params.currency !== currency) continue;
     const { data, error } = await db
       .from("traces")
-      .select("params")
+      .select("action_type, params")
       .eq("agent_id", agentId)
       .eq("mode", "enforce")
       .eq("decision", "allow")
       .gte("created_at", todayStart.toISOString());
     assertNoSupabaseError(error);
     dailyAmountSoFar[rule.id] = (data ?? []).reduce((sum, row) => {
-      const p = row.params as { amount?: number; currency?: string } | null;
+      const p = row.params as { amount?: number; currency?: string; category?: string } | null;
       if (p?.currency !== currency) return sum;
+      if (!matchesDomain(row.action_type, p?.category, domain)) return sum;
       return sum + (p?.amount ?? 0);
     }, 0);
   }

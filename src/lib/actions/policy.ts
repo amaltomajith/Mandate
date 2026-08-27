@@ -29,6 +29,18 @@ export async function approvePolicyRule(ruleId: string, supersedeRuleIds: string
   revalidatePath("/dashboard");
 }
 
+/** Domain assignment is deliberately a separate, explicit action from
+ *  approving — a rule can be reassigned to a different domain any time, not
+ *  just at approval, and draft_policy always lands new rules in the default
+ *  domain precisely so a human makes this call rather than the LLM. */
+export async function setRuleDomain(ruleId: string, domainId: string) {
+  await requireDashboardUser();
+  const db = createAdminClient();
+  const { error } = await db.from("policy_rules").update({ domain_id: domainId }).eq("id", ruleId);
+  if (error) throw error;
+  revalidatePath("/dashboard");
+}
+
 export async function rejectPolicyRule(ruleId: string) {
   await requireDashboardUser();
   const db = createAdminClient();

@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import type { Agent, Customer, Escalation, Mandate, PolicyRule, Trace } from "@/types/db";
+import type { Agent, Customer, Escalation, Mandate, PolicyDomain, PolicyRule, Trace } from "@/types/db";
 import type { PolicyIssue } from "@/lib/policy/audit";
 import { EscalationsPanel } from "./EscalationsPanel";
 import { AgentTrustPanel } from "./AgentTrustPanel";
 import { PolicyRulesPanel } from "./PolicyRulesPanel";
 import { PolicyHealthPanel } from "./PolicyHealthPanel";
+import { PolicyDomainsCanvas } from "./PolicyDomainsCanvas";
 import { HorizonPanel } from "./HorizonPanel";
 import { DemoRunner } from "./DemoRunner";
 import { BackgroundTrafficButton } from "./BackgroundTrafficButton";
@@ -15,12 +16,13 @@ import { MandatesPanel } from "./MandatesPanel";
 import { GraphCanvas } from "@/components/graph/GraphCanvas";
 import { GraphLegend } from "@/components/graph/GraphLegend";
 
-type Tab = "overview" | "transactions" | "policies" | "mandates";
+type Tab = "overview" | "transactions" | "policies" | "domains" | "mandates";
 
 const TABS: { key: Tab; label: string; badge?: (props: Props) => number }[] = [
   { key: "overview", label: "Overview" },
   { key: "transactions", label: "Transactions", badge: (p) => p.traces.length },
   { key: "policies", label: "Policies", badge: (p) => p.pendingCount + p.deterministicIssues.length },
+  { key: "domains", label: "Domains", badge: (p) => p.domains.length },
   { key: "mandates", label: "Mandates", badge: (p) => p.mandates.filter((m) => m.status === "paused").length },
 ];
 
@@ -34,6 +36,7 @@ interface Props {
   pendingCount: number;
   mandates: Mandate[];
   customers: Customer[];
+  domains: PolicyDomain[];
 }
 
 /**
@@ -43,7 +46,7 @@ interface Props {
  * instead of stacking everything into one increasingly long scroll.
  */
 export function DashboardTabs(props: Props) {
-  const { agents, rules, traces, escalations, tracesById, deterministicIssues, mandates, customers } = props;
+  const { agents, rules, traces, escalations, tracesById, deterministicIssues, mandates, customers, domains } = props;
   const [tab, setTab] = useState<Tab>("overview");
   const [highlightRuleId, setHighlightRuleId] = useState<string | null>(null);
 
@@ -127,12 +130,16 @@ export function DashboardTabs(props: Props) {
 
       {tab === "policies" && (
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-          <PolicyRulesPanel rules={rules} highlightRuleId={highlightRuleId} />
+          <PolicyRulesPanel rules={rules} domains={domains} highlightRuleId={highlightRuleId} />
           <div className="space-y-5">
             <PolicyHealthPanel deterministicIssues={deterministicIssues} />
             <HorizonPanel />
           </div>
         </div>
+      )}
+
+      {tab === "domains" && (
+        <PolicyDomainsCanvas domains={domains} rules={rules} escalations={escalations} agents={agents} traces={traces} />
       )}
 
       {tab === "mandates" && <MandatesPanel mandates={mandates} agents={agents} customers={customers} />}

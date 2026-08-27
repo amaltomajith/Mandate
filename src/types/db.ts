@@ -97,6 +97,7 @@ export interface Database {
           id: string;
           type: PolicyRuleType;
           name: string;
+          domain_id: string | null;
           params: Json;
           status: PolicyRuleStatus;
           source: PolicyRuleSource;
@@ -109,6 +110,7 @@ export interface Database {
           id?: string;
           type: PolicyRuleType;
           name: string;
+          domain_id?: string | null;
           params?: Json;
           status?: PolicyRuleStatus;
           source?: PolicyRuleSource;
@@ -118,6 +120,34 @@ export interface Database {
           created_by?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["policy_rules"]["Insert"]>;
+        Relationships: [];
+      };
+      policy_domains: {
+        Row: {
+          id: string;
+          name: string;
+          description: string | null;
+          match_action_types: string[];
+          match_categories: string[];
+          is_default: boolean;
+          position_x: number;
+          position_y: number;
+          color: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          description?: string | null;
+          match_action_types?: string[];
+          match_categories?: string[];
+          is_default?: boolean;
+          position_x?: number;
+          position_y?: number;
+          color?: string;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["policy_domains"]["Insert"]>;
         Relationships: [];
       };
       traces: {
@@ -224,3 +254,4 @@ export type Alert = Database["public"]["Tables"]["alerts"]["Row"];
 export type Customer = Database["public"]["Tables"]["customers"]["Row"];
 export type Mandate = Database["public"]["Tables"]["mandates"]["Row"];
 export type Product = Database["public"]["Tables"]["products"]["Row"];
+export type PolicyDomain = Database["public"]["Tables"]["policy_domains"]["Row"];

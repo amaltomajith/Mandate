@@ -38,6 +38,7 @@ export interface PolicyRule {
   id: string;
   type: PolicyRuleType;
   name: string;
+  domain_id: string | null;
   params: unknown;
 }
 
