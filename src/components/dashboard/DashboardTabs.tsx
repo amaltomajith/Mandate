@@ -89,7 +89,12 @@ export function DashboardTabs(props: Props) {
 
       {tab === "overview" && (
         <div className="flex flex-1 flex-col gap-5">
-          <DemoRunner />
+          {/* Graph+sidebar first, fixed here regardless of anything below —
+              DemoRunner's step list used to sit above this and could grow
+              tall enough (11 steps, with the mandate lifecycle beats) to
+              push the graph below the fold. Its own scroll cap (see
+              DemoRunner.tsx) helps, but putting it below the graph entirely
+              means the graph's position never depends on demo state at all. */}
           <div className="grid flex-1 grid-cols-1 gap-5 lg:grid-cols-[1fr_390px]">
             <div className="relative min-h-[560px] overflow-hidden rounded-2xl panel-card-lg">
               <div
@@ -111,6 +116,8 @@ export function DashboardTabs(props: Props) {
               </div>
             </div>
           </div>
+
+          <DemoRunner />
         </div>
       )}
 
