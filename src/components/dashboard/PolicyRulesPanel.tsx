@@ -203,17 +203,27 @@ export function PolicyRulesPanel({
               <span className="flex min-w-0 items-center gap-2 truncate">
                 <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "var(--decision-allow)" }} />
                 <span className="truncate">{rule.name}</span>
-                {rule.domain_id && domainById.get(rule.domain_id) && (
-                  <span
-                    className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold"
-                    style={{
-                      background: `color-mix(in srgb, ${domainById.get(rule.domain_id)!.color} 18%, transparent)`,
-                      color: domainById.get(rule.domain_id)!.color,
-                    }}
-                  >
-                    {domainById.get(rule.domain_id)!.name}
-                  </span>
-                )}
+                {/* Domain is reassignable here too, not just at pending-review time —
+                    a rule you created for one domain can turn out to belong in another. */}
+                <select
+                  value={rule.domain_id ?? ""}
+                  disabled={busy}
+                  onChange={(e) => act(rule.id, () => setRuleDomain(rule.id, e.target.value))}
+                  className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold"
+                  style={{
+                    background: rule.domain_id && domainById.get(rule.domain_id)
+                      ? `color-mix(in srgb, ${domainById.get(rule.domain_id)!.color} 18%, transparent)`
+                      : "var(--panel-border)",
+                    color: rule.domain_id && domainById.get(rule.domain_id) ? domainById.get(rule.domain_id)!.color : "var(--muted)",
+                    border: "none",
+                  }}
+                >
+                  {domains.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
               </span>
               <span className="flex shrink-0 items-center gap-2">
                 <span className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">

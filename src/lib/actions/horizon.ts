@@ -24,9 +24,9 @@ export async function triggerHorizonExample() {
   return result;
 }
 
-export async function submitManualPolicyDraft(text: string) {
+export async function submitManualPolicyDraft(text: string, targetDomainId?: string) {
   await requireDashboardUser();
-  const result = await draftPolicy(text, "human");
+  const result = await draftPolicy(text, "human", undefined, targetDomainId);
   revalidatePath("/dashboard");
   return result;
 }

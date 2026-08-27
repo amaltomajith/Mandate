@@ -109,7 +109,7 @@ export function DashboardTabs(props: Props) {
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-white/70">Entity graph</p>
                 <p className="mt-0.5 text-xs text-white/50">a live map of every agent, rule, and action</p>
               </div>
-              <GraphCanvas agents={agents} rules={rules} traces={traces} mandates={mandates} customers={customers} />
+              <GraphCanvas agents={agents} rules={rules} traces={traces} mandates={mandates} customers={customers} domains={domains} />
               <GraphLegend />
             </div>
 

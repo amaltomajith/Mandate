@@ -4,6 +4,7 @@ import { useState } from "react";
 import { DECISION_COLORS, ENTITY_COLORS } from "./colors";
 
 const ENTITY_ITEMS = [
+  { color: "#4f9dff", shape: "square" as const, label: "Policy domain", hint: "a box — independently governed, own rules" },
   { color: ENTITY_COLORS.agent, shape: "circle" as const, label: "AI agent", hint: "glow size = trust score" },
   { color: ENTITY_COLORS.rule, shape: "diamond" as const, label: "Policy rule", hint: "the guardrail that fired" },
   { color: ENTITY_COLORS.mandate, shape: "diamond" as const, label: "Mandate", hint: "ring = active/paused/revoked" },
@@ -17,7 +18,7 @@ const DECISION_ITEMS = [
   { color: DECISION_COLORS.protocol_reject, label: "Rejected — invalid signature" },
 ];
 
-function Swatch({ color, shape }: { color: string; shape: "circle" | "diamond" }) {
+function Swatch({ color, shape }: { color: string; shape: "circle" | "diamond" | "square" }) {
   return (
     <span
       className="inline-block h-2.5 w-2.5 shrink-0"

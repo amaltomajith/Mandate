@@ -1,4 +1,4 @@
-import type { Agent, Mandate, PolicyRule, Trace } from "@/types/db";
+import type { Agent, Mandate, PolicyDomain, PolicyRule, Trace } from "@/types/db";
 
 export type Vec3 = [number, number, number];
 
@@ -18,35 +18,71 @@ export interface PositionedMandate {
   mandate: Mandate;
   position: Vec3;
 }
+export interface PositionedDomain {
+  domain: PolicyDomain;
+  position: Vec3;
+}
 
 export interface GraphLayout {
   agents: PositionedAgent[];
   rules: PositionedRule[];
   traces: PositionedTrace[];
   mandates: PositionedMandate[];
+  domains: PositionedDomain[];
   agentPositionById: Record<string, Vec3>;
   rulePositionById: Record<string, Vec3>;
+  domainPositionById: Record<string, Vec3>;
 }
 
 /**
  * Deterministic, data-driven layout — no physics simulation, no randomness.
- * Three layers by entity type (rules above, agents in the middle, each agent's
- * own transactions spiraling below/around it) so the type-hue channel and the
+ * Layers by entity type: policy domains at the top, each domain's own rules
+ * orbiting close beneath it (same "attached to its owner" visual language
+ * mandates use for agents below), agents in the middle, each agent's own
+ * transactions spiraling below/around it. The type-hue channel and the
  * spatial layout reinforce each other instead of fighting.
  */
 export function computeLayout(
   agents: Agent[],
   rules: PolicyRule[],
   traces: Trace[],
-  mandates: Mandate[] = []
+  mandates: Mandate[] = [],
+  domains: PolicyDomain[] = []
 ): GraphLayout {
-  const activeRules = rules.filter((r) => r.status === "active");
-
-  const RULE_RADIUS = 6;
-  const positionedRules: PositionedRule[] = activeRules.map((rule, i) => {
-    const angle = (i / Math.max(activeRules.length, 1)) * Math.PI * 2;
-    return { rule, position: [Math.cos(angle) * RULE_RADIUS, 4.5, Math.sin(angle) * RULE_RADIUS] };
+  const DOMAIN_RADIUS = 9;
+  const DOMAIN_Y = 7.5;
+  const positionedDomains: PositionedDomain[] = domains.map((domain, i) => {
+    const angle = (i / Math.max(domains.length, 1)) * Math.PI * 2;
+    return { domain, position: [Math.cos(angle) * DOMAIN_RADIUS, DOMAIN_Y, Math.sin(angle) * DOMAIN_RADIUS] };
   });
+  const domainPositionById: Record<string, Vec3> = Object.fromEntries(
+    positionedDomains.map((p) => [p.domain.id, p.position])
+  );
+
+  // Rules orbit close beneath their own domain — same "attached to its
+  // owner" language mandates use for agents, rather than a single ring
+  // shared by every rule regardless of which domain governs it.
+  const activeRules = rules.filter((r) => r.status === "active");
+  const rulesByDomain = new Map<string, PolicyRule[]>();
+  for (const rule of activeRules) {
+    const key = rule.domain_id ?? "__no_domain__";
+    const list = rulesByDomain.get(key) ?? [];
+    list.push(rule);
+    rulesByDomain.set(key, list);
+  }
+
+  const positionedRules: PositionedRule[] = [];
+  for (const [domainId, domainRules] of rulesByDomain) {
+    const base = domainPositionById[domainId] ?? [0, DOMAIN_Y, 0];
+    const radius = 2;
+    domainRules.forEach((rule, i) => {
+      const angle = (i / Math.max(domainRules.length, 1)) * Math.PI * 2;
+      positionedRules.push({
+        rule,
+        position: [base[0] + Math.cos(angle) * radius, base[1] - 1.8, base[2] + Math.sin(angle) * radius],
+      });
+    });
+  }
 
   const AGENT_RADIUS = 4;
   const positionedAgents: PositionedAgent[] = agents.map((agent, i) => {
@@ -113,7 +149,9 @@ export function computeLayout(
     rules: positionedRules,
     traces: positionedTraces,
     mandates: positionedMandates,
+    domains: positionedDomains,
     agentPositionById,
     rulePositionById,
+    domainPositionById,
   };
 }

@@ -55,7 +55,8 @@ Only include the ONE key ("cap", "velocity", "category_block", or "step_up") mat
 export async function draftPolicy(
   text: string,
   source: "human" | "horizon",
-  sourceLabel?: string
+  sourceLabel?: string,
+  targetDomainId?: string
 ): Promise<DraftPolicyResult> {
   const llm = getLLM();
   const response = await llm.chat.completions.create({
@@ -83,11 +84,14 @@ export async function draftPolicy(
   const [existingRules, domains] = await Promise.all([getActiveRules(), getActiveDomains()]);
 
   // Domain assignment is a merchant policy decision, not something to leave
-  // to the model — every drafted rule lands in the catch-all default domain
-  // (reviewable/reassignable like everything else `pending_review` produces,
-  // see HANDOVER.md §9g). Not doing keyword-guessing at draft-time on
-  // purpose: a wrong guess here would be silently wrong, not just unreviewed.
-  const defaultDomain = domains.find((d) => d.is_default) ?? null;
+  // to the model — a caller can name a target domain explicitly (e.g.
+  // drafting directly from a domain card on the canvas); absent that, every
+  // drafted rule lands in the catch-all default domain, reviewable/
+  // reassignable like everything else `pending_review` produces (see
+  // HANDOVER.md §9g). Not doing keyword-guessing at draft-time on purpose:
+  // a wrong guess here would be silently wrong, not just unreviewed.
+  const explicitTarget = targetDomainId ? domains.find((d) => d.id === targetDomainId) : undefined;
+  const defaultDomain = explicitTarget ?? domains.find((d) => d.is_default) ?? null;
 
   const conflictsWith = existingRules
     .filter((r) => r.type === draft.type && r.domain_id === (defaultDomain?.id ?? null))

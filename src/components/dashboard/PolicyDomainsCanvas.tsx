@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { createDomain, deleteDomain, moveDomain, updateDomainRouting } from "@/lib/actions/domains";
+import { submitManualPolicyDraft } from "@/lib/actions/horizon";
 import { resolveDomain } from "@/lib/policy/domains";
 import type { Agent, Escalation, PolicyDomain, PolicyRule, Trace } from "@/types/db";
 import { DangerButton, EmptyState, GhostButton, PrimaryButton, actionTypeLabel } from "./ui";
@@ -179,12 +180,17 @@ export function PolicyDomainsCanvas({
                     </p>
                   )}
                   <p className="mt-2 text-[10px]" style={{ color: "var(--muted-2)" }}>
-                    {domain.is_default
-                      ? "Catch-all default"
-                      : [
+                    {domain.is_default ? (
+                      "Catch-all default — anything no other domain claims"
+                    ) : (
+                      <>
+                        <span style={{ color: "var(--muted)" }}>Routes here on: </span>
+                        {[
                           ...domain.match_action_types.map((t) => actionTypeLabel(t)),
-                          ...domain.match_categories.map((c) => `category: ${c}`),
-                        ].join(" · ") || "No routing rules yet"}
+                          ...domain.match_categories.map((c) => `category "${c}"`),
+                        ].join(" · ") || "nothing yet — click Edit routing"}
+                      </>
+                    )}
                   </p>
 
                   <div className="mt-3 flex items-center gap-3 text-[11px]" style={{ color: "var(--muted)" }}>
@@ -206,6 +212,8 @@ export function PolicyDomainsCanvas({
                       ))}
                     </ul>
                   )}
+
+                  <DomainQuickDraft domainId={domain.id} />
 
                   <div className="mt-3 flex gap-2">
                     <GhostButton onClick={() => setEditingId(domain.id)} className="flex-1 py-1! px-2! text-[10px]!">
@@ -297,6 +305,65 @@ function DomainCard({
         </span>
       </div>
       {children}
+    </div>
+  );
+}
+
+/**
+ * The "hard to fill" gap this closes: before this, the only way a rule
+ * landed in a specific domain was drafting it via the Policies tab's
+ * Horizon panel (which always defaults to the catch-all domain) and then
+ * separately reassigning it. This drafts straight into THIS domain in one
+ * step — same real draft_policy pipeline (LLM -> structured rule ->
+ * backtest -> pending_review), just pre-targeted, via the same
+ * `submitManualPolicyDraft` action the Horizon panel uses, now with an
+ * optional target domain.
+ */
+function DomainQuickDraft({ domainId }: { domainId: string }) {
+  const [text, setText] = useState("");
+  const [status, setStatus] = useState<"idle" | "working" | "done" | "error">("idle");
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function submit() {
+    if (!text.trim()) return;
+    setStatus("working");
+    setMessage(null);
+    try {
+      const result = await submitManualPolicyDraft(text, domainId);
+      setStatus("done");
+      setMessage(`Drafted "${result.name}" — approve it in the Policies tab.`);
+      setText("");
+    } catch (err) {
+      setStatus("error");
+      setMessage(err instanceof Error ? err.message : "Draft failed.");
+    }
+  }
+
+  return (
+    <div className="mt-3 border-t pt-3" style={{ borderColor: "var(--panel-border)" }}>
+      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--muted-2)" }}>
+        Draft a rule for this domain
+      </p>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder='e.g. "Block anything over ₹10,000 outright"'
+        rows={2}
+        className="w-full resize-none rounded-lg border px-2 py-1.5 text-[11px]"
+        style={{ borderColor: "var(--panel-border-strong)", background: "var(--panel-2)", color: "var(--foreground)" }}
+      />
+      <GhostButton
+        onClick={submit}
+        disabled={status === "working" || !text.trim()}
+        className="mt-1.5 w-full py-1! px-2! text-[10px]!"
+      >
+        {status === "working" ? "Drafting…" : "Draft into this domain"}
+      </GhostButton>
+      {message && (
+        <p className="mt-1.5 text-[10px]" style={{ color: status === "error" ? "var(--decision-block)" : "var(--decision-allow)" }}>
+          {message}
+        </p>
+      )}
     </div>
   );
 }
