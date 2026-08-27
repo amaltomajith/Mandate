@@ -104,9 +104,11 @@ export function DashboardTabs(props: Props) {
               <GraphLegend />
             </div>
 
-            <div className="space-y-5">
+            <div className="flex flex-col gap-5">
               <EscalationsPanel escalations={escalations} tracesById={tracesById} />
-              <AgentTrustPanel agents={agents} />
+              <div className="flex-1">
+                <AgentTrustPanel agents={agents} />
+              </div>
             </div>
           </div>
         </div>

@@ -63,7 +63,15 @@ export function DemoRunner() {
       )}
 
       {steps && (
-        <div className="mt-4 space-y-1.5 border-t pt-4" style={{ borderColor: "var(--panel-border)" }}>
+        // Capped height + internal scroll, not unbounded growth — with
+        // enough steps in one run (mandate lifecycle + purchases + upsells +
+        // self-defense), letting this list grow the whole page pushed the 3D
+        // graph below the fold entirely. The graph's position stays fixed
+        // now regardless of how many steps a run produces.
+        <div
+          className="mt-4 max-h-80 space-y-1.5 overflow-y-auto border-t pt-4 pr-1"
+          style={{ borderColor: "var(--panel-border)" }}
+        >
           {steps.map((step, i) => {
             const meta = STATUS_META[step.status];
             return (

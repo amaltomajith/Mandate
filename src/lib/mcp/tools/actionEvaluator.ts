@@ -37,8 +37,17 @@ export async function runActionEvaluation(
   // revoked/paused mandate is a more fundamental "this agent isn't
   // authorized at all right now" check, and should short-circuit spend
   // rules rather than compete with them. Only actions attributed to a
-  // customer can be gated by a mandate at all.
-  const mandateGate = input.customerId ? await checkMandateGate(agentId, input.customerId) : null;
+  // customer can be gated by a mandate at all — and `subscription.create`
+  // itself is deliberately exempt: it's how a NEW mandate gets established,
+  // so it can't be blocked by a PRIOR mandate's revoked/paused status for
+  // the same agent+customer pair, or a merchant could never re-authorize an
+  // agent they'd previously revoked. (Caught live: reusing the same demo
+  // agent+customer across runs meant every run after the first revoke
+  // permanently locked out ever establishing a new one.)
+  const mandateGate =
+    input.customerId && input.actionType !== "subscription.create"
+      ? await checkMandateGate(agentId, input.customerId)
+      : null;
 
   let match: ReturnType<typeof evaluatePolicy> = null;
   let decision: "allow" | "block" | "escalate";

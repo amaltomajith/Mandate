@@ -7,6 +7,7 @@ export function Panel({
   count,
   action,
   children,
+  className,
 }: {
   title: string;
   icon?: ReactNode;
@@ -14,9 +15,10 @@ export function Panel({
   count?: number;
   action?: ReactNode;
   children: ReactNode;
+  className?: string;
 }) {
   return (
-    <section className="panel-card relative overflow-hidden rounded-2xl p-5">
+    <section className={`panel-card relative overflow-hidden rounded-2xl p-5 ${className ?? ""}`}>
       {accent && (
         <div
           className="pointer-events-none absolute inset-x-0 top-0 h-[3px] opacity-80"
