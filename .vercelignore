@@ -1,0 +1,6 @@
+# Vercel CLI should already respect .gitignore, but the local PaySim CSV
+# (~470MB, from the removed Track 02 module — see HANDOVER.md §10) was
+# uploaded on the first deploy anyway. Explicit and unambiguous here so
+# every future deploy stays fast and small.
+data/
+*.csv
