@@ -9,6 +9,7 @@ import { PolicyRulesPanel } from "./PolicyRulesPanel";
 import { PolicyHealthPanel } from "./PolicyHealthPanel";
 import { HorizonPanel } from "./HorizonPanel";
 import { DemoRunner } from "./DemoRunner";
+import { BackgroundTrafficButton } from "./BackgroundTrafficButton";
 import { TransactionsView } from "./TransactionsView";
 import { MandatesPanel } from "./MandatesPanel";
 import { GraphCanvas } from "@/components/graph/GraphCanvas";
@@ -118,6 +119,7 @@ export function DashboardTabs(props: Props) {
           </div>
 
           <DemoRunner />
+          <BackgroundTrafficButton />
         </div>
       )}
 

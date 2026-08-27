@@ -1,21 +1,9 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { generateKeyPair } from "../webBotAuth/keys";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { applySeedProducts, fetchCatalog, findItem, type CatalogItem } from "./catalog";
 import { suggestCrossSell } from "./crossSell";
 import { MandateClient } from "./mandateClient";
 import { applySeedRules, SEED_CUSTOMER } from "./seedData";
-
-// Relative imports and a locally-built admin client, not `@/lib/supabase/admin`
-// — same reasoning as mandateClient.ts: this module is loaded both by Next's
-// bundler (the dashboard's "Run demo" server action) and directly by tsx
-// (scripts/checkout-agent.ts), and the guarded admin client's `import
-// "server-only"` throws immediately outside Next's server context.
-function createAdminClient(): SupabaseClient {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set.");
-  return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
-}
+import { createAdminClient, ensureAgentIdentity, moneyLabel } from "./shared";
 
 export interface DemoStep {
   label: string;
@@ -43,46 +31,24 @@ async function ensureSeedData(db: ReturnType<typeof createAdminClient>): Promise
   return { label: "Set up policy rules & catalog", status: "ok", detail: parts.join(", ") + "." };
 }
 
-/**
- * Reuses CHECKOUT_AGENT_ID/SECRET_KEY if they're already configured (e.g. from
- * `npm run gen-agent-key`) — deliberately, so the same identity's trust score
- * keeps accumulating across repeated "Run demo" clicks instead of resetting
- * every time. Otherwise registers a fresh, uniquely-named agent on the spot
- * and uses its secret immediately, in-memory, for this run only — an
- * already-seeded agent's secret is never stored anywhere to "reuse."
- */
-async function ensureDemoAgent(db: ReturnType<typeof createAdminClient>): Promise<{ id: string; secretKeyBase64: string; step: DemoStep }> {
-  const envId = process.env.CHECKOUT_AGENT_ID;
-  const envSecret = process.env.CHECKOUT_AGENT_SECRET_KEY;
-  if (envId && envSecret) {
-    const { data } = await db.from("agents").select("id").eq("id", envId).maybeSingle();
-    if (data) {
-      return {
-        id: envId,
-        secretKeyBase64: envSecret,
-        step: { label: "Agent identity", status: "ok", detail: "Reused the configured Checkout Agent." },
-      };
-    }
-  }
-
-  const { secretKey, publicKey } = generateKeyPair();
-  const name = `Checkout Agent (dashboard demo ${new Date().toISOString().slice(11, 19)})`;
-  const { data, error } = await db
-    .from("agents")
-    .insert({ name, description: "Ephemeral agent created by the dashboard's Run Demo button", public_key: publicKey })
-    .select()
-    .single();
-  if (error) throw error;
-
+/** Thin wrapper around the shared `ensureAgentIdentity` — reuses
+ *  CHECKOUT_AGENT_ID/SECRET_KEY if configured (e.g. via `npm run
+ *  gen-agent-key`), else registers a fresh identity for this run. */
+async function ensureDemoAgent(db: SupabaseClient): Promise<{ id: string; secretKeyBase64: string; step: DemoStep }> {
+  const identity = await ensureAgentIdentity(db, {
+    envIdVar: "CHECKOUT_AGENT_ID",
+    envSecretVar: "CHECKOUT_AGENT_SECRET_KEY",
+    name: "Checkout Agent",
+    description: "Ephemeral agent created by the dashboard's Run Demo button",
+  });
   return {
-    id: data.id,
-    secretKeyBase64: secretKey,
-    step: { label: "Agent identity", status: "ok", detail: `Registered a fresh signed agent identity ("${name}").` },
+    ...identity,
+    step: {
+      label: "Agent identity",
+      status: "ok",
+      detail: identity.reused ? "Reused the configured Checkout Agent." : "Registered a fresh signed agent identity.",
+    },
   };
-}
-
-function moneyLabel(paise: number): string {
-  return `₹${(paise / 100).toLocaleString("en-IN")}`;
 }
 
 /** `applySeedRules` creates this row if it's missing, but never hands back

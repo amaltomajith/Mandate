@@ -634,6 +634,47 @@ step-up escalation, a dishonest structuring attempt caught by rate-limiting,
 a merchant's mandate revocation enforced live, and a forged request
 rejected before it reaches any of the above.
 
+### 9f. Background traffic: the dashboard has a pulse between demo runs
+
+"History only exists right after I click Run demo" was the real gap —
+clicking around the dashboard between runs showed the same static handful
+of transactions, which reads as a scripted prop, not a system. A new
+"Generate background activity" button (`src/lib/demo/backgroundTraffic.ts`,
+deliberately styled as a secondary, muted control next to the demo's
+primary one — this isn't a narrative beat) fires a burst of 12 real, signed
+MCP calls against the real catalog, attributed to a small pool of synthetic
+customers (`Priya Sharma`, `Arjun Mehta`, etc. — created once, reused
+after), so Transactions, Agent trust, and the policy audit all have
+something closer to a living system to show, on demand.
+
+**Explicitly not "PaySim-calibrated"**, despite that phrase in the original
+plan (§7a) this item traces back to — PaySim is Track 02's fraud-detection
+dataset, removed entirely (§10), and has nothing to do with Mandate's own
+traffic; resurrecting a dependency on it here would undo exactly the
+separation that removal was about. The amount distribution instead comes
+from this project's own real catalog, weighted toward the cheaper items
+(mouse, hub, yoga mat picked more often than the keyboard or desk) — the
+ordinary shape of e-commerce order sizes, not an invented statistical model
+and not secretly tied to a dataset this project deliberately doesn't use
+for this.
+
+Uses a separate agent identity ("Background Traffic Bot," reusing
+`BACKGROUND_AGENT_ID`/`BACKGROUND_AGENT_SECRET_KEY` if set — same
+reuse-or-register pattern as the Checkout Agent, extracted into
+`src/lib/demo/shared.ts` so the two demo entry points can't drift into
+different agent-identity logic) rather than the Checkout Agent, so
+background noise doesn't blend into the scripted demo's own trust-score
+history — the graph now shows two agents by default, a small preview of
+what §11's "second full demo agent" roadmap item would add more
+deliberately. Any escalation or block the burst happens to generate (the
+desk-equivalent item is rare but real) surfaces the same way any other
+alert does — no separate results list, the existing toast/escalations
+panels already do that job.
+
+**What this deliberately doesn't do**: run on its own without a click. See
+§11 — the generation logic is real and reusable from a scheduled route,
+but there's no deployed instance yet to schedule it against.
+
 ## 10. Track 02 bonus (built, then removed)
 
 A real, from-scratch fraud-spike detector (logistic regression, trained and
@@ -682,23 +723,21 @@ isn't built. None of these have a dead button in the UI.
   in the mandate enforcement itself.
 - **True push-based Realtime.** Traded for a 4s poll when auth moved to Clerk
   — see §5b for why that's a deliberate tradeoff, not a shortcut.
-- **PaySim-calibrated background traffic generator** (from the original
-  plan's §7a): drive realistic transaction *volume* — varied amounts, varied
-  simulated identities, an occasional anomaly — through the real MCP path
-  continuously, instead of relying only on "Run demo" clicks for history.
-  Explicitly deferred this session, not forgotten: real enough to matter
-  (trust scores, the policy audit, and a transactions table all get more
-  meaningful with volume behind them), but sizable enough (rate-limit-aware
-  batching against a real Razorpay account, a calibration step) that bolting
-  it on here risked shipping everything else shallower. Natural next step
-  after this batch.
+- **A real "continuously running regardless of who's watching" scheduler**
+  for the background traffic generator (§9f) — it's on-demand (a dashboard
+  button) rather than a Vercel Cron job or similar, since this session had
+  no deployed instance yet to schedule against. The generation logic itself
+  is real and already reusable from a cron route if/when one gets added;
+  only the "runs on its own" part is roadmap.
 - **Statistical anomaly flagging** (outlier amounts, sudden rate spikes) —
   the honest reason this isn't built yet is that it needs real transaction
-  volume to mean anything, which is exactly what the traffic generator above
-  would provide. Building it against a handful of demo-run transactions would
-  produce a detector that's confidently wrong, not "advanced" — the same
-  judgment call as declining to use an RNN for policy-conflict detection
-  (§9a's reasoning applies here too: right-sized, not decorative).
+  volume to mean anything. §9f's background traffic generator now provides
+  that volume on demand, but building an anomaly detector against a
+  still-small, on-demand-generated history would produce something
+  confidently wrong, not "advanced" — the same judgment call as declining to
+  use an RNN for policy-conflict detection (§9a's reasoning applies here
+  too: right-sized, not decorative). Worth revisiting once real volume has
+  actually accumulated, not before.
 
 ## 12. Where things live
 
@@ -714,10 +753,13 @@ src/lib/webBotAuth/                   keys, canonical signing, sign, verify
 src/lib/razorpay/                     SDK client, RazorpayX REST client, action dispatch
 src/lib/mcp/                          schemas, server (4 tools), session store, trace helpers
 src/lib/llm/                          Groq client (explain, draft_policy, cross-sell reasoning)
-src/lib/actions/                      dashboard server actions (escalations, policy, mandates, horizon, demo)
+src/lib/actions/                      dashboard server actions (escalations, policy, mandates, horizon,
+                                       demo, backgroundTraffic)
 src/lib/demo/                         catalog.ts (products), crossSell.ts (LLM-reasoned upsells,
                                        §9a), seedData.ts, MandateClient, runDemoScript — shared by
-                                       the dashboard's "Run demo" button AND the CLI scripts
+                                       the dashboard's "Run demo" button AND the CLI scripts;
+                                       shared.ts (agent-identity reuse, §9f); backgroundTraffic.ts
+                                       (§9f, the "Generate background activity" button)
 src/lib/supabase/admin.ts             the only Supabase client left — service role, storage-only
 src/proxy.ts                          Clerk middleware
 src/app/api/mcp/route.ts              the MCP endpoint (verify → session → transport)
@@ -729,9 +771,10 @@ src/components/brand/MandateMark.tsx  shared logo mark
 src/components/graph/                 3D graph + legend (layout.ts is the pure/testable part;
                                        GraphCanvas.tsx has the block-shockwave/materialize-in effects)
 src/components/dashboard/             DashboardTabs (Overview/Transactions/Policies/Mandates),
-                                       TransactionsView, MandatesPanel (§9d), PolicyHealthPanel,
-                                       AlertsBell (header dropdown, not a panel anymore), panels,
-                                       buttons, DemoRunner, toasts, live poll refresher
+                                       TransactionsView, MandatesPanel (§9d), AgentTrustPanel,
+                                       PolicyHealthPanel, AlertsBell (header dropdown, not a panel
+                                       anymore), panels, buttons, DemoRunner, BackgroundTrafficButton
+                                       (§9f), toasts, live poll refresher
 scripts/                              seed, gen-agent-key, checkout-agent — thin CLI wrappers around src/lib/demo/
 ```
 
