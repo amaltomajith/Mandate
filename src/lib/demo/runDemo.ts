@@ -195,6 +195,39 @@ export async function runDemoScript(): Promise<DemoStep[]> {
     }
   }
 
+  /** The Recurring Mandates domain governs standing authorizations far more
+   *  tightly than Purchases governs one-off orders — a mandate is an open-ended
+   *  future liability, not a single bounded transaction. That claim was
+   *  previously asserted and never shown: the demo only ever established a
+   *  ₹199 mandate, comfortably under that domain's ₹1,000 step-up and ₹2,000
+   *  cap, so neither rule had ever fired and the domain sat inert in the graph
+   *  with no edge to anything.
+   *
+   *  The thresholds can't simply be lowered under ₹199 — the first mandate has
+   *  to be allowed through, or there is nothing for the revocation beat to
+   *  revoke. So the agent instead attempts an upgrade the domain refuses.
+   *
+   *  ₹2,500/month clears that domain's ₹2,000 per-transaction cap, and cap
+   *  outranks step-up in the engine's fixed priority order, so this is blocked
+   *  outright rather than escalated. The contrast is the whole point: the
+   *  identical amount is unremarkable in Purchases, whose ceiling is ₹20,000.
+   *  Same agent, same customer, same moment — the domain decides. */
+  async function attemptPremiumMandateUpgrade(): Promise<void> {
+    const args = {
+      actionType: "subscription.create",
+      amount: 250000,
+      currency: "INR",
+      customerId,
+      params: { planName: "Premium auto-recharge", period: "monthly" as const, interval: 1, totalCount: 12, customerNotify: false },
+    };
+    const enforced = await client.callTool<ActionResult>("enforce_action", args);
+    steps.push({
+      label: `Agent tries to upgrade the mandate to ${moneyLabel(args.amount)}/month`,
+      status: enforced.decision === "allow" ? "ok" : enforced.decision === "escalate" ? "escalated" : "blocked",
+      detail: `${enforced.reasoning} The same amount would pass unremarked as a one-off purchase — the Recurring Mandates domain holds standing authorizations to a far tighter ceiling than Purchases holds one-off orders.`,
+    });
+  }
+
   /** Buys `item`, then asks the LLM to reason over the real catalog for a
    *  complementary cross-sell and buys that too if it suggests one — no
    *  hardcoded pairing table. See src/lib/demo/crossSell.ts. */
@@ -218,6 +251,7 @@ export async function runDemoScript(): Promise<DemoStep[]> {
   // before any purchase happens, so every purchase below is demonstrably
   // acting under it — not a detail the merchant has to take on faith.
   await establishMandate();
+  await attemptPremiumMandateUpgrade();
 
   // The agent decides to buy a couple of things, and — because it's an agent
   // meant to *grow* revenue, not just place orders — reasons about a paired
