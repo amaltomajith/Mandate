@@ -170,6 +170,11 @@ export interface InsertTraceInput {
   agentId: string | null;
   decision: Decision;
   ruleFiredId?: string | null;
+  // Snapshotted once, here, at the moment a decision is made — never
+  // recomputed later. See supabase/migrations/0005_traces_domain_snapshot.sql
+  // for why: without this, editing a domain's routing after the fact would
+  // silently reclassify every past transaction along with it.
+  domainId?: string | null;
   reasoning?: string | null;
   razorpayResponse?: Json | null;
 }
@@ -186,6 +191,7 @@ export async function insertTrace(input: InsertTraceInput) {
       agent_id: input.agentId,
       decision: input.decision,
       rule_fired_id: input.ruleFiredId ?? null,
+      domain_id: input.domainId ?? null,
       reasoning: input.reasoning ?? null,
       razorpay_response: input.razorpayResponse ?? null,
     })

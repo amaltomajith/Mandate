@@ -8,7 +8,6 @@
     "start": "next start",
     "lint": "eslint",
     "seed": "tsx scripts/seed.ts",
-    "gen-agent-key": "tsx scripts/gen-agent-key.ts",
     "demo:checkout": "tsx scripts/checkout-agent.ts"
   },
   "dependencies": {

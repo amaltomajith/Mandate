@@ -15,14 +15,16 @@
  * one-click "Run demo" button — see src/lib/demo/runDemo.ts, which this
  * script is a thin CLI wrapper around.
  *
- * Uses `order.create` (standard Razorpay test-mode keys) rather than
- * `payout.create` (RazorpayX) — see HANDOVER.md §6 for why.
+ * Uses `order.create`, which works on standard Razorpay test-mode keys.
  *
  * Prereqs:
- *   1. `npx tsx scripts/seed.ts` (policy rules)
- *   2. `npx tsx scripts/gen-agent-key.ts "Checkout Agent"` — copy the printed
- *      agent id and secret key into CHECKOUT_AGENT_ID / CHECKOUT_AGENT_SECRET_KEY
- *   3. `npm run dev` running, with real Razorpay test-mode keys set
+ *   1. `npx tsx scripts/seed.ts` (policy domains + rules)
+ *   2. `npm run dev` running, with real Razorpay test-mode keys set
+ *
+ * No manual agent registration step: the run registers its own agent identity
+ * on first use and reuses it afterwards (ensureAgentIdentity in
+ * src/lib/demo/shared.ts). Setting CHECKOUT_AGENT_ID / CHECKOUT_AGENT_SECRET_KEY
+ * pins it to a specific existing agent instead, which is optional.
  *
  * Usage: npx tsx scripts/checkout-agent.ts
  */

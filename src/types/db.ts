@@ -160,6 +160,7 @@ export interface Database {
           agent_id: string | null;
           decision: Decision;
           rule_fired_id: string | null;
+          domain_id: string | null;
           reasoning: string | null;
           razorpay_response: Json | null;
           created_at: string;
@@ -173,6 +174,7 @@ export interface Database {
           agent_id?: string | null;
           decision: Decision;
           rule_fired_id?: string | null;
+          domain_id?: string | null;
           reasoning?: string | null;
           razorpay_response?: Json | null;
           created_at?: string;

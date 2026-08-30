@@ -50,16 +50,16 @@ export function HorizonPanel() {
   return (
     <Panel title="Draft a policy" icon={<Icons.Sparkles />} accent="var(--entity-agent)">
       <p className="mb-3 text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
-        Write a plain-language policy request, or simulate Horizon spotting a regulatory
-        update. Either way it becomes a structured, backtested rule sitting in{" "}
+        Describe a rule in plain language and it becomes a structured, backtested rule sitting in{" "}
         <span style={{ color: "var(--entity-rule)" }}>pending review</span> — nothing activates
-        without approval above.
+        without your approval. &quot;Try an example&quot; runs the same pipeline on a sample
+        regulatory notice, to show what an automated compliance feed would produce.
       </p>
 
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder='e.g. "Block any payout over ₹50,000 outright"'
+        placeholder='e.g. "Block any refund over ₹50,000 outright"'
         rows={3}
         className="mb-2 w-full resize-none rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors focus:border-[var(--entity-agent)]"
         style={{ borderColor: "var(--panel-border)", background: "var(--panel-2)" }}
@@ -70,7 +70,7 @@ export function HorizonPanel() {
           {isPending ? "Drafting…" : "Draft from text"}
         </PrimaryButton>
         <GhostButton disabled={isPending} onClick={runHorizon} className="flex-1">
-          Simulate Horizon
+          Try an example
         </GhostButton>
       </div>
 

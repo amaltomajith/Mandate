@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
-import type { Agent, Decision, PolicyRule, Trace } from "@/types/db";
+import type { Agent, Decision, PolicyDomain, PolicyRule, Trace } from "@/types/db";
 import { actionTypeLabel, formatMoney } from "@/lib/format";
 import { decisionColor, relativeTime } from "./ui";
 
@@ -31,16 +31,25 @@ const FILTERS: { key: "all" | Decision; label: string }[] = [
  * rule actually fired — the same thing the 3D graph shows via a trace→rule
  * edge, surfaced here too since not everyone wants to go find it in the
  * graph. `onJumpToRule` switches to the Policies tab and highlights it.
+ *
+ * The Domain column answers "which domain governed this?" directly from
+ * `trace.domain_id` — snapshotted once at decision time (see
+ * supabase/migrations/0005_traces_domain_snapshot.sql), not recomputed from
+ * today's routing. A dash means domain resolution never ran for that trace:
+ * protocol_reject and mandate-gate blocks are both stopped before the policy
+ * engine (and domain resolution) ever sees them.
  */
 export function TransactionsView({
   traces,
   agents,
   rules,
+  domains,
   onJumpToRule,
 }: {
   traces: Trace[];
   agents: Agent[];
   rules: PolicyRule[];
+  domains: PolicyDomain[];
   onJumpToRule?: (ruleId: string) => void;
 }) {
   const [filter, setFilter] = useState<"all" | Decision>("all");
@@ -49,15 +58,17 @@ export function TransactionsView({
 
   const agentNameById = useMemo(() => new Map(agents.map((a) => [a.id, a.name])), [agents]);
   const ruleById = useMemo(() => new Map(rules.map((r) => [r.id, r])), [rules]);
+  const domainById = useMemo(() => new Map(domains.map((d) => [d.id, d])), [domains]);
 
   const filtered = useMemo(() => {
     return traces.filter((t) => {
       if (filter !== "all" && t.decision !== filter) return false;
       if (!search.trim()) return true;
-      const haystack = `${t.action_type} ${t.reasoning ?? ""} ${agentNameById.get(t.agent_id ?? "") ?? ""}`.toLowerCase();
+      const domainName = t.domain_id ? domainById.get(t.domain_id)?.name ?? "" : "";
+      const haystack = `${t.action_type} ${t.reasoning ?? ""} ${agentNameById.get(t.agent_id ?? "") ?? ""} ${domainName}`.toLowerCase();
       return haystack.includes(search.trim().toLowerCase());
     });
-  }, [traces, filter, search, agentNameById]);
+  }, [traces, filter, search, agentNameById, domainById]);
 
   return (
     <div className="panel-card rounded-2xl p-5">
@@ -107,6 +118,7 @@ export function TransactionsView({
               <tr style={{ color: "var(--muted-2)" }}>
                 <th className="pb-2 pr-3 font-medium">Decision</th>
                 <th className="pb-2 pr-3 font-medium">Action</th>
+                <th className="pb-2 pr-3 font-medium">Domain</th>
                 <th className="pb-2 pr-3 font-medium">Amount</th>
                 <th className="pb-2 pr-3 font-medium">Agent</th>
                 <th className="pb-2 pr-3 font-medium">Reasoning</th>
@@ -119,6 +131,7 @@ export function TransactionsView({
                 const color = decisionColor(t.decision);
                 const expanded = expandedId === t.id;
                 const rule = t.rule_fired_id ? ruleById.get(t.rule_fired_id) : null;
+                const domain = t.domain_id ? domainById.get(t.domain_id) : null;
 
                 return (
                   <Fragment key={t.id}>
@@ -137,6 +150,19 @@ export function TransactionsView({
                         </span>
                       </td>
                       <td className="py-2 pr-3">{actionTypeLabel(t.action_type)}</td>
+                      <td className="py-2 pr-3">
+                        {domain ? (
+                          <span
+                            className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[10px] font-medium"
+                            style={{ background: `${domain.color}26`, color: domain.color }}
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full" style={{ background: domain.color }} />
+                            {domain.name}
+                          </span>
+                        ) : (
+                          <span style={{ color: "var(--muted-2)" }}>—</span>
+                        )}
+                      </td>
                       <td className="py-2 pr-3 tabular-nums">{p?.amount && p?.currency ? formatMoney(p.amount, p.currency) : "—"}</td>
                       <td className="py-2 pr-3" style={{ color: "var(--muted)" }}>
                         {t.agent_id ? agentNameById.get(t.agent_id) ?? "Unknown agent" : "—"}
@@ -150,7 +176,7 @@ export function TransactionsView({
                     </tr>
                     {expanded && (
                       <tr className="border-t" style={{ borderColor: "var(--panel-border)", background: "var(--panel-2)" }}>
-                        <td colSpan={6} className="px-3 py-3">
+                        <td colSpan={7} className="px-3 py-3">
                           <p className="text-[12px] leading-relaxed" style={{ color: "var(--foreground)" }}>
                             {t.reasoning ?? "No reasoning recorded for this trace."}
                           </p>

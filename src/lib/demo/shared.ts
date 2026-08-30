@@ -30,7 +30,7 @@ export interface AgentIdentity {
 
 /**
  * Reuses the agent identity named by `envIdVar`/`envSecretVar` if it's
- * configured (e.g. via `npm run gen-agent-key`) and still exists — so that
+ * configured (via the dashboard's Agent trust panel) and still exists — so that
  * identity's trust score keeps accumulating across repeated clicks instead
  * of resetting every time. Otherwise registers a fresh, uniquely-named
  * agent on the spot and uses its secret immediately, in-memory, for this

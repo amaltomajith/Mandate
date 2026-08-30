@@ -26,8 +26,8 @@ export interface SeedDomain {
 export const SEED_DOMAINS: SeedDomain[] = [
   {
     name: "Purchases",
-    description: "One-time orders, refunds, and payouts — each bounded to a single transaction. The catch-all default: anything not claimed by a more specific domain lands here.",
-    matchActionTypes: ["order.create", "refund.create", "payout.create"],
+    description: "One-time orders and refunds — each bounded to a single transaction. The catch-all default: anything not claimed by a more specific domain lands here.",
+    matchActionTypes: ["order.create", "refund.create"],
     matchCategories: [],
     isDefault: true,
     positionX: 40,
@@ -70,14 +70,6 @@ export const SEED_RULES: SeedRule[] = [
     rationale: "No single action should ever exceed ₹20,000 — an absolute ceiling regardless of who approves it.",
   },
   {
-    type: "velocity",
-    name: "Max 30 actions/hour per agent",
-    domain: "purchases",
-    params: { max_count: 30, window_seconds: 3600, scope: "per_agent" },
-    rationale:
-      "Caps how fast any one agent identity can act, independent of amount — protects against a runaway loop. Set high enough that running the demo several times in an hour doesn't trip it; this rule exists to stop a malfunctioning agent, not a healthy one.",
-  },
-  {
     type: "category_block",
     name: "Blocked categories",
     domain: "purchases",
@@ -86,11 +78,11 @@ export const SEED_RULES: SeedRule[] = [
   },
   {
     type: "velocity",
-    name: "Rapid-repeat guard: 10 actions / 5 min per agent",
+    name: "Rapid-repeat guard: 6 actions / 2 min per agent",
     domain: "purchases",
-    params: { max_count: 10, window_seconds: 300, scope: "per_agent" },
+    params: { max_count: 6, window_seconds: 120, scope: "per_agent" },
     rationale:
-      "A tighter, short-window companion to the 30/hour safety net above — catches an agent trying to structure around the step-up threshold (many small actions fired rapidly instead of one that would've required approval), not just a runaway loop. Amount-blind, like all velocity rules: it's the rate that's suspicious here, not any single action's size.",
+      "Catches an agent trying to structure around the step-up threshold — many small actions fired rapidly instead of one that would have required approval. Amount-blind, like all velocity rules: it's the rate that's suspicious, not any single action's size. Tuned against the real demo: four ordinary purchases precede the structuring attempt, so the third chunk is the one that trips it. The two-minute window is deliberately short — long enough that a single run's actions all fall inside it, short enough that re-running the demo a couple of minutes later starts clean instead of being blocked by the previous run's history.",
   },
   {
     type: "step_up",
@@ -152,7 +144,17 @@ export async function applySeedDomains(db: SupabaseClient): Promise<Record<"purc
  *  name is still sitting in an existing project, rename+update it in place
  *  instead of leaving it active alongside a new one (which would mean BOTH
  *  the old 5/hour and new 30/hour limits applying — the stricter one wins). */
-const LEGACY_VELOCITY_RULE_NAME = "Max 5 actions/hour per agent";
+/** This domain's velocity guard has been retuned more than once. Each older
+ *  definition must be retired when re-seeding, not left active beside the
+ *  current one: two overlapping velocity rules in a single domain is exactly
+ *  the conflict `auditPolicySet` flags, and the looser of the two would
+ *  silently never fire. Retiring (superseded) rather than deleting keeps any
+ *  trace that cites one of these as its reason intact. */
+const RETIRED_VELOCITY_RULE_NAMES = [
+  "Max 5 actions/hour per agent",
+  "Max 30 actions/hour per agent",
+  "Rapid-repeat guard: 10 actions / 5 min per agent",
+];
 
 export async function applySeedRules(db: SupabaseClient): Promise<{ created: number; migrated: boolean }> {
   let created = 0;
@@ -160,16 +162,14 @@ export async function applySeedRules(db: SupabaseClient): Promise<{ created: num
 
   const domainIds = await applySeedDomains(db);
 
-  const { data: legacy } = await db.from("policy_rules").select("id").eq("name", LEGACY_VELOCITY_RULE_NAME).maybeSingle();
-  if (legacy) {
-    const velocityRule = SEED_RULES.find((r) => r.name === "Max 30 actions/hour per agent")!;
-    const { error } = await db
-      .from("policy_rules")
-      .update({ name: velocityRule.name, params: velocityRule.params, rationale: velocityRule.rationale, domain_id: domainIds.purchases })
-      .eq("id", legacy.id);
-    if (error) throw error;
-    migrated = true;
-  }
+  const { data: retired, error: retiredError } = await db
+    .from("policy_rules")
+    .update({ status: "superseded" })
+    .in("name", RETIRED_VELOCITY_RULE_NAMES)
+    .eq("status", "active")
+    .select("id");
+  if (retiredError) throw retiredError;
+  migrated = (retired?.length ?? 0) > 0;
 
   for (const rule of SEED_RULES) {
     const { data: existing } = await db.from("policy_rules").select("id").eq("name", rule.name).maybeSingle();

@@ -7,7 +7,7 @@ import { resolveDomain } from "@/lib/policy/domains";
 import type { Agent, Escalation, PolicyDomain, PolicyRule, Trace } from "@/types/db";
 import { DangerButton, EmptyState, GhostButton, PrimaryButton, actionTypeLabel } from "./ui";
 
-const KNOWN_ACTION_TYPES = ["order.create", "refund.create", "payout.create", "subscription.create"];
+const KNOWN_ACTION_TYPES = ["order.create", "refund.create", "subscription.create"];
 
 const TYPE_LABEL: Record<PolicyRule["type"], string> = {
   cap: "Cap",
@@ -56,16 +56,22 @@ export function PolicyDomainsCanvas({
   const agentById = new Map(agents.map((a) => [a.id, a]));
   const tracesById = new Map(traces.map((t) => [t.id, t]));
 
+  // Prefers the domain snapshotted on the trace at decision time
+  // (trace.domain_id — see supabase/migrations/0005_traces_domain_snapshot.sql)
+  // over recomputing it from today's routing, so a domain's stats reflect
+  // what actually governed each transaction historically, not what would
+  // govern it if it happened again right now. Only falls back to
+  // resolveDomain for a trace that predates the column and slipped past the
+  // migration's backfill.
+  function domainIdForTrace(t: Trace): string | null {
+    if (t.domain_id) return t.domain_id;
+    const p = t.params as { category?: string } | null;
+    return resolveDomain(t.action_type, p?.category, domains)?.id ?? null;
+  }
+
   function statsFor(domain: PolicyDomain) {
     const domainRules = rules.filter((r) => r.domain_id === domain.id && r.status === "active");
-    const domainTraceIds = new Set(
-      traces
-        .filter((t) => {
-          const p = t.params as { category?: string } | null;
-          return resolveDomain(t.action_type, p?.category, domains)?.id === domain.id;
-        })
-        .map((t) => t.id)
-    );
+    const domainTraceIds = new Set(traces.filter((t) => domainIdForTrace(t) === domain.id).map((t) => t.id));
     const pendingEscalations = escalations.filter((e) => e.status === "pending" && domainTraceIds.has(e.trace_id)).length;
     const agentIds = new Set(
       [...domainTraceIds].map((id) => tracesById.get(id)?.agent_id).filter((id): id is string => Boolean(id))

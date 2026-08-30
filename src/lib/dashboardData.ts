@@ -21,23 +21,39 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Supabase's newer `sb_secret_...` key format mints a fresh internal JWT
- * per request at the gateway in front of PostgREST; a clock disagreement
- * between whichever internal service minted it and whichever verified it
- * surfaces as `"JWT issued at future"` — confirmed (via a direct out-of-band
- * probe against the same credentials, moments after hitting it) to be a
- * transient upstream hiccup, not a real credentials/config problem here.
- * Retried a few times with a short backoff so an isolated blip doesn't
- * surface as a broken dashboard; any other error still fails immediately,
- * on the first try, same as before.
+ * Two known-transient failure shapes, retried; everything else still fails
+ * immediately, on the first try, same as before:
+ *
+ * 1. Supabase's newer `sb_secret_...` key format mints a fresh internal JWT
+ *    per request at the gateway in front of PostgREST; a clock disagreement
+ *    between whichever internal service minted it and whichever verified it
+ *    surfaces as `"JWT issued at future"` — confirmed (via a direct
+ *    out-of-band probe against the same credentials, moments after hitting
+ *    it) to be a transient upstream hiccup, not a real credentials/config
+ *    problem here.
+ * 2. A raw network/TLS exception below Supabase's own layer — surfaces as
+ *    `"TypeError: fetch failed"` (undici's generic wrapper) with no `cause`
+ *    Supabase-js preserves. Reproduced directly against this exact project:
+ *    a bare request intermittently fails the TLS handshake and succeeds on
+ *    the very next attempt, no config change involved — a one-off network
+ *    blip, not a broken project. Distinct from #1's message shape, so it
+ *    needed its own check rather than a broader regex on the same pattern.
  */
 function isTransientJwtClockError(error: { message: string }): boolean {
   return /jwt/i.test(error.message) && /future|clock skew/i.test(error.message);
 }
 
+function isTransientNetworkError(error: { message: string }): boolean {
+  return /fetch failed|econnreset|etimedout|enotfound|socket hang up/i.test(error.message);
+}
+
 async function withRetry<T>(query: () => PromiseLike<SupabaseResult<T>>, attempts = 3): Promise<SupabaseResult<T>> {
   let result = await query();
-  for (let attempt = 1; attempt < attempts && result.error && isTransientJwtClockError(result.error); attempt++) {
+  for (
+    let attempt = 1;
+    attempt < attempts && result.error && (isTransientJwtClockError(result.error) || isTransientNetworkError(result.error));
+    attempt++
+  ) {
     await sleep(300 * attempt);
     result = await query();
   }
@@ -63,7 +79,16 @@ export async function getDashboardData() {
     .filter((e): e is NonNullable<typeof e> => e !== null);
 
   if (errors.length > 0) {
-    for (const e of errors) console.error("[dashboardData] Supabase query failed:", e.message, e);
+    for (const e of errors) {
+      // supabase-js flattens a raw network/TLS exception down to just
+      // `{ message }` — the underlying reason (ECONNREFUSED, a cert error,
+      // ENOTFOUND, ...) normally lives on the original error's `.cause`, but
+      // gets dropped in that flattening. Logging it separately when present
+      // is the difference between "TypeError: fetch failed" (tells you
+      // nothing) and the actual OS-level reason underneath it.
+      const cause = (e as { cause?: unknown }).cause;
+      console.error("[dashboardData] Supabase query failed:", e.message, cause ? { cause } : e);
+    }
   }
 
   return {

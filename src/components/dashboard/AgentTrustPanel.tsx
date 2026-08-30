@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { registerAgent, type RegisteredAgent } from "@/lib/actions/agents";
 import type { Agent } from "@/types/db";
+import { AgentCredentials } from "./AgentCredentials";
 import { EmptyState, GhostButton, Icons, Panel, PrimaryButton } from "./ui";
 
 function trustColor(score: number): string {
@@ -19,12 +20,16 @@ function trustColor(score: number): string {
  *
  * "+ Register" closes a real inconsistency: once domains stopped being
  * hardcoded and became dashboard-creatable, agents still requiring a
- * terminal (`npm run gen-agent-key`) to register was the odd one out. Same
- * real Ed25519 keypair either way — src/lib/actions/agents.ts. The secret
- * half is shown exactly once, right here, with nowhere to retrieve it
- * again if you navigate away without copying it — that's a real security
- * property of Web Bot Auth (the secret is never stored server-side), not a
- * UI limitation to work around.
+ * terminal script to register was the odd one out. That script has since
+ * been removed; this is the one registration path — src/lib/actions/agents.ts.
+ *
+ * On success it hands back the full credential set via AgentCredentials —
+ * endpoint, agent id, and secret key together. That completeness matters:
+ * an earlier version showed the secret alone, which made registration a
+ * dead end, because `/api/mcp` resolves an agent by `keyid` and `keyid` is
+ * the agent id. Shown exactly once, with nowhere to retrieve the secret
+ * from afterwards — a real property of Web Bot Auth (never stored server
+ * side), not a UI limitation to work around.
  *
  * `className="h-full"` on Panel plus `flex-1` in DashboardTabs.tsx lets
  * this stretch to fill whatever's left in the Overview sidebar below
@@ -39,7 +44,6 @@ export function AgentTrustPanel({ agents }: { agents: Agent[] }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [justRegistered, setJustRegistered] = useState<RegisteredAgent | null>(null);
-  const [copied, setCopied] = useState(false);
 
   async function submit() {
     if (!name.trim()) return;
@@ -55,17 +59,6 @@ export function AgentTrustPanel({ agents }: { agents: Agent[] }) {
       setError(err instanceof Error ? err.message : "Couldn't register the agent.");
     } finally {
       setPending(false);
-    }
-  }
-
-  async function copySecret() {
-    if (!justRegistered) return;
-    try {
-      await navigator.clipboard.writeText(justRegistered.secretKeyBase64);
-      setCopied(true);
-    } catch {
-      // Clipboard API can fail silently (permissions, non-HTTPS) — the key
-      // is still selectable text either way, so this isn't a dead end.
     }
   }
 
@@ -86,28 +79,7 @@ export function AgentTrustPanel({ agents }: { agents: Agent[] }) {
     >
       <div className="flex flex-1 flex-col">
         {justRegistered && (
-          <div className="mb-3 rounded-xl border p-3" style={{ borderColor: "var(--decision-escalate)", background: "color-mix(in srgb, var(--decision-escalate) 10%, transparent)" }}>
-            <p className="text-[11px] font-semibold" style={{ color: "var(--decision-escalate)" }}>
-              &quot;{justRegistered.name}&quot; registered — save this secret key now
-            </p>
-            <p className="mt-1 text-[10px] leading-relaxed" style={{ color: "var(--muted)" }}>
-              This is the only time it&apos;s shown. Mandate never stores it — losing it means registering a new agent.
-            </p>
-            <code
-              className="mt-2 block break-all rounded-lg border px-2 py-1.5 text-[10px]"
-              style={{ borderColor: "var(--panel-border-strong)", background: "var(--panel-2)", color: "var(--foreground)" }}
-            >
-              {justRegistered.secretKeyBase64}
-            </code>
-            <div className="mt-2 flex gap-2">
-              <GhostButton onClick={copySecret} className="flex-1 py-1! px-2! text-[10px]!">
-                {copied ? "Copied" : "Copy secret key"}
-              </GhostButton>
-              <GhostButton onClick={() => setJustRegistered(null)} className="py-1! px-2! text-[10px]!">
-                Done
-              </GhostButton>
-            </div>
-          </div>
+          <AgentCredentials agent={justRegistered} onDismiss={() => setJustRegistered(null)} />
         )}
 
         {registering && (

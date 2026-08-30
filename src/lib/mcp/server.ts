@@ -32,7 +32,7 @@ export function createMandateServer(): McpServer {
     {
       title: "Simulate a money action",
       description:
-        "Runs a proposed money action (order.create, refund.create, payout.create, subscription.create) through Mandate's policy engine WITHOUT moving money. Returns the decision (allow/block/escalate), which rule fired if any, and a trace id. Use this before enforce_action to preview what will happen.",
+        "Runs a proposed money action (order.create, refund.create, subscription.create) through Mandate's policy engine WITHOUT moving money. Returns the decision (allow/block/escalate), which rule fired if any, and a trace id. Use this before enforce_action to preview what will happen.",
       inputSchema: ActionInput,
     },
     async (input, extra) => toolResult(await runActionEvaluation(requireAgentId(extra), input, "simulate"))

@@ -33,7 +33,7 @@ async function ensureSeedData(db: ReturnType<typeof createAdminClient>): Promise
 
 /** Thin wrapper around the shared `ensureAgentIdentity` — reuses
  *  CHECKOUT_AGENT_ID/SECRET_KEY if configured (e.g. via `npm run
- *  gen-agent-key`), else registers a fresh identity for this run. */
+ *  dashboard), else registers a fresh identity for this run. */
 async function ensureDemoAgent(db: SupabaseClient): Promise<{ id: string; secretKeyBase64: string; step: DemoStep }> {
   const identity = await ensureAgentIdentity(db, {
     envIdVar: "CHECKOUT_AGENT_ID",

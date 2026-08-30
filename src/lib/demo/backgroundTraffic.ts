@@ -22,7 +22,12 @@ import { createAdminClient, ensureAgentIdentity } from "./shared";
  * doesn't use for this.
  */
 
-const BURST_SIZE = 12;
+// Kept at or under the purchases domain's velocity limit (6 actions / 2 min
+// per agent — see SEED_RULES). Velocity is scoped per_agent and this bot has
+// its own identity, so it never competes with the demo agent's budget; but a
+// burst larger than the limit would rate-limit itself halfway through and fill
+// the dashboard with meaningless velocity blocks rather than ordinary traffic.
+const BURST_SIZE = 6;
 
 const SYNTHETIC_CUSTOMERS = [
   { name: "Priya Sharma", email: "priya.sharma@example.com" },

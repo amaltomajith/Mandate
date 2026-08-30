@@ -12,7 +12,7 @@ export interface RegisteredAgent {
 }
 
 /**
- * The dashboard-native version of `scripts/gen-agent-key.ts` — same real
+ * Mints an agent identity from the dashboard — a real
  * Ed25519 keypair, same guarantee (the secret half is returned to the
  * caller exactly once and never stored anywhere; only the public half goes
  * into `agents.public_key`). Closes the inconsistency the domains feature

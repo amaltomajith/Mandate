@@ -43,7 +43,7 @@ export interface PolicyRule {
 }
 
 export interface ActionContext {
-  actionType: string; // e.g. "payment.capture" | "refund.create" | "payout.create" | "subscription.create"
+  actionType: string; // e.g. "order.create" | "refund.create" | "subscription.create"
   amount: number; // smallest currency unit (paise)
   currency: string;
   category?: string;

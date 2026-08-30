@@ -44,8 +44,9 @@ explains every decision by tracing a real graph.
   `draft_policy` prompt was tested end-to-end against the live API
 - Clerk keys — signed in, dashboard confirmed rendering (dark theme, 3D graph,
   hover tooltips all checked)
-- `npm run seed` run (policy rules + sample customer), `npm run gen-agent-key`
-  run (a real registered agent identity, id + secret key in `.env.local`)
+- `npm run seed` run (policy domains, rules, catalog + sample customer); agent
+  identities are registered from the dashboard's Agent trust panel, or created
+  automatically on the first demo run
 - **`npm run demo:checkout` run partway, successfully**: MCP session
   `initialize` → Web Bot Auth signature verify → `simulate_action` all
   confirmed working together, live, for the first time. It stopped at the
@@ -348,8 +349,8 @@ Every agent starts at a neutral 50. See `src/lib/trust/score.ts`.
 7. `npm run dev`, sign up at `/sign-up` (Clerk, self-serve).
 8. On the dashboard, click **"Run demo"** — it seeds the policy rules, sets up
    an agent identity, and runs the full scenario (§9) in one click. No further
-   CLI steps needed. (The CLI equivalents — `npm run seed`, `npm run
-   gen-agent-key -- "Checkout Agent"`, `npm run demo:checkout` — still work
+   CLI steps needed. (The CLI equivalents — `npm run seed` and
+   `npm run demo:checkout` — still work
    individually if you want more control, and share the same underlying code
    via `src/lib/demo/`.)
 
@@ -871,7 +872,7 @@ src/components/dashboard/             DashboardTabs (Overview/Transactions/Polic
                                        PolicyHealthPanel, AlertsBell (header dropdown, not a panel
                                        anymore), panels, buttons, DemoRunner, BackgroundTrafficButton
                                        (§9f), toasts, live poll refresher
-scripts/                              seed, gen-agent-key, checkout-agent — thin CLI wrappers around src/lib/demo/
+scripts/                              seed, checkout-agent — thin CLI wrappers around src/lib/demo/
 ```
 
 ## 13. Resuming in Antigravity

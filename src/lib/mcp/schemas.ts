@@ -16,13 +16,6 @@ export const RefundCreateParams = z.object({
   paymentId: z.string(),
 });
 
-export const PayoutCreateParams = z.object({
-  vendorName: z.string(),
-  vpa: z.string(),
-  purpose: z.string().optional(),
-  narration: z.string().optional(),
-});
-
 export const SubscriptionCreateParams = z.object({
   planName: z.string(),
   period: z.enum(["daily", "weekly", "monthly", "yearly"]),
@@ -49,15 +42,6 @@ export const ActionInput = z.discriminatedUnion("actionType", [
     customerId: z.string().uuid().optional(),
     forkFrom: z.string().uuid().optional(),
     params: RefundCreateParams,
-  }),
-  z.object({
-    actionType: z.literal("payout.create"),
-    amount: z.number().int().positive(),
-    currency: z.string().length(3).default("INR"),
-    category: z.string().optional(),
-    customerId: z.string().uuid().optional(),
-    forkFrom: z.string().uuid().optional(),
-    params: PayoutCreateParams,
   }),
   z.object({
     actionType: z.literal("subscription.create"),

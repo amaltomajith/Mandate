@@ -2,7 +2,6 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { ActionInput } from "@/lib/mcp/schemas";
 import { getRazorpay } from "./client";
-import { createContact, createPayout, createVpaFundAccount } from "./x";
 import type { Json } from "@/types/db";
 
 /** Razorpay's Plans/Subscriptions API returns a plain 401 when the
@@ -31,9 +30,14 @@ function isSubscriptionsNotActivated(err: unknown): boolean {
  * authorizing a UPI Autopay mandate is, by Razorpay's own design, a customer-facing
  * step (Checkout / an auth link) that happens outside this control plane — Mandate's
  * job is the gate before and the record after, not reimplementing Razorpay's own
- * checkout UI. `payout.create` and `refund.create` are genuinely end-to-end
- * server-to-server with no customer-facing step, which is why the demo script
- * leans on payouts as its primary "real money movement" beat.
+ * checkout UI. `refund.create` is genuinely end-to-end server-to-server with no
+ * customer-facing step.
+ *
+ * `payout.create` (RazorpayX) was removed rather than left in place: it needs a
+ * registered business Razorpay itself gates, so it could never execute on this
+ * account, and nothing in the app called it. Keeping unreachable code around
+ * implied a capability that didn't exist. The three action types here are the
+ * ones that genuinely run.
  */
 export async function executeRealAction(input: ActionInput): Promise<Json> {
   switch (input.actionType) {
@@ -54,22 +58,6 @@ export async function executeRealAction(input: ActionInput): Promise<Json> {
         amount: input.amount,
       });
       return refund as unknown as Json;
-    }
-
-    case "payout.create": {
-      const contact = await createContact({
-        name: input.params.vendorName,
-        type: "vendor",
-      });
-      const fundAccount = await createVpaFundAccount(contact.id, input.params.vpa);
-      const payout = await createPayout({
-        fundAccountId: fundAccount.id,
-        amount: input.amount,
-        currency: input.currency,
-        purpose: input.params.purpose ?? "payout",
-        narration: input.params.narration,
-      });
-      return { contact, fundAccount, payout } as unknown as Json;
     }
 
     case "subscription.create": {

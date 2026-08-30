@@ -14,7 +14,9 @@ import "./lib/loadEnv";
 import { createClient } from "@supabase/supabase-js";
 import { applySeedRules } from "../src/lib/demo/seedData";
 
-// See scripts/gen-agent-key.ts for why this doesn't import src/lib/supabase/admin.ts.
+// Builds its own service-role client rather than importing
+// src/lib/supabase/admin.ts: that module is guarded with `import "server-only"`,
+// which throws outside Next's server bundler context (i.e. under plain tsx).
 function createAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -26,7 +28,7 @@ async function main() {
   const db = createAdminClient();
   const { created, migrated } = await applySeedRules(db);
 
-  if (migrated) console.log('Migrated the old "Max 5 actions/hour per agent" rule to the new 30/hour limit.');
+  if (migrated) console.log("Retired an out-of-date velocity rule (superseded, not deleted — traces still cite it).");
   console.log(created > 0 ? `Created ${created} new rule(s).` : "All rules already existed — nothing to create.");
   console.log("\nSeed complete.");
 }

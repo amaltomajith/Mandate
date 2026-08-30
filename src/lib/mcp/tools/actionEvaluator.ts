@@ -110,6 +110,7 @@ export async function runActionEvaluation(
     agentId,
     decision,
     ruleFiredId: match?.rule.id ?? null,
+    domainId: resolvedDomain?.id ?? null,
     reasoning,
     razorpayResponse,
   });

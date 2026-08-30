@@ -53,6 +53,19 @@ export default async function DashboardPage() {
             <span className="live-dot h-1.5 w-1.5 rounded-full" style={{ background: "var(--decision-allow)" }} />
             live
           </div>
+          {/* The architecture walkthrough (public/architecture.html) — a plain
+              static page, deliberately reachable without signing in, so it can
+              be linked from a README or handed to someone evaluating this
+              without giving them dashboard access. */}
+          <a
+            href="/architecture.html"
+            target="_blank"
+            rel="noopener"
+            className="rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-colors hover:bg-[var(--panel-2)]"
+            style={{ color: "var(--muted)" }}
+          >
+            How it works
+          </a>
           <AlertsBell alerts={alerts} />
           <SignOutButton />
         </div>
