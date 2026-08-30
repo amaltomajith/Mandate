@@ -49,7 +49,12 @@ export async function ensureAgentIdentity(
   }
 
   const { secretKey, publicKey } = generateKeyPair();
-  const name = `${opts.name} (${new Date().toISOString().slice(11, 19)})`;
+  // Only disambiguate when the plain name is already taken. The timestamp
+  // suffix used to be unconditional, which leaked demo scaffolding into what
+  // is meant to read as a merchant's real agent roster — "Background Traffic
+  // Bot (06:59:50)" is not a name anyone would give an agent.
+  const { data: clash } = await db.from("agents").select("id").eq("name", opts.name).maybeSingle();
+  const name = clash ? `${opts.name} (${new Date().toISOString().slice(11, 19)})` : opts.name;
   const { data, error } = await db
     .from("agents")
     .insert({ name, description: opts.description, public_key: publicKey })

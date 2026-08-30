@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { registerAgent, type RegisteredAgent } from "@/lib/actions/agents";
 import type { Agent } from "@/types/db";
+import type { TrustComponents } from "@/lib/trust/score";
 import { AgentCredentials } from "./AgentCredentials";
+import { TrustBreakdown } from "./TrustBreakdown";
 import { EmptyState, GhostButton, Icons, Panel, PrimaryButton } from "./ui";
 
 function trustColor(score: number): string {
@@ -44,6 +46,9 @@ export function AgentTrustPanel({ agents }: { agents: Agent[] }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [justRegistered, setJustRegistered] = useState<RegisteredAgent | null>(null);
+  // One open at a time: the breakdown is detail-on-demand, and two expanded at
+  // once in a sidebar this narrow just pushes everything out of view.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   async function submit() {
     if (!name.trim()) return;
@@ -121,20 +126,50 @@ export function AgentTrustPanel({ agents }: { agents: Agent[] }) {
           <div className="space-y-3">
             {sorted.map((agent) => {
               const color = trustColor(agent.trust_score);
+              const components = agent.trust_components as TrustComponents | null;
+              const expanded = expandedId === agent.id;
+              // An agent that has never acted has nothing to explain — its score
+              // is just the untouched starting value.
+              const explainable = Boolean(components && components.totalDecisions > 0);
+
               return (
                 <div key={agent.id}>
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <span className="truncate text-[13px] font-medium">{agent.name}</span>
-                    <span className="shrink-0 text-[12px] font-semibold tabular-nums" style={{ color }}>
-                      {agent.trust_score.toFixed(0)}
-                    </span>
-                  </div>
-                  <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: "var(--panel-2)" }}>
-                    <div
-                      className="h-full rounded-full transition-all"
-                      style={{ width: `${Math.max(0, Math.min(100, agent.trust_score))}%`, background: color }}
-                    />
-                  </div>
+                  <button
+                    onClick={() => setExpandedId(expanded ? null : agent.id)}
+                    disabled={!explainable}
+                    className="w-full text-left disabled:cursor-default"
+                  >
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate text-[13px] font-medium">{agent.name}</span>
+                        {explainable && (
+                          <span
+                            className="shrink-0 text-[9px] transition-transform"
+                            style={{ color: "var(--muted-2)", transform: expanded ? "rotate(90deg)" : undefined }}
+                          >
+                            ▶
+                          </span>
+                        )}
+                      </span>
+                      <span className="shrink-0 text-[12px] font-semibold tabular-nums" style={{ color }}>
+                        {agent.trust_score.toFixed(0)}
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: "var(--panel-2)" }}>
+                      <div
+                        className="h-full rounded-full transition-all"
+                        style={{ width: `${Math.max(0, Math.min(100, agent.trust_score))}%`, background: color }}
+                      />
+                    </div>
+                  </button>
+
+                  {expanded && components && <TrustBreakdown components={components} />}
+
+                  {!explainable && (
+                    <p className="mt-1 text-[10px]" style={{ color: "var(--muted-2)" }}>
+                      No decisions yet — still at the starting score.
+                    </p>
+                  )}
                 </div>
               );
             })}

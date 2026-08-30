@@ -33,6 +33,14 @@ export interface TrustComponents {
   tenureBonus: number;
   protocolRejectPenalty: number;
   totalDecisions: number;
+  /** The raw counts each term was derived from, stored alongside the terms so
+   *  the dashboard can show "why this score" without re-querying, and without
+   *  recounting from a trace list that's capped at the most recent 300. */
+  approvals: number;
+  blocks: number;
+  escalations: number;
+  protocolRejects: number;
+  accountAgeDays: number;
 }
 
 export function computeTrustScore(inputs: TrustInputs): TrustComponents {
@@ -48,6 +56,11 @@ export function computeTrustScore(inputs: TrustInputs): TrustComponents {
       tenureBonus: 0,
       protocolRejectPenalty: 0,
       totalDecisions: 0,
+      approvals: inputs.approvals,
+      blocks: inputs.blocks,
+      escalations: inputs.escalations,
+      protocolRejects: inputs.protocolRejects,
+      accountAgeDays: inputs.accountAgeDays,
     };
   }
 
@@ -67,5 +80,10 @@ export function computeTrustScore(inputs: TrustInputs): TrustComponents {
     tenureBonus,
     protocolRejectPenalty,
     totalDecisions: total,
+    approvals: inputs.approvals,
+    blocks: inputs.blocks,
+    escalations: inputs.escalations,
+    protocolRejects: inputs.protocolRejects,
+    accountAgeDays: inputs.accountAgeDays,
   };
 }
