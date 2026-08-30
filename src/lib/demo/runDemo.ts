@@ -237,6 +237,73 @@ export async function runDemoScript(): Promise<DemoStep[]> {
   // rather than being individually gameable.
   await attemptStructuredEvasion();
 
+  // A second agent, different job, different risk surface — and the only
+  // thing here that trips a category ban.
+  await procurementAgentBeat();
+
+  /** A second agent, with a genuinely different job and a genuinely different
+   *  risk profile — not the checkout agent doing more of the same. A
+   *  procurement bot buys supplies on the business's own behalf (no customer
+   *  mandate involved at all, which is why none is passed here), and it is the
+   *  only thing in this demo that exercises `category_block`.
+   *
+   *  That gap was real: of the four rule types, category_block had never once
+   *  fired in this project's entire trace history — the rule was active and
+   *  correct, but nothing ever attempted a purchase in a blocked category, so
+   *  a quarter of the policy engine went undemonstrated. This closes it with a
+   *  purchase that is *blocked outright rather than escalated*: unlike a
+   *  spending cap, a category ban is not a "large enough to need a human"
+   *  judgement, it is a line the merchant has decided no agent crosses at any
+   *  amount. Nothing reaches Razorpay — the block happens first.
+   *
+   *  Its own identity, so its trust score reflects its own behaviour rather
+   *  than blending into the checkout agent's history. */
+  async function procurementAgentBeat(): Promise<void> {
+    const identity = await ensureAgentIdentity(db, {
+      envIdVar: "PROCUREMENT_AGENT_ID",
+      envSecretVar: "PROCUREMENT_AGENT_SECRET_KEY",
+      name: "Procurement Agent",
+      description: "Buys operational supplies for the business itself — no customer mandate involved.",
+    });
+    const procurement = new MandateClient(baseUrl, identity.id, identity.secretKeyBase64);
+    await procurement.initialize("mandate-procurement-agent");
+
+    steps.push({
+      label: "A second agent joins — Procurement Agent",
+      status: "ok",
+      detail:
+        "A different agent with a different job: buying supplies for the business, not for a customer. Same four MCP tools, same endpoint, its own identity and its own trust score.",
+    });
+
+    const supplies = {
+      actionType: "order.create",
+      amount: 189900,
+      currency: "INR",
+      category: "office",
+      params: { receipt: `procurement-supplies-${Date.now()}`, notes: { purpose: "office supplies" } },
+    };
+    const suppliesResult = await procurement.callTool<ActionResult>("enforce_action", supplies);
+    steps.push({
+      label: `Procurement Agent buys office supplies (${moneyLabel(supplies.amount)})`,
+      status: suppliesResult.decision === "allow" ? "ok" : suppliesResult.decision === "escalate" ? "escalated" : "blocked",
+      detail: suppliesResult.reasoning,
+    });
+
+    const crypto = {
+      actionType: "order.create",
+      amount: 250000,
+      currency: "INR",
+      category: "crypto",
+      params: { receipt: `procurement-treasury-${Date.now()}`, notes: { purpose: "treasury allocation" } },
+    };
+    const cryptoResult = await procurement.callTool<ActionResult>("enforce_action", crypto);
+    steps.push({
+      label: `Procurement Agent tries a crypto purchase (${moneyLabel(crypto.amount)})`,
+      status: cryptoResult.decision === "allow" ? "ok" : cryptoResult.decision === "escalate" ? "escalated" : "blocked",
+      detail: cryptoResult.reasoning,
+    });
+  }
+
   // The second control-plane beat: the merchant revokes the agent's mandate,
   // and its very next attempted action is blocked immediately — proving
   // mandate governance is enforced live, not just recorded for later.
