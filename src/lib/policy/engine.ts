@@ -7,6 +7,7 @@ import type {
   VelocityParams,
   CategoryBlockParams,
   StepUpParams,
+  TrustFloorParams,
 } from "./types";
 
 /** Paise -> a reasoning string a merchant can actually read at a glance. */
@@ -21,11 +22,18 @@ function formatMoney(amountPaise: number, currency: string): string {
  * `enforce_action` both call this with the same inputs and get the same decision;
  * only `enforce_action` goes on to make the real Razorpay call when the result is "allow".
  *
- * Priority order is fixed and documented: category_block > cap > velocity > step_up.
+ * Priority order is fixed and documented:
+ *   category_block > cap > velocity > trust_floor > step_up.
  * First match wins. This ordering is a deliberate policy choice (hard blocks and
  * spend caps are absolute; step-up is the last resort that asks a human instead of
  * refusing outright) — change it here, in one place, if that priority is wrong for
  * a given merchant.
+ *
+ * trust_floor sits above step_up because "this agent has not earned the benefit
+ * of the doubt" is a stronger reason to involve a human than "this amount is
+ * large" — a distrusted agent should be held at any amount, so its reasoning
+ * should be the one the merchant reads, not an amount threshold that happens to
+ * also match.
  */
 export function evaluatePolicy(
   context: ActionContext,
@@ -83,6 +91,26 @@ export function evaluatePolicy(
         decision: "block",
         reasoning: `This would be action ${count + 1} within ${windowLabel}, over the limit of ${params.max_count} set by rule "${rule.name}".`,
       };
+    }
+  }
+
+  // Reputation gate. Skipped when the caller couldn't supply a score (the
+  // draft_policy backtest replays historical actions, where the agent's score
+  // at that moment isn't recoverable) — better to omit the rule from that
+  // replay than to score it against today's number and report a confident
+  // count that never happened.
+  if (typeof context.agentTrustScore === "number") {
+    for (const rule of byType("trust_floor")) {
+      const params = rule.params as TrustFloorParams;
+      if (context.agentTrustScore < params.min_score) {
+        return {
+          rule,
+          decision: params.action ?? "escalate",
+          reasoning:
+            `This agent's trust score is ${context.agentTrustScore.toFixed(0)}, below the minimum of ` +
+            `${params.min_score} set by rule "${rule.name}" — held regardless of amount.`,
+        };
+      }
     }
   }
 

@@ -26,11 +26,23 @@ export const StepUpParams = z.object({
 });
 export type StepUpParams = z.infer<typeof StepUpParams>;
 
+/** Reputation gate. Below `min_score`, this agent's actions are held —
+ *  escalated for a human by default, or refused outright — whatever the
+ *  amount. The trust score is computed on every enforce decision
+ *  (src/lib/trust/score.ts); this is the rule that makes it consequential
+ *  rather than merely displayed. */
+export const TrustFloorParams = z.object({
+  min_score: z.number().min(0).max(100),
+  action: z.enum(["escalate", "block"]).default("escalate"),
+});
+export type TrustFloorParams = z.infer<typeof TrustFloorParams>;
+
 export const RuleParamsByType = {
   cap: CapParams,
   velocity: VelocityParams,
   category_block: CategoryBlockParams,
   step_up: StepUpParams,
+  trust_floor: TrustFloorParams,
 } satisfies Record<PolicyRuleType, z.ZodType>;
 
 /** Rule shape the policy engine operates on — a narrowed view of a `policy_rules` row. */
@@ -49,6 +61,12 @@ export interface ActionContext {
   category?: string;
   agentId: string;
   customerId?: string;
+  /** The acting agent's current trust score (0-100), read by `trust_floor`
+   *  rules. Optional because the pure evaluator must stay callable without
+   *  it — the backtest in draft_policy replays historical actions where the
+   *  score at the time isn't recoverable, and guessing would be worse than
+   *  skipping the rule. */
+  agentTrustScore?: number;
 }
 
 export interface RuleMatch {

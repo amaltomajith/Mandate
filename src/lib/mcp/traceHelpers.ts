@@ -162,6 +162,18 @@ export async function recordMandateFromSubscription(
   assertNoSupabaseError(error);
 }
 
+/** Current trust score for an agent, for `trust_floor` rules. Returns
+ *  undefined rather than a default if the agent can't be read — the evaluator
+ *  skips trust rules on undefined, which fails open. That is the right
+ *  direction here: a transient read failure should not start refusing an
+ *  agent's traffic as though it had a bad reputation. */
+export async function getAgentTrustScore(agentId: string): Promise<number | undefined> {
+  const db = createAdminClient();
+  const { data, error } = await db.from("agents").select("trust_score").eq("id", agentId).maybeSingle();
+  if (error || !data) return undefined;
+  return data.trust_score;
+}
+
 export interface InsertTraceInput {
   parentTraceId?: string | null;
   mode: TraceMode;

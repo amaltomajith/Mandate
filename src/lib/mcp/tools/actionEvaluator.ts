@@ -8,6 +8,7 @@ import {
   createEscalationForTrace,
   getActiveDomains,
   getActiveRules,
+  getAgentTrustScore,
   getAggregates,
   insertTrace,
   recomputeTrust,
@@ -70,6 +71,10 @@ export async function runActionEvaluation(
     const domain = resolveDomain(input.actionType, input.category, domains);
     resolvedDomain = domain ? { id: domain.id, name: domain.name } : null;
 
+    // The acting agent's current trust score, for `trust_floor` rules. Read
+    // here rather than inside the evaluator so the evaluator stays pure and
+    // DB-free — same contract every other input follows.
+    const agentTrustScore = await getAgentTrustScore(agentId);
     const allRules = await getActiveRules();
     const rules = domain ? allRules.filter((r) => r.domain_id === domain.id) : [];
     const aggregates = domain
@@ -83,6 +88,7 @@ export async function runActionEvaluation(
         category: input.category,
         agentId,
         customerId: input.customerId,
+        agentTrustScore,
       },
       rules,
       aggregates

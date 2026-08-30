@@ -13,12 +13,13 @@ import type { Json } from "@/types/db";
 // result ourselves is more portable across whichever Groq model ends up
 // configured, so validation happens here rather than being delegated to the API.
 const DraftShape = z.object({
-  type: z.enum(["cap", "velocity", "category_block", "step_up"]),
+  type: z.enum(["cap", "velocity", "category_block", "step_up", "trust_floor"]),
   name: z.string(),
   rationale: z.string(),
   cap: z.object({ max_amount: z.number(), currency: z.string(), scope: z.enum(["per_transaction", "per_day"]) }).optional(),
   velocity: z.object({ max_count: z.number(), window_seconds: z.number(), scope: z.enum(["per_agent", "per_customer"]) }).optional(),
   category_block: z.object({ categories: z.array(z.string()) }).optional(),
+  trust_floor: z.object({ min_score: z.number(), action: z.enum(["escalate", "block"]).optional() }).optional(),
   step_up: z.object({ threshold_amount: z.number(), currency: z.string() }).optional(),
 });
 type DraftShape = z.infer<typeof DraftShape>;
@@ -33,19 +34,20 @@ export interface DraftPolicyResult {
   backtest: { tracesEvaluated: number; wouldHaveChangedDecision: number };
 }
 
-const SYSTEM_PROMPT = `You turn plain-language policy requests or regulatory notices into one structured spend-control rule for a payments control plane. Read the input and produce exactly one rule of type "cap" (a spend ceiling), "velocity" (a rate limit), "category_block" (blocks a category outright), or "step_up" (requires human approval above a threshold). Respond with ONLY a JSON object shaped like:
+const SYSTEM_PROMPT = `You turn plain-language policy requests or regulatory notices into one structured spend-control rule for a payments control plane. Read the input and produce exactly one rule of type "cap" (a spend ceiling), "velocity" (a rate limit), "category_block" (blocks a category outright), "step_up" (requires human approval above a threshold), or "trust_floor" (holds an agent whose trust score is below a minimum, regardless of amount). Respond with ONLY a JSON object shaped like:
 
 {
-  "type": "cap" | "velocity" | "category_block" | "step_up",
+  "type": "cap" | "velocity" | "category_block" | "step_up" | "trust_floor",
   "name": string,
   "rationale": string,
   "cap": { "max_amount": number, "currency": string, "scope": "per_transaction" | "per_day" },
   "velocity": { "max_count": number, "window_seconds": number, "scope": "per_agent" | "per_customer" },
   "category_block": { "categories": string[] },
+  "trust_floor": { "min_score": number, "action": "escalate" | "block" },
   "step_up": { "threshold_amount": number, "currency": string }
 }
 
-Only include the ONE key ("cap", "velocity", "category_block", or "step_up") matching your chosen "type" — omit the other three. Fill in realistic numbers inferred from the text. Amounts are in paise (INR smallest unit) unless the text clearly implies another currency. Respond with the JSON object only, no other text.`;
+Only include the ONE key ("cap", "velocity", "category_block", "step_up", or "trust_floor") matching your chosen "type" — omit the others. Trust scores run 0-100 and every agent starts at 50. Fill in realistic numbers inferred from the text. Amounts are in paise (INR smallest unit) unless the text clearly implies another currency. Respond with the JSON object only, no other text.`;
 
 /**
  * NL -> structured rule -> auto-backtest, always landing as `pending_review`.

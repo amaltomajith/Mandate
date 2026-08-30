@@ -85,6 +85,14 @@ export const SEED_RULES: SeedRule[] = [
       "Catches an agent trying to structure around the step-up threshold — many small actions fired rapidly instead of one that would have required approval. Amount-blind, like all velocity rules: it's the rate that's suspicious, not any single action's size. Tuned against the real demo: four ordinary purchases precede the structuring attempt, so the third chunk is the one that trips it. The two-minute window is deliberately short — long enough that a single run's actions all fall inside it, short enough that re-running the demo a couple of minutes later starts clean instead of being blocked by the previous run's history.",
   },
   {
+    type: "trust_floor",
+    name: "Hold agents below trust 35",
+    domain: "purchases",
+    params: { min_score: 35, action: "escalate" },
+    rationale:
+      "Reputation, made consequential. Every agent starts at a neutral 50 and moves with its own record — an agent that has been blocked repeatedly, or has had forged requests rejected in its name, falls. Below 35 its actions are held for a human regardless of amount, because the problem is the caller, not the transaction. Set below the starting score deliberately: a new agent is unproven, not suspect, and shouldn't be punished for having no history.",
+  },
+  {
     type: "step_up",
     name: "Mandate step-up above ₹1,000",
     domain: "mandates",
