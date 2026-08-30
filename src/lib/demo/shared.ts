@@ -30,14 +30,38 @@ export interface AgentIdentity {
 
 /**
  * Reuses the agent identity named by `envIdVar`/`envSecretVar` if it's
- * configured (via the dashboard's Agent trust panel) and still exists — so that
- * identity's trust score keeps accumulating across repeated clicks instead
- * of resetting every time. Otherwise registers a fresh, uniquely-named
- * agent on the spot and uses its secret immediately, in-memory, for this
- * call only — an already-seeded agent's secret is never stored anywhere to
- * "reuse," so without the env vars set, every call gets its own new agent.
+ * configured (register one from the dashboard's Agent trust panel, which now
+ * hands back the id and secret together) and still exists — so that identity's
+ * trust score keeps accumulating instead of resetting.
+ *
+ * Without those env vars there is nothing to reuse: Mandate never stores an
+ * agent's secret key, so a previously-registered identity cannot be signed as
+ * again. A fresh one is registered instead — but memoised per process, which
+ * matters more than it looks. Continuous background traffic calls this once
+ * per transaction; without the cache that is a brand-new agent row for every
+ * single order, burying the real agents in the roster and resetting the trust
+ * score to 50 forever. Cached, an unpinned bot gets one identity per server
+ * run; pinned via env, one identity permanently.
  */
+const identityCache = new Map<string, Promise<AgentIdentity>>();
+
 export async function ensureAgentIdentity(
+  db: SupabaseClient,
+  opts: { envIdVar: string; envSecretVar: string; name: string; description: string }
+): Promise<AgentIdentity> {
+  const cached = identityCache.get(opts.envIdVar);
+  if (cached) return cached;
+
+  // Cache the in-flight promise, not just the result, so concurrent callers
+  // can't race each other into registering two agents.
+  const pending = resolveAgentIdentity(db, opts);
+  identityCache.set(opts.envIdVar, pending);
+  // A failed lookup must not poison the cache for the rest of the process.
+  pending.catch(() => identityCache.delete(opts.envIdVar));
+  return pending;
+}
+
+async function resolveAgentIdentity(
   db: SupabaseClient,
   opts: { envIdVar: string; envSecretVar: string; name: string; description: string }
 ): Promise<AgentIdentity> {

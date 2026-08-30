@@ -93,7 +93,11 @@ async function ensureSyntheticCustomers(db: SupabaseClient): Promise<{ id: strin
   return result;
 }
 
-export async function runBackgroundTraffic(): Promise<BackgroundTrafficSummary> {
+/** `count` defaults to a full burst. Continuous mode passes 1, so the caller
+ *  controls pacing between single transactions rather than this function
+ *  firing a clump — see LIVE_INTERVAL_MS in BackgroundTrafficButton.tsx for
+ *  why that pacing has to stay under the velocity rule's rate. */
+export async function runBackgroundTraffic(count: number = BURST_SIZE): Promise<BackgroundTrafficSummary> {
   const db = createAdminClient();
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
@@ -114,7 +118,7 @@ export async function runBackgroundTraffic(): Promise<BackgroundTrafficSummary> 
   let blocked = 0;
   let totalAmountPaise = 0;
 
-  for (let i = 0; i < BURST_SIZE; i++) {
+  for (let i = 0; i < count; i++) {
     const item = weightedPick(catalog);
     const customer = customers[Math.floor(Math.random() * customers.length)];
     const args = {
@@ -135,5 +139,5 @@ export async function runBackgroundTraffic(): Promise<BackgroundTrafficSummary> 
     else blocked++;
   }
 
-  return { generated: BURST_SIZE, allowed, escalated, blocked, totalAmountPaise };
+  return { generated: count, allowed, escalated, blocked, totalAmountPaise };
 }
