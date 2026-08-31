@@ -63,7 +63,7 @@ async function withRetry<T>(query: () => PromiseLike<SupabaseResult<T>>, attempt
 export async function getDashboardData() {
   const supabase = createAdminClient();
 
-  const [agents, rules, traces, escalations, alerts, mandates, customers, domains] = await Promise.all([
+  const [agents, rules, traces, escalations, alerts, mandates, customers] = await Promise.all([
     withRetry(() => supabase.from("agents").select("*").order("trust_score", { ascending: false })),
     withRetry(() => supabase.from("policy_rules").select("*").order("created_at", { ascending: false })),
     withRetry(() => supabase.from("traces").select("*").order("created_at", { ascending: false }).limit(300)),
@@ -71,10 +71,9 @@ export async function getDashboardData() {
     withRetry(() => supabase.from("alerts").select("*").order("created_at", { ascending: false }).limit(50)),
     withRetry(() => supabase.from("mandates").select("*").order("created_at", { ascending: false })),
     withRetry(() => supabase.from("customers").select("*").order("created_at", { ascending: false })),
-    withRetry(() => supabase.from("policy_domains").select("*").order("created_at", { ascending: true })),
   ]);
 
-  const errors = [agents, rules, traces, escalations, alerts, mandates, customers, domains]
+  const errors = [agents, rules, traces, escalations, alerts, mandates, customers]
     .map((r) => r.error)
     .filter((e): e is NonNullable<typeof e> => e !== null);
 
@@ -99,7 +98,6 @@ export async function getDashboardData() {
     alerts: alerts.data ?? [],
     mandates: mandates.data ?? [],
     customers: customers.data ?? [],
-    domains: domains.data ?? [],
     loadError: errors[0]?.message ?? null,
   };
 }

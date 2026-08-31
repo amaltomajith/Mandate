@@ -19,8 +19,11 @@ import type { TrustComponents } from "@/lib/trust/score";
  *
  * `components` is read straight off `agents.trust_components`, written by
  * recomputeTrust on every enforce decision — not recounted from the dashboard's
- * trace list, which is capped at the most recent 300 and would silently
- * undercount a busy agent.
+ * trace list, which is capped and would silently undercount a busy agent.
+ *
+ * The counts shown are the agent's most recent decisions, not its whole
+ * history (see TRUST_WINDOW_SIZE in traceHelpers.ts), which is why the total
+ * here stops climbing once an agent has been running a while.
  */
 
 interface Term {
@@ -54,16 +57,6 @@ export function TrustBreakdown({ components }: { components: TrustComponents }) 
       hint: typeof components.accountAgeDays === "number" ? `${Math.floor(components.accountAgeDays)} days, caps at 30` : undefined,
     },
   ];
-
-  // Only worth a row when it actually happened — a permanent "0 forged
-  // requests" line reads as noise on a healthy agent.
-  if (hasCounts && components.protocolRejects > 0) {
-    terms.push({
-      label: "Forged requests",
-      value: components.protocolRejectPenalty,
-      hint: `${components.protocolRejects} rejected at the protocol layer`,
-    });
-  }
 
   const scale = Math.max(1, ...terms.map((t) => Math.abs(t.value)));
 

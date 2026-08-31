@@ -5,7 +5,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { Grid, Html, Line, OrbitControls, Stars } from "@react-three/drei";
 import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import type * as THREE from "three";
-import type { Agent, Customer, Mandate, PolicyDomain, PolicyRule, Trace } from "@/types/db";
+import type { Agent, Customer, Mandate, PolicyRule, Trace } from "@/types/db";
 import { computeLayout, type Vec3 } from "./layout";
 import { DECISION_COLORS, ENTITY_COLORS } from "./colors";
 import { actionTypeLabel, formatMoney } from "@/lib/format";
@@ -49,7 +49,6 @@ type HoverInfo =
   | { kind: "rule"; rule: PolicyRule; position: Vec3 }
   | { kind: "trace"; trace: Trace; position: Vec3 }
   | { kind: "mandate"; mandate: Mandate; customerName: string; position: Vec3 }
-  | { kind: "domain"; domain: PolicyDomain; ruleCount: number; position: Vec3 }
   | null;
 
 const MAX_VISIBLE_TRACES = 120;
@@ -97,41 +96,6 @@ function AgentNode({
           emissiveIntensity={0.7}
           roughness={0.4}
         />
-      </mesh>
-    </group>
-  );
-}
-
-function DomainNode({
-  domain,
-  ruleCount,
-  position,
-  onHover,
-}: {
-  domain: PolicyDomain;
-  ruleCount: number;
-  position: Vec3;
-  onHover: (h: HoverInfo) => void;
-}) {
-  return (
-    <group
-      position={position}
-      onPointerOver={(e) => {
-        e.stopPropagation();
-        onHover({ kind: "domain", domain, ruleCount, position });
-      }}
-      onPointerOut={(e) => {
-        e.stopPropagation();
-        onHover(null);
-      }}
-    >
-      {/* A box, not a sphere/octahedron like anything else here — domains
-          are the one entity that's a container for others (its rules), not
-          a participant in a decision, so it reads as structurally different
-          at a glance, not just a different color. */}
-      <mesh scale={0.55} rotation={[0.3, 0.4, 0]}>
-        <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial color={domain.color} emissive={domain.color} emissiveIntensity={0.6} roughness={0.3} />
       </mesh>
     </group>
   );
@@ -308,20 +272,6 @@ function HoverPanel({ info }: { info: HoverInfo }) {
     title = info.rule.name;
     badge = { text: RULE_TYPE_LABELS[info.rule.type], color: ENTITY_COLORS.rule };
     lines = [info.rule.rationale ?? "No extra detail recorded for this rule."];
-  } else if (info.kind === "domain") {
-    title = info.domain.name;
-    badge = { text: info.domain.is_default ? "Catch-all default domain" : "Policy domain", color: info.domain.color };
-    const routing = [
-      ...info.domain.match_action_types.map((t) => actionTypeLabel(t)),
-      ...info.domain.match_categories.map((c) => `category "${c}"`),
-    ].join(" · ");
-    // Description OR the generic fallback, never both — the seeded domains'
-    // own descriptions already say "catch-all," so showing the generic
-    // line too was pure duplication, not extra information.
-    lines = [
-      info.domain.description || (info.domain.is_default ? "Governs anything no other domain claims." : routing ? `Routes here on: ${routing}` : ""),
-      `${info.ruleCount} active rule${info.ruleCount === 1 ? "" : "s"} of its own — independent of every other domain's.`,
-    ];
   } else if (info.kind === "mandate") {
     title = `${MANDATE_TYPE_LABELS[info.mandate.type]} · ${info.customerName}`;
     badge = { text: MANDATE_STATUS_LABELS[info.mandate.status], color: MANDATE_STATUS_COLORS[info.mandate.status] };
@@ -345,15 +295,9 @@ function HoverPanel({ info }: { info: HoverInfo }) {
     // regardless of zoom, which is what a hover label needs to be.
     <Html position={info.position} style={{ pointerEvents: "none" }} zIndexRange={[100, 0]}>
       {/* Hardcoded dark colors, not the (light-theme) CSS vars — this tooltip
-          floats over the graph's own dark canvas, not the light dashboard shell.
-          Domains sit at the topmost tier of the layout (see layout.ts) — a
-          tooltip that always opens upward has no headroom left above them and
-          runs off the top of the canvas. Opens downward for domains only;
-          every lower tier still has room to open upward as before. */}
+          floats over the graph's own dark canvas, not the light dashboard shell. */}
       <div
-        className={`w-72 -translate-x-1/2 rounded-xl border px-3.5 py-3 shadow-2xl backdrop-blur-md ${
-          info.kind === "domain" ? "translate-y-[14px]" : "-translate-y-[calc(100%+14px)]"
-        }`}
+        className="w-72 -translate-x-1/2 -translate-y-[calc(100%+14px)] rounded-xl border px-3.5 py-3 shadow-2xl backdrop-blur-md"
         style={{ background: "rgba(9,11,18,0.97)", borderColor: "rgba(255,255,255,0.14)", color: "#f3f5fb" }}
       >
         <p className="mb-1.5 text-[13px] font-semibold leading-snug">{title}</p>
@@ -381,30 +325,20 @@ function Scene({
   traces,
   mandates,
   customers,
-  domains,
 }: {
   agents: Agent[];
   rules: PolicyRule[];
   traces: Trace[];
   mandates: Mandate[];
   customers: Customer[];
-  domains: PolicyDomain[];
 }) {
   const [hover, setHover] = useState<HoverInfo>(null);
   const visibleTraces = useMemo(() => traces.slice(0, MAX_VISIBLE_TRACES), [traces]);
   const layout = useMemo(
-    () => computeLayout(agents, rules, visibleTraces, mandates, domains),
-    [agents, rules, visibleTraces, mandates, domains]
+    () => computeLayout(agents, rules, visibleTraces, mandates),
+    [agents, rules, visibleTraces, mandates]
   );
   const customerNameById = useMemo(() => new Map(customers.map((c) => [c.id, c.name])), [customers]);
-  const ruleCountByDomain = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const rule of rules) {
-      if (rule.status !== "active" || !rule.domain_id) continue;
-      counts.set(rule.domain_id, (counts.get(rule.domain_id) ?? 0) + 1);
-    }
-    return counts;
-  }, [rules]);
 
   const tracePositionById = useMemo(
     () => new Map(layout.traces.map((t) => [t.trace.id, t.position])),
@@ -452,18 +386,6 @@ function Scene({
     return edges;
   }, [layout]);
 
-  const domainRuleEdges = useMemo(() => {
-    const edges: { from: Vec3; to: Vec3; color: string }[] = [];
-    for (const r of layout.rules) {
-      const domainId = r.rule.domain_id;
-      const domainPos = domainId ? layout.domainPositionById[domainId] : null;
-      if (!domainPos) continue;
-      const domain = domains.find((d) => d.id === domainId);
-      edges.push({ from: domainPos, to: r.position, color: domain?.color ?? ENTITY_COLORS.rule });
-    }
-    return edges;
-  }, [layout, domains]);
-
   return (
     <>
       <ambientLight intensity={0.45} />
@@ -496,19 +418,6 @@ function Scene({
       ))}
       {mandateEdges.map((e, i) => (
         <Edge key={`me-${i}`} from={e.from} to={e.to} color={e.color} opacity={0.4} />
-      ))}
-      {domainRuleEdges.map((e, i) => (
-        <Edge key={`de-${i}`} from={e.from} to={e.to} color={e.color} opacity={0.3} />
-      ))}
-
-      {layout.domains.map((p) => (
-        <DomainNode
-          key={p.domain.id}
-          domain={p.domain}
-          ruleCount={ruleCountByDomain.get(p.domain.id) ?? 0}
-          position={p.position}
-          onHover={setHover}
-        />
       ))}
       {layout.agents.map((p) => (
         <AgentNode key={p.agent.id} agent={p.agent} position={p.position} onHover={setHover} />
@@ -552,20 +461,18 @@ export function GraphCanvas({
   traces,
   mandates = [],
   customers = [],
-  domains = [],
 }: {
   agents: Agent[];
   rules: PolicyRule[];
   traces: Trace[];
   mandates?: Mandate[];
   customers?: Customer[];
-  domains?: PolicyDomain[];
 }) {
   return (
     <Canvas camera={{ position: [9, 7, 9], fov: 50 }} className="h-full w-full" dpr={[1, 1.75]}>
       <color attach="background" args={["#05060a"]} />
       <fog attach="fog" args={["#05060a", 14, 34]} />
-      <Scene agents={agents} rules={rules} traces={traces} mandates={mandates} customers={customers} domains={domains} />
+      <Scene agents={agents} rules={rules} traces={traces} mandates={mandates} customers={customers} />
     </Canvas>
   );
 }

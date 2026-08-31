@@ -361,21 +361,17 @@
   }
 </style>
 </head>
-<body>
-
-<div class="hero">
+<body><div class="hero">
   <div class="eyebrow"><span class="dot"></span> reference — how mandate actually works</div>
   <h1>Mandate, end to end</h1>
   <p class="lede">
-    Everything in this codebase, in one place: what each piece is for, how a single
-    agent request travels through it, and the two ideas (agents, domains) that were
-    easy to tangle together. Built to be read top to bottom once, then jumped around
-    with the sidebar.
+    What each piece is for, how a single agent request travels through it, and why the
+    decisions are shaped the way they are. Built to be read top to bottom once, then
+    jumped around with the sidebar.
   </p>
   <div class="meta-row">
     <span class="pill accent">Razorpay Track 01 — Agentic Commerce</span>
     <span class="pill">Next.js 16 · Supabase · Razorpay · Clerk</span>
-    <span class="pill">Last updated for the policy-domains build</span>
   </div>
 </div>
 
@@ -387,15 +383,15 @@
       <li><a href="#architecture">System architecture</a></li>
       <li><a href="#auth">Two auth layers</a></li>
       <li><a href="#concepts">Core concepts</a></li>
-      <li><a href="#agents-vs-domains">Agents vs. domains</a></li>
       <li><a href="#decision-flow">One request&rsquo;s decision path</a></li>
+      <li><a href="#rules">The five rule types</a></li>
+      <li><a href="#trust">Trust, and why it bites</a></li>
       <li><a href="#mcp-tools">The four MCP tools</a></li>
-      <li><a href="#routing">Why one endpoint, not many</a></li>
+      <li><a href="#identity">Mapping a transaction to an agent</a></li>
+      <li><a href="#simulation">The simulated agent</a></li>
       <li><a href="#data-model">Data model</a></li>
-      <li><a href="#dashboard">The dashboard</a></li>
       <li><a href="#honesty">What&rsquo;s real vs. illustrative</a></li>
       <li><a href="#file-map">Where things live</a></li>
-      <li><a href="#deployment">Live deployment</a></li>
     </ul>
   </nav>
 
@@ -406,30 +402,34 @@
       <p class="section-intro">The one-paragraph version, if you read nothing else.</p>
       <p>
         Mandate is an <strong>agentic spending firewall</strong> — a policy-enforcement
-        layer that sits between an AI agent and Razorpay. An agent (a piece of software,
-        not a human) asks Mandate for permission to move money. Mandate checks whether
-        that agent still has a valid standing authorization (a <em>mandate</em>), works out
-        which independently-governed <em>policy domain</em> the request belongs to, evaluates
-        that domain&rsquo;s rules, and either lets the real Razorpay call through, escalates
-        it to a human, or blocks it outright — then remembers exactly why, forever, so
-        the decision can be explained later.
+        layer between an AI agent and Razorpay. An agent asks Mandate for permission to
+        move money. Mandate proves who is asking, checks whether that agent still holds a
+        valid standing authorization, evaluates the merchant&rsquo;s rules, and either lets
+        the real Razorpay call through, escalates it to a human, or refuses it — then
+        records exactly why, permanently.
       </p>
       <p>
-        Nothing here is simulated at the edges: agents sign real requests with real
-        Ed25519 keys, allowed actions are real Razorpay API calls, and every decision is
-        a real row in a real database that the dashboard reads live.
+        Nothing is simulated at the edges: agents sign real requests with real Ed25519
+        keys, allowed actions are real Razorpay API calls, and every decision is a row in
+        a real database the dashboard reads live.
       </p>
+      <div class="callout note">
+        <span class="label">The problem it exists for</span>
+        <p>
+          Today an AI agent buying on a merchant&rsquo;s behalf is invisible in the payment
+          record — it uses a saved card as the human, or the merchant&rsquo;s own API key.
+          You cannot cap, rate-limit, or revoke a thing you cannot name. Mandate gives the
+          agent a cryptographic name first; everything else follows from that.
+        </p>
+      </div>
     </section>
 
     <section id="architecture">
       <h2><span class="num">02</span> System architecture</h2>
-      <p class="section-intro">
-        Every arrow below is a real network call or a real database write — nothing
-        here is illustrative.
-      </p>
+      <p class="section-intro">Every arrow is a real network call or a real database write.</p>
       <div class="card fig">
         <figure>
-          <svg viewBox="0 0 900 460" role="img" aria-label="Agents sign requests to Mandate's single MCP server, which verifies, checks mandate status, resolves a policy domain, evaluates rules, and either calls Razorpay for real or stops the action — every outcome is written to Supabase, which the Clerk-gated dashboard polls.">
+          <svg viewBox="0 0 900 430" role="img" aria-label="Agents sign requests to Mandate's single MCP endpoint, which verifies the signature, checks mandate status, and evaluates policy rules before either calling Razorpay for real or stopping the action; every outcome is written to Supabase, which the Clerk-gated dashboard polls.">
             <defs>
               <marker id="arrow1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                 <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
@@ -439,74 +439,60 @@
               </marker>
             </defs>
             <g fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.9">
-              <!-- Agents column -->
-              <rect x="24" y="40" width="168" height="56" rx="9" />
-              <rect x="24" y="112" width="168" height="56" rx="9" />
-              <rect x="24" y="184" width="168" height="56" stroke-dasharray="4 4" rx="9" />
+              <rect x="24" y="70" width="168" height="56" rx="9" />
+              <rect x="24" y="150" width="168" height="56" rx="9" stroke-dasharray="4 4" />
             </g>
             <g font-family="var(--font-display)" font-size="13" fill="currentColor">
-              <text x="108" y="64" text-anchor="middle" font-weight="600">Checkout Agent</text>
-              <text x="108" y="80" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.6">scripted demo caller</text>
-              <text x="108" y="136" text-anchor="middle" font-weight="600">Background Traffic Bot</text>
-              <text x="108" y="152" text-anchor="middle" font-size="11" opacity="0.6">scripted demo caller</text>
-              <text x="108" y="208" text-anchor="middle" font-weight="600">Any real agent</text>
-              <text x="108" y="224" text-anchor="middle" font-size="11" opacity="0.6">third-party, once registered</text>
+              <text x="108" y="94" text-anchor="middle" font-weight="600">Checkout Agent</text>
+              <text x="108" y="110" text-anchor="middle" font-size="11" opacity="0.6">the simulated buyer</text>
+              <text x="108" y="174" text-anchor="middle" font-weight="600">Any real agent</text>
+              <text x="108" y="190" text-anchor="middle" font-size="11" opacity="0.6">third-party, once registered</text>
             </g>
 
-            <!-- arrow agents -> MCP server -->
-            <line x1="192" y1="130" x2="292" y2="130" stroke="var(--accent)" stroke-width="1.4" marker-end="url(#arrowAccent)" />
-            <text x="242" y="118" text-anchor="middle" font-size="11" fill="var(--accent)" font-family="var(--font-mono)">signs w/ Ed25519</text>
+            <line x1="192" y1="140" x2="292" y2="140" stroke="var(--accent)" stroke-width="1.4" marker-end="url(#arrowAccent)" />
+            <text x="242" y="128" text-anchor="middle" font-size="11" fill="var(--accent)" font-family="var(--font-mono)">signs w/ Ed25519</text>
 
-            <!-- MCP server big box -->
-            <rect x="296" y="30" width="272" height="270" rx="14" fill="none" stroke="var(--accent)" stroke-width="1.6" />
-            <text x="432" y="54" text-anchor="middle" font-size="13.5" font-weight="700" fill="currentColor">Mandate MCP server</text>
-            <text x="432" y="70" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.6" font-family="var(--font-mono)">POST /api/mcp — one endpoint</text>
+            <rect x="296" y="34" width="272" height="230" rx="14" fill="none" stroke="var(--accent)" stroke-width="1.6" />
+            <text x="432" y="58" text-anchor="middle" font-size="13.5" font-weight="700" fill="currentColor">Mandate MCP server</text>
+            <text x="432" y="74" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.6" font-family="var(--font-mono)">POST /api/mcp — one endpoint</text>
 
             <g font-family="var(--font-mono)" font-size="11.5" fill="currentColor">
-              <rect x="316" y="86" width="232" height="34" rx="7" fill="currentColor" opacity="0.06" stroke="none" />
-              <text x="432" y="107" text-anchor="middle">1. verify signature</text>
-              <rect x="316" y="128" width="232" height="34" rx="7" fill="currentColor" opacity="0.06" stroke="none" />
-              <text x="432" y="149" text-anchor="middle">2. check mandate status</text>
-              <rect x="316" y="170" width="232" height="34" rx="7" fill="currentColor" opacity="0.06" stroke="none" />
-              <text x="432" y="191" text-anchor="middle">3. resolve policy domain</text>
-              <rect x="316" y="212" width="232" height="34" rx="7" fill="currentColor" opacity="0.1" stroke="var(--accent)" stroke-width="1" />
-              <text x="432" y="233" text-anchor="middle" fill="var(--accent)">4. evaluate that domain&#8217;s rules</text>
+              <rect x="316" y="90" width="232" height="34" rx="7" fill="currentColor" opacity="0.06" stroke="none" />
+              <text x="432" y="111" text-anchor="middle">1. verify signature</text>
+              <rect x="316" y="132" width="232" height="34" rx="7" fill="currentColor" opacity="0.06" stroke="none" />
+              <text x="432" y="153" text-anchor="middle">2. check mandate status</text>
+              <rect x="316" y="174" width="232" height="34" rx="7" fill="currentColor" opacity="0.1" stroke="var(--accent)" stroke-width="1" />
+              <text x="432" y="195" text-anchor="middle" fill="var(--accent)">3. evaluate policy rules</text>
             </g>
-            <line x1="432" y1="120" x2="432" y2="128" stroke="currentColor" opacity="0.4" />
-            <line x1="432" y1="162" x2="432" y2="170" stroke="currentColor" opacity="0.4" />
-            <line x1="432" y1="204" x2="432" y2="212" stroke="currentColor" opacity="0.4" />
-            <text x="432" y="266" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.55">decision: allow / escalate / block</text>
+            <line x1="432" y1="124" x2="432" y2="132" stroke="currentColor" opacity="0.4" />
+            <line x1="432" y1="166" x2="432" y2="174" stroke="currentColor" opacity="0.4" />
+            <text x="432" y="234" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.55">decision: allow / escalate / block</text>
 
-            <!-- MCP -> Razorpay -->
-            <line x1="568" y1="90" x2="668" y2="90" stroke="currentColor" marker-end="url(#arrow1)" />
-            <text x="618" y="78" text-anchor="middle" font-size="11" font-family="var(--font-mono)" opacity="0.75">if allow: real API call</text>
-            <rect x="672" y="55" width="180" height="70" rx="9" fill="none" stroke="currentColor" />
-            <text x="762" y="86" text-anchor="middle" font-size="13" font-weight="600">Razorpay</text>
-            <text x="762" y="103" text-anchor="middle" font-size="11" opacity="0.6">orders · refunds · subscriptions</text>
+            <line x1="568" y1="92" x2="668" y2="92" stroke="currentColor" marker-end="url(#arrow1)" />
+            <text x="618" y="80" text-anchor="middle" font-size="11" font-family="var(--font-mono)" opacity="0.75">if allow: real API call</text>
+            <rect x="672" y="58" width="180" height="68" rx="9" fill="none" stroke="currentColor" />
+            <text x="762" y="88" text-anchor="middle" font-size="13" font-weight="600">Razorpay</text>
+            <text x="762" y="105" text-anchor="middle" font-size="11" opacity="0.6">orders · refunds · subscriptions</text>
 
-            <!-- MCP -> Supabase -->
-            <line x1="432" y1="300" x2="432" y2="356" stroke="currentColor" marker-end="url(#arrow1)" />
-            <text x="500" y="332" text-anchor="middle" font-size="11" font-family="var(--font-mono)" opacity="0.75">trace + trust + mandate state</text>
-            <rect x="292" y="360" width="280" height="66" rx="9" fill="none" stroke="currentColor" />
-            <text x="432" y="388" text-anchor="middle" font-size="13" font-weight="600">Supabase (Postgres)</text>
-            <text x="432" y="405" text-anchor="middle" font-size="11" opacity="0.6">the only source of truth — no cache</text>
+            <line x1="432" y1="264" x2="432" y2="320" stroke="currentColor" marker-end="url(#arrow1)" />
+            <text x="507" y="296" text-anchor="middle" font-size="11" font-family="var(--font-mono)" opacity="0.75">trace + trust + mandate state</text>
+            <rect x="292" y="324" width="280" height="66" rx="9" fill="none" stroke="currentColor" />
+            <text x="432" y="352" text-anchor="middle" font-size="13" font-weight="600">Supabase (Postgres)</text>
+            <text x="432" y="369" text-anchor="middle" font-size="11" opacity="0.6">the only source of truth</text>
 
-            <!-- Razorpay -> Supabase (response stored) -->
-            <line x1="720" y1="125" x2="720" y2="230" stroke="currentColor" stroke-dasharray="3 3" opacity="0.5" />
-            <line x1="720" y1="230" x2="574" y2="393" stroke="currentColor" stroke-dasharray="3 3" opacity="0.5" marker-end="url(#arrow1)" />
+            <line x1="720" y1="126" x2="720" y2="210" stroke="currentColor" stroke-dasharray="3 3" opacity="0.5" />
+            <line x1="720" y1="210" x2="574" y2="357" stroke="currentColor" stroke-dasharray="3 3" opacity="0.5" marker-end="url(#arrow1)" />
 
-            <!-- Supabase -> Dashboard -->
-            <line x1="572" y1="393" x2="672" y2="290" stroke="currentColor" marker-end="url(#arrow1)" />
-            <text x="660" y="345" text-anchor="middle" font-size="11" font-family="var(--font-mono)" opacity="0.75">poll, 4s</text>
-            <rect x="672" y="250" width="180" height="80" rx="9" fill="none" stroke="currentColor" />
-            <text x="762" y="278" text-anchor="middle" font-size="13" font-weight="600">Dashboard</text>
-            <text x="762" y="295" text-anchor="middle" font-size="11" opacity="0.6">Clerk-gated, human merchant</text>
-            <text x="762" y="311" text-anchor="middle" font-size="11" opacity="0.6">approves escalations here</text>
+            <line x1="572" y1="357" x2="672" y2="270" stroke="currentColor" marker-end="url(#arrow1)" />
+            <text x="655" y="322" text-anchor="middle" font-size="11" font-family="var(--font-mono)" opacity="0.75">poll, 4s</text>
+            <rect x="672" y="230" width="180" height="80" rx="9" fill="none" stroke="currentColor" />
+            <text x="762" y="258" text-anchor="middle" font-size="13" font-weight="600">Dashboard</text>
+            <text x="762" y="275" text-anchor="middle" font-size="11" opacity="0.6">Clerk-gated, human merchant</text>
+            <text x="762" y="291" text-anchor="middle" font-size="11" opacity="0.6">approves escalations here</text>
           </svg>
           <figcaption>
-            One endpoint, three real systems behind it. Every agent — scripted or real —
-            hits the same URL; what happens next depends on what they asked for, not
-            which door they knocked on.
+            One endpoint, three real systems behind it. Every agent hits the same URL; what
+            happens next depends on what it asked for and what it has proven.
           </figcaption>
         </figure>
       </div>
@@ -514,86 +500,41 @@
 
     <section id="auth">
       <h2><span class="num">03</span> Two authentication layers</h2>
-      <p class="section-intro">
-        A recurring point of confusion: there are <em>two separate</em> identity
-        systems in play, gating two separate kinds of caller.
-      </p>
+      <p class="section-intro">Two separate identity systems, gating two kinds of caller.</p>
       <div class="table-wrap card">
         <table>
-          <thead>
-            <tr><th></th><th>Clerk</th><th>Web Bot Auth</th></tr>
-          </thead>
+          <thead><tr><th></th><th>Clerk</th><th>Web Bot Auth</th></tr></thead>
           <tbody>
             <tr><td><strong>Gates</strong></td><td>The dashboard — a human merchant</td><td><code>/api/mcp</code> — an AI agent</td></tr>
             <tr><td><strong>Mechanism</strong></td><td>Email/password or Google OAuth session</td><td>Ed25519 signature over every request (RFC 9421-shaped)</td></tr>
-            <tr><td><strong>Identity lives in</strong></td><td>Clerk&rsquo;s own hosted service</td><td><code class="mono">agents.public_key</code> in Supabase</td></tr>
-            <tr><td><strong>Proves</strong></td><td>&ldquo;I&rsquo;m an authorized person&rdquo;</td><td>&ldquo;This exact request came from this exact registered key&rdquo;</td></tr>
-            <tr><td><strong>Failure mode</strong></td><td>Redirected to <code>/login</code></td><td><code>protocol_reject</code> — caught before policy logic ever runs</td></tr>
+            <tr><td><strong>Identity lives in</strong></td><td>Clerk&rsquo;s hosted service</td><td><code class="mono">agents.public_key</code> in Supabase</td></tr>
+            <tr><td><strong>Proves</strong></td><td>&ldquo;I&rsquo;m an authorized person&rdquo;</td><td>&ldquo;This exact request came from this exact key&rdquo;</td></tr>
+            <tr><td><strong>Failure mode</strong></td><td>Redirected to <code>/login</code></td><td><code>protocol_reject</code> — before any policy logic runs</td></tr>
           </tbody>
         </table>
       </div>
-      <p>They never overlap: a merchant never signs a request, and an agent never has a Clerk session.</p>
+      <p>A merchant never signs a request, and an agent never has a Clerk session.</p>
     </section>
 
     <section id="concepts">
       <h2><span class="num">04</span> Core concepts</h2>
-      <p class="section-intro">Seven nouns. Everything else in the system is built from these.</p>
+      <p class="section-intro">Six nouns. Everything else is built from these.</p>
       <div class="concepts">
-        <div class="concept card"><div class="k"><span class="dot-lg" style="background:var(--agent)"></span>Agent</div><p>A registered identity (an Ed25519 keypair) representing one piece of calling software. Accumulates its own trust score from its own history.</p></div>
-        <div class="concept card"><div class="k"><span class="dot-lg" style="background:var(--accent)"></span>Policy domain</div><p>An independently-governed zone — its own rules, its own approval queue. An action lands in one based on <em>what it is</em>, never who called it.</p></div>
-        <div class="concept card"><div class="k"><span class="dot-lg" style="background:var(--rule)"></span>Policy rule</div><p>One of four types — <code>cap</code>, <code>velocity</code>, <code>category_block</code>, <code>step_up</code> — belonging to exactly one domain.</p></div>
-        <div class="concept card"><div class="k"><span class="dot-lg" style="background:var(--mandate)"></span>Mandate</div><p>A standing authorization for one agent to act on one customer&rsquo;s behalf. Revoking it blocks every future action under it, instantly.</p></div>
-        <div class="concept card"><div class="k"><span class="dot-lg" style="background:var(--transaction)"></span>Trace</div><p>A permanent record of one decision — what was asked, what domain/rule governed it, what happened, and why, in plain language.</p></div>
-        <div class="concept card"><div class="k"><span class="dot-lg" style="background:var(--escalate)"></span>Escalation</div><p>What a <code>step_up</code> rule produces instead of a block — sits in a queue until a human approves or denies it.</p></div>
-        <div class="concept card"><div class="k"><span class="dot-lg" style="background:var(--customer)"></span>Trust score</div><p>0–100 per agent. Starts at 50, moves with its own approval/block/escalation history and account age.</p></div>
+        <div class="concept card"><div class="k"><span class="dot-lg" style="background:var(--agent)"></span>Agent</div><p>A registered identity — an Ed25519 keypair — representing one piece of calling software. Accumulates its own trust score from its own record.</p></div>
+        <div class="concept card"><div class="k"><span class="dot-lg" style="background:var(--rule)"></span>Policy rule</div><p>One of five types. All active rules are checked against every action, in a fixed priority order; the first match decides.</p></div>
+        <div class="concept card"><div class="k"><span class="dot-lg" style="background:var(--mandate)"></span>Mandate</div><p>A standing authorization for one agent to act for one customer. Revoking it blocks every future action under it, immediately.</p></div>
+        <div class="concept card"><div class="k"><span class="dot-lg" style="background:var(--transaction)"></span>Trace</div><p>A permanent record of one decision — what was asked, which rule governed it, what happened, and why, in plain language.</p></div>
+        <div class="concept card"><div class="k"><span class="dot-lg" style="background:var(--escalate)"></span>Escalation</div><p>What a step-up or trust rule produces instead of a refusal. It waits in a queue, and approving it is what actually executes the held action.</p></div>
+        <div class="concept card"><div class="k"><span class="dot-lg" style="background:var(--customer)"></span>Trust score</div><p>0–100 per agent, from its own recent record. Not decoration: a rule reads it.</p></div>
       </div>
-    </section>
-
-    <section id="agents-vs-domains">
-      <h2><span class="num">05</span> Agents vs. domains</h2>
-      <p class="section-intro">
-        The single most important distinction in this codebase, because it looks
-        like one idea and is actually two independent axes.
-      </p>
-      <p><strong>Agent answers &ldquo;who.&rdquo;</strong> Domain answers &ldquo;what kind, and therefore which rules.&rdquo;</p>
-      <div class="table-wrap card">
-        <table>
-          <thead>
-            <tr><th></th><th>Checkout Agent</th><th>Background Traffic Bot</th></tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td class="mono">calls <code>order.create</code></td>
-              <td>→ routed to <strong style="color:var(--accent)">Purchases</strong> domain</td>
-              <td>→ routed to <strong style="color:var(--accent)">Purchases</strong> domain</td>
-            </tr>
-            <tr>
-              <td class="mono">calls <code>subscription.create</code></td>
-              <td>→ routed to <strong style="color:var(--mandate)">Recurring Mandates</strong> domain</td>
-              <td><span style="color:var(--muted-2)">never calls this</span></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p>
-        Read down a column: the <em>same agent</em> lands in two different domains
-        depending on what it&rsquo;s doing. Read across a row: two <em>different agents</em>
-        land in the same domain, governed by the exact same rule, regardless of who
-        triggered it. Neither axis can substitute for the other — collapsing them
-        would make it impossible to answer either &ldquo;who do I trust&rdquo; or
-        &ldquo;which rule applies here&rdquo; on its own.
-      </p>
     </section>
 
     <section id="decision-flow">
-      <h2><span class="num">06</span> One request&rsquo;s decision path</h2>
-      <p class="section-intro">
-        What actually happens, in order, for a single <code>enforce_action</code> call —
-        the mechanism every other section refers back to.
-      </p>
+      <h2><span class="num">05</span> One request&rsquo;s decision path</h2>
+      <p class="section-intro">What actually happens, in order, for a single <code>enforce_action</code> call.</p>
       <div class="card fig">
         <figure>
-          <svg viewBox="0 0 620 900" role="img" aria-label="An enforce_action call is verified for a valid signature, checked against mandate status, routed to its policy domain, evaluated against that domain's rules in fixed priority, and results in allow, escalate, or block, with a real Razorpay call only on allow.">
+          <svg viewBox="0 0 620 750" role="img" aria-label="An enforce_action call is verified for a valid signature, checked against mandate status, then evaluated against the active rules in fixed priority order, resulting in allow, escalate, or block, with a real Razorpay call only on allow.">
             <defs>
               <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
                 <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
@@ -613,7 +554,7 @@
 
               <line x1="310" y1="136" x2="310" y2="166" stroke="currentColor" marker-end="url(#arrow2)" />
               <rect x="130" y="170" width="360" height="52" rx="9" fill="none" stroke="currentColor" />
-              <text x="310" y="193" text-anchor="middle">Has a customerId, isn&#8217;t establishing</text>
+              <text x="310" y="193" text-anchor="middle">Has a customer, isn&#8217;t establishing</text>
               <text x="310" y="209" text-anchor="middle">a new mandate? Check its status.</text>
               <line x1="490" y1="196" x2="576" y2="196" stroke="var(--block)" marker-end="url(#arrow2)" />
               <text x="533" y="184" text-anchor="middle" font-size="10.5" fill="var(--block)" font-family="var(--font-mono)">revoked/paused</text>
@@ -622,280 +563,288 @@
 
               <line x1="310" y1="222" x2="310" y2="252" stroke="currentColor" marker-end="url(#arrow2)" />
               <rect x="150" y="256" width="320" height="46" rx="9" fill="var(--accent-soft)" stroke="var(--accent)" />
-              <text x="310" y="284" text-anchor="middle" fill="var(--accent)">Resolve domain (action type / category)</text>
+              <text x="310" y="284" text-anchor="middle" fill="var(--accent)">Read this agent&#8217;s current trust score</text>
 
               <line x1="310" y1="302" x2="310" y2="332" stroke="currentColor" marker-end="url(#arrow2)" />
-              <rect x="150" y="336" width="320" height="46" rx="9" fill="none" stroke="currentColor" />
-              <text x="310" y="364" text-anchor="middle">Load only THAT domain&#8217;s active rules</text>
+              <rect x="90" y="336" width="440" height="76" rx="9" fill="none" stroke="currentColor" />
+              <text x="310" y="360" text-anchor="middle">Evaluate active rules, first match wins:</text>
+              <text x="310" y="381" text-anchor="middle" font-family="var(--font-mono)" font-size="11.5">category_block &#8594; cap &#8594; velocity</text>
+              <text x="310" y="399" text-anchor="middle" font-family="var(--font-mono)" font-size="11.5">&#8594; trust_floor &#8594; step_up</text>
 
-              <line x1="310" y1="382" x2="310" y2="412" stroke="currentColor" marker-end="url(#arrow2)" />
-              <rect x="110" y="416" width="400" height="60" rx="9" fill="none" stroke="currentColor" />
-              <text x="310" y="440" text-anchor="middle">Evaluate, first match wins:</text>
-              <text x="310" y="459" text-anchor="middle" font-family="var(--font-mono)" font-size="12">category_block &#8594; cap &#8594; velocity &#8594; step_up</text>
+              <line x1="310" y1="412" x2="310" y2="440" stroke="currentColor" marker-end="url(#arrow2)" />
+              <text x="310" y="458" text-anchor="middle" font-size="11.5" opacity="0.65">no rule matched = allow by default</text>
 
-              <line x1="310" y1="476" x2="310" y2="506" stroke="currentColor" marker-end="url(#arrow2)" />
-              <text x="310" y="524" text-anchor="middle" font-size="11.5" opacity="0.65">no rule matched = allow by default</text>
+              <line x1="230" y1="466" x2="110" y2="512" stroke="var(--allow)" marker-end="url(#arrow2)" />
+              <line x1="310" y1="466" x2="310" y2="512" stroke="var(--escalate)" marker-end="url(#arrow2)" />
+              <line x1="390" y1="466" x2="500" y2="512" stroke="var(--block)" marker-end="url(#arrow2)" />
 
-              <!-- three-way outcome -->
-              <line x1="230" y1="530" x2="110" y2="580" stroke="var(--allow)" marker-end="url(#arrow2)" />
-              <line x1="310" y1="530" x2="310" y2="580" stroke="var(--escalate)" marker-end="url(#arrow2)" />
-              <line x1="390" y1="530" x2="500" y2="580" stroke="var(--block)" marker-end="url(#arrow2)" />
+              <rect x="30" y="516" width="170" height="40" rx="8" fill="none" stroke="var(--allow)" />
+              <text x="115" y="541" text-anchor="middle" fill="var(--allow)" font-weight="600">allow</text>
+              <rect x="225" y="516" width="170" height="40" rx="8" fill="none" stroke="var(--escalate)" />
+              <text x="310" y="541" text-anchor="middle" fill="var(--escalate)" font-weight="600">escalate</text>
+              <rect x="420" y="516" width="170" height="40" rx="8" fill="none" stroke="var(--block)" />
+              <text x="505" y="541" text-anchor="middle" fill="var(--block)" font-weight="600">block</text>
 
-              <rect x="30" y="584" width="170" height="40" rx="8" fill="none" stroke="var(--allow)" />
-              <text x="115" y="609" text-anchor="middle" fill="var(--allow)" font-weight="600">allow</text>
+              <line x1="115" y1="556" x2="115" y2="584" stroke="var(--allow)" marker-end="url(#arrow2)" />
+              <rect x="30" y="588" width="170" height="46" rx="8" fill="none" stroke="var(--allow)" />
+              <text x="115" y="608" text-anchor="middle" font-size="11.5">Real Razorpay call</text>
+              <text x="115" y="624" text-anchor="middle" font-size="11.5">only now, never before</text>
 
-              <rect x="225" y="584" width="170" height="40" rx="8" fill="none" stroke="var(--escalate)" />
-              <text x="310" y="609" text-anchor="middle" fill="var(--escalate)" font-weight="600">escalate</text>
+              <line x1="310" y1="556" x2="310" y2="584" stroke="var(--escalate)" marker-end="url(#arrow2)" />
+              <rect x="225" y="588" width="170" height="46" rx="8" fill="none" stroke="var(--escalate)" />
+              <text x="310" y="608" text-anchor="middle" font-size="11.5">Waits in the queue;</text>
+              <text x="310" y="624" text-anchor="middle" font-size="11.5">approving it executes it</text>
 
-              <rect x="420" y="584" width="170" height="40" rx="8" fill="none" stroke="var(--block)" />
-              <text x="505" y="609" text-anchor="middle" fill="var(--block)" font-weight="600">block</text>
+              <line x1="505" y1="556" x2="505" y2="584" stroke="var(--block)" marker-end="url(#arrow2)" />
+              <rect x="420" y="588" width="170" height="46" rx="8" fill="none" stroke="var(--block)" />
+              <text x="505" y="608" text-anchor="middle" font-size="11.5">Alert logged,</text>
+              <text x="505" y="624" text-anchor="middle" font-size="11.5">nothing executes</text>
 
-              <line x1="115" y1="624" x2="115" y2="654" stroke="var(--allow)" marker-end="url(#arrow2)" />
-              <rect x="30" y="658" width="170" height="46" rx="8" fill="none" stroke="var(--allow)" />
-              <text x="115" y="678" text-anchor="middle" font-size="11.5">Real Razorpay call</text>
-              <text x="115" y="694" text-anchor="middle" font-size="11.5">only now, never before</text>
-
-              <line x1="310" y1="624" x2="310" y2="654" stroke="var(--escalate)" marker-end="url(#arrow2)" />
-              <rect x="225" y="658" width="170" height="46" rx="8" fill="none" stroke="var(--escalate)" />
-              <text x="310" y="678" text-anchor="middle" font-size="11.5">Sits in the queue</text>
-              <text x="310" y="694" text-anchor="middle" font-size="11.5">until a human decides</text>
-
-              <line x1="505" y1="624" x2="505" y2="654" stroke="var(--block)" marker-end="url(#arrow2)" />
-              <rect x="420" y="658" width="170" height="46" rx="8" fill="none" stroke="var(--block)" />
-              <text x="505" y="678" text-anchor="middle" font-size="11.5">Alert logged,</text>
-              <text x="505" y="694" text-anchor="middle" font-size="11.5">nothing executes</text>
-
-              <line x1="115" y1="704" x2="115" y2="734" stroke="currentColor" marker-end="url(#arrow2)" />
-              <line x1="310" y1="704" x2="235" y2="734" stroke="currentColor" opacity="0.5" />
-              <line x1="505" y1="704" x2="385" y2="734" stroke="currentColor" opacity="0.5" marker-end="url(#arrow2)" />
-              <line x1="115" y1="734" x2="385" y2="734" stroke="currentColor" opacity="0.5" />
-              <rect x="115" y="738" width="270" height="46" rx="9" fill="none" stroke="currentColor" />
-              <text x="250" y="758" text-anchor="middle" font-size="11.5">Trace written, trust score</text>
-              <text x="250" y="774" text-anchor="middle" font-size="11.5">recomputed — every outcome, always</text>
+              <line x1="115" y1="634" x2="115" y2="664" stroke="currentColor" marker-end="url(#arrow2)" />
+              <line x1="505" y1="634" x2="385" y2="664" stroke="currentColor" opacity="0.5" marker-end="url(#arrow2)" />
+              <line x1="310" y1="634" x2="250" y2="664" stroke="currentColor" opacity="0.5" />
+              <line x1="115" y1="664" x2="385" y2="664" stroke="currentColor" opacity="0.5" />
+              <rect x="115" y="668" width="270" height="46" rx="9" fill="none" stroke="currentColor" />
+              <text x="250" y="688" text-anchor="middle" font-size="11.5">Trace written, trust recomputed</text>
+              <text x="250" y="704" text-anchor="middle" font-size="11.5">— every outcome, always</text>
             </g>
           </svg>
           <figcaption>
-            Two gates run before any policy rule is even loaded (signature, mandate) —
-            both can stop the request cold, independent of what a rule would have said.
-            Only after those does the domain-scoped rule set get its turn.
+            Two gates run before any rule is consulted — signature, then mandate status.
+            Either can stop the request cold, independent of what a rule would have said.
           </figcaption>
         </figure>
       </div>
     </section>
 
-    <section id="mcp-tools">
-      <h2><span class="num">07</span> The four MCP tools</h2>
+    <section id="rules">
+      <h2><span class="num">06</span> The five rule types</h2>
       <p class="section-intro">
-        Deliberately exactly four, reused for every domain and every agent — no
-        per-domain or per-agent tool variants.
+        All active rules are checked against every action, in a fixed order. The first
+        match decides, and its reasoning is what the merchant reads.
       </p>
       <div class="table-wrap card">
         <table>
-          <thead><tr><th class="mono">Tool</th><th>Does</th><th>Real side effect?</th></tr></thead>
+          <thead><tr><th class="mono">order</th><th class="mono">type</th><th>Refuses or defers when&hellip;</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">1</td><td class="mono">category_block</td><td>the category is banned outright, at any amount</td></tr>
+            <tr><td class="mono">2</td><td class="mono">cap</td><td>a per-transaction or per-day ceiling is exceeded</td></tr>
+            <tr><td class="mono">3</td><td class="mono">velocity</td><td>too many actions in a window — amount-blind, the <em>pace</em> is the signal</td></tr>
+            <tr><td class="mono">4</td><td class="mono">trust_floor</td><td>the agent&rsquo;s trust has fallen below a minimum, at any amount</td></tr>
+            <tr><td class="mono">5</td><td class="mono">step_up</td><td>the amount is above a threshold — send it to a human</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        The ordering is a policy choice, not an accident. Hard bans and absolute ceilings
+        come first because they are not judgment calls. <code>trust_floor</code> sits above
+        <code>step_up</code> because &ldquo;this agent has not earned the benefit of the
+        doubt&rdquo; is a stronger reason to involve a human than &ldquo;this amount is
+        large&rdquo; — so a distrusted agent&rsquo;s stated reason is its record, not an
+        amount threshold that happened to also match.
+      </p>
+    </section>
+
+    <section id="trust">
+      <h2><span class="num">07</span> Trust, and why it bites</h2>
+      <p class="section-intro">
+        A reputation signal nothing acts on is decoration. This one gates decisions.
+      </p>
+      <p>
+        Every agent starts at a neutral <strong>50</strong>. The score moves with its own
+        record: a clean approve-to-block ratio pushes it up, escalations nudge it down, and
+        account age adds a small capped bonus so a brand-new agent cannot out-trust an
+        established one on a lucky streak. A <code>trust_floor</code> rule reads that
+        number — below the threshold, an agent&rsquo;s actions are held for a human
+        regardless of amount, because at that point the problem is the caller rather than
+        the transaction.
+      </p>
+
+      <h3>Computed over recent decisions, not all history</h3>
+      <p>
+        An all-time score cannot be recovered from. An agent with hundreds of clean actions
+        barely moves when it misbehaves, and one that misbehaved badly stays punished no
+        matter how it behaves afterwards. Neither is what reputation should do — and a
+        score that cannot move is one no gate can meaningfully act on.
+      </p>
+
+      <div class="callout warn">
+        <span class="label">A trap this design had to avoid</span>
+        <p>
+          Once the floor starts holding an agent, <em>every</em> subsequent decision is an
+          escalation — so if escalations are penalised heavily, the penalty becomes
+          self-sustaining and the gate turns into a one-way trapdoor no amount of good
+          behaviour reopens. Escalations are therefore weighted lightly, which puts a held
+          agent&rsquo;s equilibrium at 40 — above a floor of 35, so it recovers — while an
+          agent genuinely being blocked settles near 29 and stays held. Changing either
+          number has to preserve that ordering.
+        </p>
+      </div>
+
+      <h3>Forged requests count against nobody</h3>
+      <p>
+        Rejected signatures are recorded as traces and alerts, but never against an
+        agent&rsquo;s score. A request whose signature does not verify carries no proven
+        identity — the signature is what proves it — so attributing it by the
+        <em>claimed</em> agent id would let anyone destroy a competitor&rsquo;s reputation
+        by sending forgeries in their name.
+      </p>
+    </section>
+
+    <section id="mcp-tools">
+      <h2><span class="num">08</span> The four MCP tools</h2>
+      <p class="section-intro">
+        Deliberately exactly four, identical for every agent. A new agent needs no new tool
+        and no new endpoint.
+      </p>
+      <div class="table-wrap card">
+        <table>
+          <thead><tr><th class="mono">Tool</th><th>Does</th><th>Side effect?</th></tr></thead>
           <tbody>
             <tr><td class="mono">simulate_action</td><td>Runs the full decision path, returns what would happen</td><td>None — read-only preview</td></tr>
-            <tr><td class="mono">enforce_action</td><td>Same decision path; on <code>allow</code>, actually executes</td><td>Real Razorpay call, real trace</td></tr>
-            <tr><td class="mono">explain</td><td>Groq-backed plain-language explanation of a past trace</td><td>None — grounded in the real trace, not freeform</td></tr>
-            <tr><td class="mono">draft_policy</td><td>Turns plain language into a structured, backtested rule</td><td>Inserts a <code>pending_review</code> row — never auto-activates</td></tr>
+            <tr><td class="mono">enforce_action</td><td>Same path; on <code>allow</code>, actually executes</td><td>Real Razorpay call, real trace</td></tr>
+            <tr><td class="mono">explain</td><td>Plain-language account of a past decision</td><td>None — grounded in the real trace</td></tr>
+            <tr><td class="mono">draft_policy</td><td>Turns plain language into a structured, backtested rule</td><td>Inserts as <code>pending_review</code> — never auto-activates</td></tr>
           </tbody>
         </table>
       </div>
     </section>
 
-    <section id="routing">
-      <h2><span class="num">08</span> Why one endpoint, not one per domain</h2>
+    <section id="identity">
+      <h2><span class="num">09</span> Mapping a transaction to an agent</h2>
       <p class="section-intro">
-        The architectural fork that&rsquo;s easy to get wrong: route by <em>content</em>,
-        or route by <em>address</em>?
+        The agent never tells you who it is. It proves it, and the identity is derived from
+        the proof.
       </p>
-      <div class="card fig">
-        <figure>
-          <svg viewBox="0 0 780 300" role="img" aria-label="Comparison: content-based routing sends every agent to one endpoint that internally resolves the domain, while per-domain endpoints require every agent to already know and separately integrate with each domain's own URL.">
-            <defs>
-              <marker id="arrow3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
-              </marker>
-            </defs>
-            <text x="195" y="26" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent)">Content-based (built)</text>
-            <rect x="60" y="46" width="120" height="38" rx="8" fill="none" stroke="currentColor" />
-            <text x="120" y="70" text-anchor="middle" font-size="12">Any agent</text>
-            <line x1="180" y1="65" x2="220" y2="65" stroke="var(--accent)" marker-end="url(#arrow3)" />
-            <rect x="224" y="46" width="150" height="38" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" />
-            <text x="299" y="70" text-anchor="middle" font-size="12" font-family="var(--font-mono)">/api/mcp</text>
-            <line x1="299" y1="84" x2="150" y2="150" stroke="currentColor" opacity="0.55" marker-end="url(#arrow3)" />
-            <line x1="299" y1="84" x2="299" y2="150" stroke="currentColor" opacity="0.55" marker-end="url(#arrow3)" />
-            <line x1="299" y1="84" x2="360" y2="150" stroke="currentColor" opacity="0.55" marker-end="url(#arrow3)" />
-            <rect x="90" y="154" width="120" height="36" rx="7" fill="none" stroke="currentColor" opacity="0.85" />
-            <text x="150" y="176" text-anchor="middle" font-size="11">Purchases</text>
-            <rect x="239" y="154" width="120" height="36" rx="7" fill="none" stroke="currentColor" opacity="0.85" />
-            <text x="299" y="176" text-anchor="middle" font-size="11">Mandates</text>
-            <rect x="300" y="154" width="120" height="36" rx="7" fill="none" stroke="currentColor" opacity="0.85" style="transform:translateX(60px)"/>
-            <text x="420" y="176" text-anchor="middle" font-size="11">Logistics</text>
-            <text x="240" y="212" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.6">resolved internally, by action type / category</text>
-            <text x="240" y="234" text-anchor="middle" font-size="12" fill="var(--allow)">one URL to integrate with, ever</text>
+      <ol>
+        <li>The agent builds a <code>Signature-Input</code> header carrying its agent id as <code>keyid</code>, and signs the method, path, authority, a digest of the body — <strong>and that header itself</strong>.</li>
+        <li>The server looks up <code>agents.public_key</code> by that <code>keyid</code>, recomputes the body digest, and verifies the signature.</li>
+        <li>The <em>verified</em> keyid is attached to the request and passed down as an argument.</li>
+        <li>The trace is written with <code>agent_id</code> already set.</li>
+      </ol>
+      <p>
+        Because the keyid sits inside the signed material, you cannot lift a valid request
+        and swap the keyid to impersonate another agent — the signature stops matching. And
+        <code>agentId</code> is deliberately absent from the tool input schema, so it can
+        never come from the request body. An agent can misdescribe an action&rsquo;s
+        category; it cannot misrepresent <em>who it is</em>.
+      </p>
+      <p>
+        Nothing here is hardcoded. Register an agent, point a signed client at the endpoint,
+        and its transactions attach to it automatically — its own trust score, its own
+        history, no code change.
+      </p>
+    </section>
 
-            <line x1="450" y1="20" x2="450" y2="270" stroke="currentColor" opacity="0.15" />
-
-            <text x="615" y="26" text-anchor="middle" font-size="13" font-weight="700" opacity="0.7">Per-domain endpoints (rejected)</text>
-            <rect x="480" y="150" width="110" height="34" rx="7" fill="none" stroke="currentColor" opacity="0.7" />
-            <text x="535" y="171" text-anchor="middle" font-size="10.5" font-family="var(--font-mono)">/domains/purchases</text>
-            <rect x="480" y="192" width="110" height="34" rx="7" fill="none" stroke="currentColor" opacity="0.7" />
-            <text x="535" y="213" text-anchor="middle" font-size="10.5" font-family="var(--font-mono)">/domains/mandates</text>
-            <rect x="480" y="234" width="110" height="34" rx="7" fill="none" stroke="currentColor" opacity="0.7" />
-            <text x="535" y="255" text-anchor="middle" font-size="10.5" font-family="var(--font-mono)">/domains/logistics</text>
-
-            <rect x="640" y="150" width="120" height="34" rx="7" fill="none" stroke="currentColor" opacity="0.7" />
-            <text x="700" y="171" text-anchor="middle" font-size="11">Agent A</text>
-            <rect x="640" y="192" width="120" height="34" rx="7" fill="none" stroke="currentColor" opacity="0.7" />
-            <text x="700" y="213" text-anchor="middle" font-size="11">Agent B</text>
-            <rect x="640" y="234" width="120" height="34" rx="7" fill="none" stroke="currentColor" opacity="0.7" />
-            <text x="700" y="255" text-anchor="middle" font-size="11">Agent C</text>
-            <line x1="640" y1="167" x2="590" y2="167" stroke="currentColor" opacity="0.55" marker-end="url(#arrow3)" />
-            <line x1="640" y1="209" x2="590" y2="209" stroke="currentColor" opacity="0.55" marker-end="url(#arrow3)" />
-            <line x1="640" y1="251" x2="590" y2="251" stroke="currentColor" opacity="0.55" marker-end="url(#arrow3)" />
-            <text x="700" y="280" text-anchor="middle" font-size="12" fill="var(--block)">a new domain = a new route to provision</text>
-          </svg>
-          <figcaption>
-            Same outcome — each domain independently governed — reached two ways. The
-            left side is what real payment APIs (Stripe, Razorpay itself) already do:
-            one stable surface, routed internally by what the request <em>is</em>.
-          </figcaption>
-        </figure>
+    <section id="simulation">
+      <h2><span class="num">10</span> The simulated agent</h2>
+      <p class="section-intro">One agent, transacting continuously — not a scripted walkthrough.</p>
+      <p>
+        Each tick picks a scenario by weight and then lets the <strong>real engine
+        decide</strong>. A high-value action escalates because it genuinely crosses the
+        step-up threshold, not because the simulation labelled it an escalation — so if a
+        rule is retuned, the mix shifts with it. Purely random purchases would be an
+        unbroken wall of &ldquo;allow&rdquo; and would never show the engine doing anything;
+        the weighting is what makes every decision type surface on its own.
+      </p>
+      <div class="table-wrap card">
+        <table>
+          <thead><tr><th>Speed</th><th class="mono">interval</th><th>Effect</th></tr></thead>
+          <tbody>
+            <tr><td>Calm</td><td class="mono">30s</td><td>comfortably inside the velocity limit</td></tr>
+            <tr><td>Busy</td><td class="mono">10s</td><td>inside the limit</td></tr>
+            <tr><td>Stress</td><td class="mono">3s</td><td><strong>deliberately outruns it</strong> — the rate limiter engages, live</td></tr>
+          </tbody>
+        </table>
       </div>
       <p>
-        The per-domain version also can&rsquo;t survive a merchant creating a new
-        domain from the canvas without dynamically provisioning a new route — a much
-        harder problem, for no functional gain over reading <code>action_type</code>
-        and <code>category</code> off the same request.
+        That last row is the point of having a speed control at all: the guardrail can be
+        watched working rather than only described.
       </p>
     </section>
 
     <section id="data-model">
-      <h2><span class="num">09</span> Data model</h2>
-      <p class="section-intro">Nine tables, grouped by what they&rsquo;re actually for.</p>
-
-      <h3>Identity &amp; authorization</h3>
+      <h2><span class="num">11</span> Data model</h2>
       <div class="table-wrap card">
         <table>
           <thead><tr><th class="mono">table</th><th>Key columns</th><th>Purpose</th></tr></thead>
           <tbody>
-            <tr><td class="mono">agents</td><td class="mono">public_key, trust_score</td><td>One row per registered caller identity</td></tr>
+            <tr><td class="mono">agents</td><td class="mono">public_key, trust_score, trust_components</td><td>One row per registered caller identity</td></tr>
             <tr><td class="mono">customers</td><td class="mono">name, email</td><td>Who a mandate authorizes an agent to act for</td></tr>
-            <tr><td class="mono">mandates</td><td class="mono">agent_id, customer_id, status</td><td>The standing authorization itself — active / paused / revoked / expired</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <h3>Policy</h3>
-      <div class="table-wrap card">
-        <table>
-          <thead><tr><th class="mono">table</th><th>Key columns</th><th>Purpose</th></tr></thead>
-          <tbody>
-            <tr><td class="mono">policy_domains</td><td class="mono">match_action_types[], match_categories[], is_default</td><td>Merchant-defined governance zones</td></tr>
-            <tr><td class="mono">policy_rules</td><td class="mono">type, domain_id, params, status</td><td>cap / velocity / category_block / step_up, one domain each</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <h3>Activity</h3>
-      <div class="table-wrap card">
-        <table>
-          <thead><tr><th class="mono">table</th><th>Key columns</th><th>Purpose</th></tr></thead>
-          <tbody>
-            <tr><td class="mono">traces</td><td class="mono">decision, rule_fired_id, reasoning</td><td>Permanent record of every simulate/enforce call</td></tr>
-            <tr><td class="mono">escalations</td><td class="mono">trace_id, status</td><td>The human-approval queue a step_up rule feeds</td></tr>
+            <tr><td class="mono">mandates</td><td class="mono">agent_id, customer_id, status</td><td>The standing authorization — active / paused / revoked / expired</td></tr>
+            <tr><td class="mono">policy_rules</td><td class="mono">type, params, status</td><td>The five rule types; only <code>active</code> ones are evaluated</td></tr>
+            <tr><td class="mono">traces</td><td class="mono">decision, rule_fired_id, reasoning</td><td>Permanent record of every decision</td></tr>
+            <tr><td class="mono">escalations</td><td class="mono">trace_id, status</td><td>The human-approval queue</td></tr>
             <tr><td class="mono">alerts</td><td class="mono">trace_id, severity, message</td><td>What powers the toasts and the header bell</td></tr>
+            <tr><td class="mono">products</td><td class="mono">sku, price_paise, category</td><td>The catalog the simulated agent buys from</td></tr>
           </tbody>
         </table>
       </div>
-
-      <h3>Catalog</h3>
-      <div class="table-wrap card">
-        <table>
-          <thead><tr><th class="mono">table</th><th>Key columns</th><th>Purpose</th></tr></thead>
-          <tbody>
-            <tr><td class="mono">products</td><td class="mono">sku, price_paise, category</td><td>The real catalog the demo agent buys from and cross-sells against</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section id="dashboard">
-      <h2><span class="num">10</span> The dashboard</h2>
-      <p class="section-intro">Five tabs, Clerk-gated, all reading the same live Supabase data.</p>
-      <div class="concepts">
-        <div class="concept card"><div class="k">Overview</div><p>The 3D entity graph (agents, domains, rules, mandates, traces), plus escalations and agent trust at a glance.</p></div>
-        <div class="concept card"><div class="k">Transactions</div><p>Every trace, filterable and searchable — what an audit log looks like when it&rsquo;s actually usable.</p></div>
-        <div class="concept card"><div class="k">Policies</div><p>Rule management, a deterministic conflict/gap checker, and Horizon&rsquo;s natural-language drafting.</p></div>
-        <div class="concept card"><div class="k">Domains</div><p>The draggable canvas — create a domain, define its routing, draft a rule straight into it.</p></div>
-        <div class="concept card"><div class="k">Mandates</div><p>Every standing authorization, with real pause/revoke that the policy engine actually enforces.</p></div>
-      </div>
+      <p>
+        A superseded rule is never deleted while a trace cites it: that trace&rsquo;s recorded
+        reason would otherwise point at nothing, and the audit trail is the one thing this
+        product exists to preserve.
+      </p>
     </section>
 
     <section id="honesty">
-      <h2><span class="num">11</span> What&rsquo;s real vs. illustrative</h2>
-      <p class="section-intro">The specific, current caveats worth knowing before you demo this.</p>
+      <h2><span class="num">12</span> What&rsquo;s real vs. illustrative</h2>
       <div class="callout note">
         <span class="label">Real</span>
-        <p>Every allowed action is a genuine Razorpay test-mode API call. Web Bot Auth signature verification is real Ed25519 cryptography. Trust scores, traces, and mandate state are computed from actual history, not fixtures.</p>
+        <p>
+          Every allowed action is a genuine Razorpay test-mode API call. Signature
+          verification is real Ed25519 cryptography. Trust scores, traces, and mandate state
+          are computed from actual history, not fixtures.
+        </p>
       </div>
       <div class="callout warn">
         <span class="label">Labeled, not hidden</span>
         <p>
-          Clerk is still running on development-instance keys (the visible badge is
-          accurate, not a bug). <code>subscription.create</code> falls back to a
-          clearly-flagged simulated mandate object if Razorpay Subscriptions isn&rsquo;t
-          activated on the connected account. RazorpayX payouts were removed rather than stubbed: they need a registered
-          business Razorpay itself gates, so they could never execute here.
+          Only agents a merchant <em>onboards</em> are governed — there is no universal
+          identity layer for arbitrary agents from the open internet yet, which is the gap
+          this is built against. An action&rsquo;s category is self-reported and unverified,
+          so a hostile agent could misdeclare one to dodge a category rule; the action type
+          cannot be faked. Signatures are verified then discarded, so a historical trace
+          cannot be independently re-proved after the fact. Clerk runs on a development
+          instance. <code>subscription.create</code> falls back to a clearly-flagged
+          simplified mandate object when Razorpay Subscriptions is not activated on the
+          account, and RazorpayX payouts were removed rather than stubbed because they need
+          a registered business Razorpay itself gates.
         </p>
       </div>
     </section>
 
     <section id="file-map">
-      <h2><span class="num">12</span> Where things live</h2>
+      <h2><span class="num">13</span> Where things live</h2>
       <div class="card file-tree">
         <div><span class="path">src/lib/mcp/</span> &nbsp;<span class="desc">— the 4 tools, session store, trace helpers</span></div>
-        <div><span class="path">src/lib/policy/</span> &nbsp;<span class="desc">— engine.ts (pure evaluator), domains.ts (routing), audit.ts</span></div>
+        <div><span class="path">src/lib/policy/</span> &nbsp;<span class="desc">— engine.ts (pure evaluator), audit.ts, semanticAudit.ts</span></div>
+        <div><span class="path">src/lib/trust/</span> &nbsp;<span class="desc">— the score formula, and the reasoning behind its weights</span></div>
         <div><span class="path">src/lib/webBotAuth/</span> &nbsp;<span class="desc">— Ed25519 keygen, signing, verification</span></div>
         <div><span class="path">src/lib/razorpay/</span> &nbsp;<span class="desc">— the only place real money-moving calls happen</span></div>
-        <div><span class="path">src/lib/actions/</span> &nbsp;<span class="desc">— dashboard server actions (domains, agents, mandates, policy&#8230;)</span></div>
-        <div><span class="path">src/lib/demo/</span> &nbsp;<span class="desc">— the scripted Checkout Agent + Background Traffic Bot</span></div>
-        <div><span class="path">src/components/graph/</span> &nbsp;<span class="desc">— the 3D scene (layout.ts is the pure/testable part)</span></div>
+        <div><span class="path">src/lib/demo/</span> &nbsp;<span class="desc">— the simulated agent and its MCP client</span></div>
+        <div><span class="path">src/components/graph/</span> &nbsp;<span class="desc">— the 3D scene (layout.ts is the pure, testable part)</span></div>
         <div><span class="path">src/components/dashboard/</span> &nbsp;<span class="desc">— every dashboard panel, tab by tab</span></div>
-        <div><span class="path">supabase/migrations/</span> &nbsp;<span class="desc">— 0001 schema &#8594; 0004 policy_domains</span></div>
+        <div><span class="path">supabase/migrations/</span> &nbsp;<span class="desc">— schema history, in order</span></div>
       </div>
-    </section>
-
-    <section id="deployment">
-      <h2><span class="num">13</span> Live deployment</h2>
-      <p>
-        Source: <a href="https://github.com/amaltomajith/Mandate" target="_blank" rel="noopener">github.com/amaltomajith/Mandate</a><br>
-        Live: <a href="https://mandate-amaltomajiths-projects.vercel.app" target="_blank" rel="noopener">mandate-amaltomajiths-projects.vercel.app</a>
-      </p>
-      <p>
-        Git-linked to Vercel — every push to <code>master</code> auto-deploys. One
-        Supabase project backs both local dev and the deployed instance; there is no
-        separate production database.
-      </p>
     </section>
 
   </main>
 </div>
 
 <footer>
-  Reference document, generated from the codebase as of the policy-domains build. Re-publish this page any time the architecture moves — it&rsquo;s meant to be kept current, not archived.
+  Reference document, generated from the codebase. Kept in step with the code — if this
+  and the code disagree, the code is right and this needs updating.
 </footer>
 
 <script>
   (function () {
     try {
       var links = Array.prototype.slice.call(document.querySelectorAll('nav.toc a'));
-      var sections = links.map(function (a) {
-        return document.querySelector(a.getAttribute('href'));
-      }).filter(Boolean);
-
+      var sections = links
+        .map(function (a) { return document.querySelector(a.getAttribute('href')); })
+        .filter(Boolean);
       if (!('IntersectionObserver' in window) || sections.length === 0) return;
-
       var observer = new IntersectionObserver(function (entries) {
         entries.forEach(function (entry) {
           if (!entry.isIntersecting) return;
@@ -905,10 +854,9 @@
           });
         });
       }, { rootMargin: '-15% 0px -70% 0px', threshold: 0 });
-
       sections.forEach(function (s) { observer.observe(s); });
     } catch (e) {
-      /* non-essential enhancement — page works fine without it */
+      /* non-essential enhancement — the page works fine without it */
     }
   })();
 </script>

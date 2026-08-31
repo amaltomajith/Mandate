@@ -1,27 +1,50 @@
 /**
- * Trust score formula (documented in the build plan, §Trust score):
+ * Trust score formula:
  *
  *   score = clamp(0, 100,
  *     50
  *     + 30 * (approvals - blocks) / total
- *     - 20 * (escalations / total)
+ *     - 10 * (escalations / total)
  *     + 10 * min(accountAgeDays, 30) / 30
  *   )
  *
- * Starts every agent at a neutral 50. Rewards a clean approve/block ratio, penalizes
- * escalations (they're not failures, but a trustworthy agent shouldn't need many),
- * and gives a small, capped boost for tenure so a brand-new agent can't out-trust
- * an established one on a lucky streak. Every component is stored alongside the
- * score so `explain()` can show its reasoning instead of just a number.
+ * Starts every agent at a neutral 50. Rewards a clean approve/block ratio,
+ * penalizes escalations lightly, and gives a small, capped boost for tenure so
+ * a brand-new agent can't out-trust an established one on a lucky streak.
+ *
+ * That escalation weight is deliberately small (-10, not -30 like a block),
+ * and the reason is a trap found by working the arithmetic backwards. An
+ * escalation is not a failure — it is the system working, a human being asked.
+ * But once a trust_floor rule starts holding an agent, EVERY subsequent
+ * decision is an escalation, so the penalty becomes self-sustaining. At -20
+ * an agent held by the floor settles at 30.0 and can never climb back above a
+ * floor of 35: the gate becomes a one-way trapdoor that no amount of good
+ * behaviour reopens. At -10 that equilibrium is 40, comfortably above the
+ * floor, so being held is a state an agent recovers from — while an agent
+ * genuinely being blocked still lands near 29 and stays held. Any change to
+ * this weight or to a trust_floor threshold has to preserve that ordering. Every
+ * component is stored alongside the score so the dashboard and `explain()` can
+ * show the reasoning instead of just a number.
+ *
+ * Computed over a WINDOW of recent decisions, not all history — see
+ * TRUST_WINDOW_SIZE in traceHelpers.ts. An all-time score can't be recovered
+ * from: an agent with a few hundred clean actions barely moves when it
+ * misbehaves, and one that misbehaved badly is punished forever no matter how
+ * it behaves afterwards. Neither is what a reputation signal should do, and a
+ * score that can't move is one the trust_floor rule can't meaningfully gate on.
+ *
+ * There is deliberately NO penalty for forged/tampered requests, despite those
+ * being logged. A request whose signature doesn't verify carries no proven
+ * identity — the signature is what proves it — so it can't be attributed to an
+ * agent at all. Attributing by the *claimed* keyid would let anyone destroy a
+ * competitor's score by sending forgeries in their name. Those rejections are
+ * recorded as traces and alerts, just not against anybody's reputation.
  */
 
 export interface TrustInputs {
   approvals: number;
   blocks: number;
   escalations: number;
-  /** protocol_reject events count separately — they reflect a malformed/tampered
-   *  call, not a policy judgment, but repeated ones should still drag trust down. */
-  protocolRejects: number;
   accountAgeDays: number;
 }
 
@@ -31,15 +54,12 @@ export interface TrustComponents {
   approvalBlockTerm: number;
   escalationPenalty: number;
   tenureBonus: number;
-  protocolRejectPenalty: number;
   totalDecisions: number;
   /** The raw counts each term was derived from, stored alongside the terms so
-   *  the dashboard can show "why this score" without re-querying, and without
-   *  recounting from a trace list that's capped at the most recent 300. */
+   *  the dashboard can show "why this score" without re-querying. */
   approvals: number;
   blocks: number;
   escalations: number;
-  protocolRejects: number;
   accountAgeDays: number;
 }
 
@@ -54,22 +74,18 @@ export function computeTrustScore(inputs: TrustInputs): TrustComponents {
       approvalBlockTerm: 0,
       escalationPenalty: 0,
       tenureBonus: 0,
-      protocolRejectPenalty: 0,
       totalDecisions: 0,
       approvals: inputs.approvals,
       blocks: inputs.blocks,
       escalations: inputs.escalations,
-      protocolRejects: inputs.protocolRejects,
       accountAgeDays: inputs.accountAgeDays,
     };
   }
 
   const approvalBlockTerm = 30 * ((inputs.approvals - inputs.blocks) / total);
-  const escalationPenalty = -20 * (inputs.escalations / total);
+  const escalationPenalty = -10 * (inputs.escalations / total);
   const tenureBonus = 10 * (Math.min(inputs.accountAgeDays, 30) / 30);
-  const protocolRejectPenalty = -5 * Math.min(inputs.protocolRejects, 4); // caps at -20
-
-  const raw = base + approvalBlockTerm + escalationPenalty + tenureBonus + protocolRejectPenalty;
+  const raw = base + approvalBlockTerm + escalationPenalty + tenureBonus;
   const score = Math.max(0, Math.min(100, raw));
 
   return {
@@ -78,12 +94,10 @@ export function computeTrustScore(inputs: TrustInputs): TrustComponents {
     approvalBlockTerm,
     escalationPenalty,
     tenureBonus,
-    protocolRejectPenalty,
     totalDecisions: total,
     approvals: inputs.approvals,
     blocks: inputs.blocks,
     escalations: inputs.escalations,
-    protocolRejects: inputs.protocolRejects,
     accountAgeDays: inputs.accountAgeDays,
   };
 }

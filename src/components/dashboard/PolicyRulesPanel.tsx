@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { approvePolicyRule, deactivatePolicyRule, deletePolicyRule, reactivatePolicyRule, rejectPolicyRule, setRuleDomain } from "@/lib/actions/policy";
-import type { PolicyDomain, PolicyRule } from "@/types/db";
+import { approvePolicyRule, deactivatePolicyRule, deletePolicyRule, reactivatePolicyRule, rejectPolicyRule } from "@/lib/actions/policy";
+import type { PolicyRule } from "@/types/db";
 import { DangerButton, EmptyState, GhostButton, Icons, Panel, SuccessButton, relativeTime } from "./ui";
 
 function ParamsLine({ rule }: { rule: PolicyRule }) {
@@ -31,14 +31,11 @@ const TYPE_LABEL: Record<PolicyRule["type"], string> = {
 
 export function PolicyRulesPanel({
   rules,
-  domains,
   highlightRuleId,
 }: {
   rules: PolicyRule[];
-  domains: PolicyDomain[];
   highlightRuleId?: string | null;
 }) {
-  const domainById = new Map(domains.map((d) => [d.id, d]));
   const active = rules.filter((r) => r.status === "active");
   const pendingReview = rules.filter((r) => r.status === "pending_review");
   const inactive = rules.filter((r) => r.status === "superseded");
@@ -91,11 +88,9 @@ export function PolicyRulesPanel({
           </p>
           {pendingReview.map((rule) => {
             const busy = isPending && busyId === rule.id;
-            // Domain-scoped: a rule in a different domain never actually
-            // competes with this one, even if it's the same type (same fix
-            // as src/lib/policy/audit.ts) — only same-domain rules are a
-            // real conflict.
-            const conflicts = active.filter((r) => r.type === rule.type && r.domain_id === rule.domain_id);
+            // Same-type rules are the ones that can actually shadow each
+            // other — a cap never competes with a step-up.
+            const conflicts = active.filter((r) => r.type === rule.type);
             const chosen = supersedeChoices[rule.id] ?? new Set<string>();
 
             return (
@@ -121,23 +116,6 @@ export function PolicyRulesPanel({
                     {rule.rationale}
                   </p>
                 )}
-
-                <label className="mt-2.5 flex items-center gap-2 text-[11px]" style={{ color: "var(--muted)" }}>
-                  Domain:
-                  <select
-                    value={rule.domain_id ?? ""}
-                    disabled={busy}
-                    onChange={(e) => act(rule.id, () => setRuleDomain(rule.id, e.target.value))}
-                    className="rounded-md border px-2 py-1 text-[11px]"
-                    style={{ borderColor: "var(--panel-border-strong)", background: "var(--panel)", color: "var(--foreground)" }}
-                  >
-                    {domains.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
 
                 {conflicts.length > 0 && (
                   <div className="mt-3 rounded-lg border px-2.5 py-2" style={{ borderColor: "var(--decision-escalate)", background: "color-mix(in srgb, var(--decision-escalate) 8%, transparent)" }}>
@@ -204,27 +182,6 @@ export function PolicyRulesPanel({
               <span className="flex min-w-0 items-center gap-2 truncate">
                 <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "var(--decision-allow)" }} />
                 <span className="truncate">{rule.name}</span>
-                {/* Domain is reassignable here too, not just at pending-review time —
-                    a rule you created for one domain can turn out to belong in another. */}
-                <select
-                  value={rule.domain_id ?? ""}
-                  disabled={busy}
-                  onChange={(e) => act(rule.id, () => setRuleDomain(rule.id, e.target.value))}
-                  className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold"
-                  style={{
-                    background: rule.domain_id && domainById.get(rule.domain_id)
-                      ? `color-mix(in srgb, ${domainById.get(rule.domain_id)!.color} 18%, transparent)`
-                      : "var(--panel-border)",
-                    color: rule.domain_id && domainById.get(rule.domain_id) ? domainById.get(rule.domain_id)!.color : "var(--muted)",
-                    border: "none",
-                  }}
-                >
-                  {domains.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                    </option>
-                  ))}
-                </select>
               </span>
               <span className="flex shrink-0 items-center gap-2">
                 <span className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">

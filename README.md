@@ -5,10 +5,10 @@
 Built for the Razorpay AI Buildathon — Track 01, AI Growth & Agentic Commerce.
 
 An AI agent asks Mandate for permission before it moves money. Mandate checks
-that the agent still holds a valid standing authorization, works out which
-policy domain the request belongs to, evaluates that domain's rules, and either
-lets the real Razorpay call through, escalates it to a human, or blocks it —
-then records exactly why, permanently, so the decision can be explained later.
+that the agent still holds a valid standing authorization, evaluates the
+merchant's spending rules, and either lets the real Razorpay call through,
+escalates it to a human, or blocks it — then records exactly why, permanently,
+so the decision can be explained later.
 
 Live: <https://mandate-amaltomajiths-projects.vercel.app>
 
@@ -23,9 +23,9 @@ Ed25519-signed (Web Bot Auth). The decision path is:
 signed request
   → verify signature          invalid → protocol_reject, never reaches policy
   → check mandate status      revoked/paused → block
-  → resolve policy domain     by action type / category
-  → evaluate that domain's rules only
-       category_block → cap → velocity → step_up   (first match wins)
+  → evaluate the active rules
+       category_block → cap → velocity → trust_floor → step_up
+       (first match wins)
   → allow | escalate | block
   → real Razorpay call, but only on allow
   → write trace, recompute agent trust
@@ -44,27 +44,38 @@ dashboard reads live.
 | `explain` | Plain-language account of a past decision | None |
 | `draft_policy` | Turns plain language into a structured, backtested rule | Inserts as `pending_review` — never auto-activates |
 
-There are exactly four, and they are the same four for every agent and every
-domain. A new domain does not get new tools or a new endpoint.
+There are exactly four, and they are the same four for every agent. A new
+agent needs no new tools and no new endpoint — it registers, gets credentials,
+and signs.
 
-### Policy domains
+### Five rule types
 
-A domain is a merchant-defined governance zone — its own rules, its own
-approval queue. An action lands in one based on **what it is**, never on who
-called it: routing matches the request's action type or category against each
-domain's routing arrays, with one catch-all default so nothing is ever
-ungoverned.
+| Type | Does |
+| --- | --- |
+| `category_block` | Refuses a category outright, at any amount |
+| `cap` | A ceiling, per transaction or per day |
+| `velocity` | A rate limit — amount-blind, it's the pace that's suspicious |
+| `trust_floor` | Holds an agent whose trust score has fallen, regardless of amount |
+| `step_up` | Sends anything above a threshold to a human |
 
-That means the two axes are independent. The same agent lands in different
-domains depending on what it's doing; different agents doing the same thing
-land in the same domain:
+Priority is fixed and documented in `src/lib/policy/engine.ts`; first match
+wins. `trust_floor` sits above `step_up` because "this agent hasn't earned the
+benefit of the doubt" is a stronger reason to involve a human than "this amount
+is large" — so the merchant reads the real cause.
 
-| | Checkout Agent | Background Traffic Bot |
-| --- | --- | --- |
-| `order.create` | Purchases | Purchases |
-| `subscription.create` | Recurring Mandates | *(never calls this)* |
+### Trust, and why it isn't decoration
 
-Domains are rows, created and edited from the dashboard — not a hardcoded list.
+Every agent starts at a neutral 50 and moves with its own record, computed over
+its most recent decisions rather than all history — a score that can't recover
+is one no gate can meaningfully act on. `trust_floor` is what makes it
+consequential: below the threshold, an agent's actions are held for a human at
+any amount, because at that point the problem is the caller, not the
+transaction.
+
+Forged requests are deliberately **not** counted against anyone's score. A
+request whose signature doesn't verify carries no proven identity, so
+attributing it by the *claimed* agent id would let anyone destroy a
+competitor's reputation with forgeries in their name.
 
 ---
 
@@ -96,7 +107,7 @@ NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/dashboard
 ```
 
 Apply the migrations in `supabase/migrations/` in order, via the Supabase SQL
-Editor. Then seed the policy domains, rules, and catalog:
+Editor. Then seed the rules, catalog, and sample customer:
 
 ```bash
 npm run seed
@@ -118,21 +129,25 @@ Sign in at `/login`, then use **Run demo** on the dashboard.
 
 ## Trying it
 
-**Run demo** (dashboard) walks an AI buyer through a full scenario against real
-signed MCP calls: establishing a mandate, purchases with a cross-sell, one
-purchase over the approval threshold that escalates instead of firing, an
-attempt to structure around that threshold caught by a rate limit, the merchant
-revoking the mandate and blocking the agent's very next action, and a forged
-request rejected at the protocol layer.
+**Simulated agent** (Overview) runs an AI buyer continuously — real, signed MCP
+calls through the same policy engine any external agent would hit. Most go
+through; some cross the approval threshold, some touch a banned category, and
+some are forged requests rejected before the engine ever sees them. Nothing is
+staged: each action is weighted by scenario and then the real engine decides.
+
+The speed control matters. Calm and Busy stay inside the agent's velocity
+limit; **Stress deliberately outruns it**, so the rate limiter can be watched
+engaging rather than only described.
 
 **Register an agent** (Overview → Agent trust → *+ Register*) mints a real
 Ed25519 keypair and hands back the three values an external agent needs —
 endpoint, agent ID, secret key. The secret is shown once and never stored.
 
-**Dashboard tabs:** Overview (3D entity graph, escalations, agent trust) ·
-Transactions (every decision, with the rule and domain that decided it) ·
-Policies (rule management, conflict detection, plain-language drafting) ·
-Domains (draggable canvas, create and route domains) · Mandates (pause, revoke).
+**Dashboard tabs:** Overview (3D entity graph, escalations, agent trust with a
+per-term score breakdown) · Transactions (every decision, with the rule that
+decided it) · Policies (rule management, conflict detection, plain-language
+drafting) · Mandates (pause, revoke — a revoked mandate blocks the agent's very
+next action).
 
 ---
 

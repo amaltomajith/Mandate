@@ -11,13 +11,10 @@ import type { CapParams, CategoryBlockParams, StepUpParams } from "./types";
  * that catches things this can't (coverage gaps that are a judgment call, not
  * a logic error) — deliberately kept separate and labeled, not blended in.
  *
- * Domain-scoped since policy domains went in (src/lib/policy/domains.ts):
- * two rules of the same type in two DIFFERENT domains never actually compete
- * against each other — a mandates-domain step-up at ₹1,000 and a
- * purchases-domain cap at ₹20,000 look like a "dead rule" conflict if
- * compared globally, but they never evaluate against the same action, so
- * that would be a false positive. Every check below only ever compares rules
- * within the same domain.
+ * Compares active rules of the same type against each other, since those are
+ * the ones that can genuinely shadow or contradict one another: a cap that
+ * sits below another cap makes the looser one unreachable, two step-ups at
+ * different thresholds mean the higher one never fires, and so on.
  */
 
 export interface PolicyIssue {
@@ -34,8 +31,9 @@ function money(paise: number, currency: string): string {
   return currency === "INR" ? `₹${formatted}` : `${formatted} ${currency}`;
 }
 
-/** The original checks, run against one domain's rules at a time. */
-function auditDomainRules(active: PolicyRule[]): PolicyIssue[] {
+/** Deterministic checks over the active rule set. */
+export function auditPolicySet(rules: PolicyRule[]): PolicyIssue[] {
+  const active = rules.filter((r) => r.status === "active");
   const issues: PolicyIssue[] = [];
 
   const caps = active.filter((r) => r.type === "cap");
@@ -120,38 +118,19 @@ function auditDomainRules(active: PolicyRule[]): PolicyIssue[] {
     }
   }
 
-  // No step-up rule at all in this domain: nothing ever routes to a human.
+  // No step-up rule at all: nothing ever routes to a human.
   // Every action here is either allowed outright or hard-blocked, with no
   // in-between — a real gap in a system whose whole pitch is "bounded and
-  // gated," now checked per domain since each domain is independently
   // governed and could independently lack one.
   if (stepUps.length === 0 && active.length > 0) {
     issues.push({
-      id: `no-stepup-configured-${active[0].domain_id ?? "none"}`,
+      id: "no-stepup-configured",
       severity: "warning",
       title: "No step-up rule configured",
-      explanation: "Nothing routes to human approval right now — every action in this domain is either allowed outright or hard-blocked, with no in-between. Consider adding a step-up threshold so unusually large actions get a second look instead of an automatic decision either way.",
+      explanation: "Nothing routes to human approval right now — every action is either allowed outright or hard-blocked, with no in-between. Consider adding a step-up threshold so unusually large actions get a second look instead of an automatic decision either way.",
       affectedRuleIds: [],
     });
   }
 
-  return issues;
-}
-
-export function auditPolicySet(rules: PolicyRule[]): PolicyIssue[] {
-  const active = rules.filter((r) => r.status === "active");
-
-  const byDomain = new Map<string, PolicyRule[]>();
-  for (const rule of active) {
-    const key = rule.domain_id ?? "__no_domain__";
-    const list = byDomain.get(key) ?? [];
-    list.push(rule);
-    byDomain.set(key, list);
-  }
-
-  const issues: PolicyIssue[] = [];
-  for (const domainRules of byDomain.values()) {
-    issues.push(...auditDomainRules(domainRules));
-  }
   return issues;
 }
