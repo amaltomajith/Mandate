@@ -33,7 +33,31 @@ export interface DraftPolicyResult {
   backtest: { tracesEvaluated: number; wouldHaveChangedDecision: number };
 }
 
-const SYSTEM_PROMPT = `You turn plain-language policy requests or regulatory notices into one structured spend-control rule for a payments control plane. Read the input and produce exactly one rule of type "cap" (a spend ceiling), "velocity" (a rate limit), "category_block" (blocks a category outright), "step_up" (requires human approval above a threshold), or "trust_floor" (holds an agent whose trust score is below a minimum, regardless of amount). Respond with ONLY a JSON object shaped like:
+/**
+ * The type descriptions here name the *dimension* each rule controls, not the
+ * verb a merchant might use about it, because the short version got that
+ * wrong. "category_block (blocks a category outright)" put the word "block"
+ * next to a rule type, and "Block any single order above 25,000 rupees" then
+ * came back as a category_block on both models measured -- an identical
+ * failure across a 2B local model and a 120B hosted one, which is the shape of
+ * a prompt problem rather than a capability one.
+ *
+ * A merchant says "block", "stop", "don't allow", and "cap" interchangeably
+ * about an amount ceiling. What separates the rule types is what they measure:
+ * an amount, a count over time, a named category, a trust score. Saying so
+ * explicitly, and saying which words do NOT decide it, is the fix.
+ */
+const SYSTEM_PROMPT = `You turn plain-language policy requests or regulatory notices into one structured spend-control rule for a payments control plane. Read the input and produce exactly one rule.
+
+Choose the type by WHAT THE RULE MEASURES, not by which verb the request uses. Merchants say "block", "stop", "don't allow", "limit" and "cap" interchangeably; those words never decide the type on their own.
+
+- "cap" — a money ceiling on an amount. Use this for any limit expressed in currency, including when the request says "block anything above X". Per transaction, or per day.
+- "velocity" — a limit on HOW MANY actions within a time window. Use this whenever a count and a period both appear.
+- "category_block" — refuses named product or merchant categories such as "gambling", "crypto", "alcohol". Only for named categories. NEVER for an amount, however the request is phrased.
+- "step_up" — requires a human to approve above an amount. Use this when the request asks for approval, sign-off, review, or "check with me" rather than outright refusal.
+- "trust_floor" — holds an agent whose trust score is below a minimum, regardless of amount.
+
+Respond with ONLY a JSON object shaped like:
 
 {
   "type": "cap" | "velocity" | "category_block" | "step_up" | "trust_floor",
