@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import { getLLM, LLM_MODEL } from "@/lib/llm/client";
+import { getLLM } from "@/lib/llm/client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { evaluatePolicy } from "@/lib/policy/engine";
 import { getActiveRules } from "@/lib/mcp/traceHelpers";
@@ -58,9 +58,10 @@ export async function draftPolicy(
   source: "human" | "horizon",
   sourceLabel?: string
 ): Promise<DraftPolicyResult> {
-  const llm = getLLM();
-  const response = await llm.chat.completions.create({
-    model: LLM_MODEL,
+  // policy text and the rule set it is drafted against
+  const llm = await getLLM("internal");
+  const response = await llm.client.chat.completions.create({
+    model: llm.model,
     response_format: { type: "json_object" },
     temperature: 0.2,
     messages: [

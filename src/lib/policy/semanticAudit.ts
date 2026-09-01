@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getLLM, LLM_MODEL } from "@/lib/llm/client";
+import { getLLM } from "@/lib/llm/client";
 import type { PolicyRule } from "@/types/db";
 
 /**
@@ -45,9 +45,10 @@ export async function runSemanticPolicyAudit(rules: PolicyRule[]): Promise<Seman
 
   let raw: string;
   try {
-    const llm = getLLM();
-    const response = await llm.chat.completions.create({
-      model: LLM_MODEL,
+    // every active rule: caps, thresholds, blocked categories
+    const llm = await getLLM("internal");
+    const response = await llm.client.chat.completions.create({
+      model: llm.model,
       response_format: { type: "json_object" },
       temperature: 0.3,
       messages: [

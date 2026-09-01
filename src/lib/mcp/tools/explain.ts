@@ -1,6 +1,6 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getLLM, LLM_MODEL } from "@/lib/llm/client";
+import { getLLM } from "@/lib/llm/client";
 
 /**
  * Grounded explanation: the model is only ever shown the actual trace + rule that
@@ -9,7 +9,12 @@ import { getLLM, LLM_MODEL } from "@/lib/llm/client";
  * in `traces.reasoning`, this just makes it read naturally and mentions the graph
  * neighborhood (agent trust, parent/child trace) for context.
  */
-export async function explainTrace(traceId: string): Promise<{ explanation: string; traceId: string }> {
+/** `elaborated` says whether a model expanded the engine's own reasoning or
+ *  the reasoning is being returned as-is. Callers that show this to a
+ *  merchant should not present a deterministic sentence as a generated one. */
+export async function explainTrace(
+  traceId: string
+): Promise<{ explanation: string; traceId: string; elaborated: boolean }> {
   const db = createAdminClient();
 
   const { data: trace, error } = await db.from("traces").select("*").eq("id", traceId).single();
@@ -43,15 +48,36 @@ export async function explainTrace(traceId: string): Promise<{ explanation: stri
 Trace data:
 ${JSON.stringify(grounding, null, 2)}`;
 
-  const llm = getLLM();
-  const response = await llm.chat.completions.create({
-    model: LLM_MODEL,
+  // A trace's full params, including customerId, plus the rule that fired and
+  // its thresholds. Classified internal: this is the merchant's configuration.
+  //
+  // Falls back to the engine's own reasoning rather than failing. That string
+  // was written deterministically at decision time and is already the sentence
+  // a merchant reads everywhere else in the dashboard -- the model's job here
+  // is to expand it, not to supply it. So when there is no model, the honest
+  // answer is the shorter one, not an error.
+  let llm;
+  try {
+    llm = await getLLM("internal");
+  } catch {
+    return {
+      explanation:
+        trace.reasoning ??
+        "No explanation is recorded for this decision.",
+      traceId,
+      elaborated: false,
+    };
+  }
+
+  const response = await llm.client.chat.completions.create({
+    model: llm.model,
     messages: [{ role: "user", content: prompt }],
     temperature: 0.3,
   });
 
   return {
-    explanation: response.choices[0]?.message?.content ?? "No explanation could be generated.",
+    explanation: response.choices[0]?.message?.content ?? trace.reasoning ?? "No explanation could be generated.",
     traceId,
+    elaborated: true,
   };
 }

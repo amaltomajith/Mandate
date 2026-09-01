@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getLLM, LLM_MODEL } from "../llm/client";
+import { getLLM } from "../llm/client";
 import type { CatalogItem } from "./catalog";
 
 /**
@@ -32,9 +32,10 @@ export async function suggestCrossSell(catalog: CatalogItem[], justBoughtSku: st
 
   let raw: string;
   try {
-    const llm = getLLM();
-    const response = await llm.chat.completions.create({
-      model: LLM_MODEL,
+    // catalog + a sku, both already served unauthenticated at /api/catalog
+    const llm = await getLLM("public");
+    const response = await llm.client.chat.completions.create({
+      model: llm.model,
       response_format: { type: "json_object" },
       temperature: 0.3,
       messages: [
