@@ -18,6 +18,27 @@ function formatMoney(amountPaise: number, currency: string): string {
 }
 
 /**
+ * Optional per-rule action-type scoping.
+ *
+ * Rules were global: a per-transaction cap written for purchase orders also
+ * bound refunds, subscriptions, and anything added later, with no way to say
+ * otherwise. That is the right default — a merchant who writes a spend ceiling
+ * means it — but it makes some perfectly ordinary policies unexpressible.
+ * "Fifty thousand a day of discounted payment links, on top of the two lakh a
+ * day of orders" needs the two ceilings to be about different things.
+ *
+ * Absent or empty means the rule applies to everything, so every rule written
+ * before this existed keeps its exact meaning. Reading it off `params` rather
+ * than adding a column keeps it out of the migration path and lets one check
+ * cover all five rule types instead of five near-identical ones.
+ */
+function appliesTo(rule: PolicyRule, actionType: string): boolean {
+  const scope = (rule.params as { action_types?: unknown } | null)?.action_types;
+  if (!Array.isArray(scope) || scope.length === 0) return true;
+  return scope.includes(actionType);
+}
+
+/**
  * Pure policy evaluator. No DB access, no side effects — `simulate_action` and
  * `enforce_action` both call this with the same inputs and get the same decision;
  * only `enforce_action` goes on to make the real Razorpay call when the result is "allow".
@@ -40,7 +61,8 @@ export function evaluatePolicy(
   activeRules: PolicyRule[],
   aggregates: EvaluationAggregates
 ): RuleMatch | null {
-  const byType = (t: PolicyRule["type"]) => activeRules.filter((r) => r.type === t);
+  const byType = (t: PolicyRule["type"]) =>
+    activeRules.filter((r) => r.type === t && appliesTo(r, context.actionType));
 
   for (const rule of byType("category_block")) {
     const params = rule.params as CategoryBlockParams;

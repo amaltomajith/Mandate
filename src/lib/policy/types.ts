@@ -1,10 +1,17 @@
 import { z } from "zod";
 import type { Decision, PolicyRuleType } from "@/types/db";
 
+/** Optional on every rule type: restricts the rule to specific action types.
+ *  Absent means "applies to every action", which is what every rule written
+ *  before this field existed means, so nothing changes meaning by default.
+ *  See `appliesTo` in engine.ts. */
+const actionTypes = { action_types: z.array(z.string()).optional() };
+
 export const CapParams = z.object({
   max_amount: z.number().positive(),
   currency: z.string().length(3),
   scope: z.enum(["per_transaction", "per_day"]),
+  ...actionTypes,
 });
 export type CapParams = z.infer<typeof CapParams>;
 
@@ -12,17 +19,20 @@ export const VelocityParams = z.object({
   max_count: z.number().int().positive(),
   window_seconds: z.number().int().positive(),
   scope: z.enum(["per_agent", "per_customer"]),
+  ...actionTypes,
 });
 export type VelocityParams = z.infer<typeof VelocityParams>;
 
 export const CategoryBlockParams = z.object({
   categories: z.array(z.string()).min(1),
+  ...actionTypes,
 });
 export type CategoryBlockParams = z.infer<typeof CategoryBlockParams>;
 
 export const StepUpParams = z.object({
   threshold_amount: z.number().positive(),
   currency: z.string().length(3),
+  ...actionTypes,
 });
 export type StepUpParams = z.infer<typeof StepUpParams>;
 
@@ -34,6 +44,7 @@ export type StepUpParams = z.infer<typeof StepUpParams>;
 export const TrustFloorParams = z.object({
   min_score: z.number().min(0).max(100),
   action: z.enum(["escalate", "block"]).default("escalate"),
+  ...actionTypes,
 });
 export type TrustFloorParams = z.infer<typeof TrustFloorParams>;
 

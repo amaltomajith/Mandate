@@ -52,6 +52,40 @@ export async function executeRealAction(input: ActionInput): Promise<Json> {
       return order as unknown as Json;
     }
 
+    // A real Razorpay payment link, and the only action here whose outcome is
+    // observable after the fact: the link object carries a `status` that moves
+    // to "paid" and an `amount_paid`, so a campaign's conversion can be read
+    // back rather than asserted. Orders cannot tell you that -- creating one
+    // says nothing about whether anybody paid.
+    case "payment_link.create": {
+      const rzp = getRazorpay();
+      const p = input.params;
+      const link = await rzp.paymentLink.create({
+        amount: input.amount,
+        currency: input.currency,
+        description: p.description,
+        customer: {
+          name: p.customerName,
+          ...(p.customerEmail ? { email: p.customerEmail } : {}),
+          ...(p.customerContact ? { contact: p.customerContact } : {}),
+        },
+        // Off unless explicitly asked for. Razorpay does the sending, so a
+        // campaign run against synthetic customers with this on would be
+        // mailing real addresses that happen to look fake.
+        notify: { email: p.notify, sms: p.notify },
+        reminder_enable: false,
+        ...(p.expiresInHours
+          ? { expire_by: Math.floor(Date.now() / 1000) + p.expiresInHours * 3600 }
+          : {}),
+        notes: {
+          ...(p.notes ?? {}),
+          discount_paise: String(p.discountPaise),
+          ...(p.campaignId ? { campaign_id: p.campaignId } : {}),
+        },
+      });
+      return link as unknown as Json;
+    }
+
     case "refund.create": {
       const rzp = getRazorpay();
       const refund = await rzp.payments.refund(input.params.paymentId, {

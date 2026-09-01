@@ -218,21 +218,37 @@ async function main() {
   ];
   const draft: Outcome[] = [];
   const createdRuleIds: string[] = [];
+  // Connecting is itself a thing that can fail, and a dev server that is not
+  // running must not discard the three tasks that already completed. Treated
+  // as an infrastructure outcome for every case, the same as any other call
+  // that never reached a model.
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-  const { id: agentId, secretKeyBase64 } = await ensureAgentIdentity(db, {
-    envIdVar: "SIM_AGENT_ID",
-    envSecretVar: "SIM_AGENT_SECRET_KEY",
-    name: "Checkout Agent",
-    description: "An AI buyer agent transacting on behalf of customers.",
-  });
-  const mcp = new MandateClient(baseUrl, agentId, secretKeyBase64);
-  await mcp.initialize("mandate-llm-benchmark");
+  let mcp: MandateClient | null = null;
+  let mcpError: string | null = null;
+  try {
+    const { id: agentId, secretKeyBase64 } = await ensureAgentIdentity(db, {
+      envIdVar: "SIM_AGENT_ID",
+      envSecretVar: "SIM_AGENT_SECRET_KEY",
+      name: "Checkout Agent",
+      description: "An AI buyer agent transacting on behalf of customers.",
+    });
+    mcp = new MandateClient(baseUrl, agentId, secretKeyBase64);
+    await mcp.initialize("mandate-llm-benchmark");
+  } catch (err) {
+    mcpError = `dev server unreachable at ${baseUrl} — start it to measure draft_policy`;
+    void err;
+  }
 
   for (let i = 0; i < RUNS; i++) {
     for (const c of draftCases) {
+      if (!mcp) {
+        draft.push({ ok: false, ms: 0, note: mcpError ?? "no mcp client", infra: true });
+        continue;
+      }
+      const client = mcp;
       draft.push(
         await timed(async () => {
-          const r = await mcp.callTool<{ ruleId: string; type: string }>("draft_policy", { text: c.text });
+          const r = await client.callTool<{ ruleId: string; type: string }>("draft_policy", { text: c.text });
           if (r.ruleId) createdRuleIds.push(r.ruleId);
           return r.type === c.type ? { ok: true } : { ok: false, note: `wanted ${c.type}, got ${r.type}` };
         })

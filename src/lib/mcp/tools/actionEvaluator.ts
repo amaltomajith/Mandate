@@ -63,7 +63,7 @@ export async function runActionEvaluation(
     // DB-free — same contract every other input follows.
     const agentTrustScore = await getAgentTrustScore(agentId);
     const rules = await getActiveRules();
-    const aggregates = await getAggregates(agentId, rules, input.currency);
+    const aggregates = await getAggregates(agentId, rules, input.currency, input.customerId);
     match = evaluatePolicy(
       {
         actionType: input.actionType,

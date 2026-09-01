@@ -19,6 +19,16 @@ function assertNoSupabaseError(error: { message: string } | null): asserts error
   if (error) throw new Error(error.message);
 }
 
+/** Mirrors `appliesTo` in the engine. A rule scoped to specific action types
+ *  must have its aggregate scoped the same way, or a "50k/day of payment
+ *  links" cap would be measured against every order the agent placed today
+ *  and fire immediately. The engine decides *whether* a rule applies; this
+ *  decides *what it counts*, and the two have to agree. */
+function scopedActionTypes(rule: EngineRule): string[] | null {
+  const scope = (rule.params as { action_types?: unknown } | null)?.action_types;
+  return Array.isArray(scope) && scope.length > 0 ? (scope as string[]) : null;
+}
+
 export async function getActiveRules(): Promise<EngineRule[]> {
   const db = createAdminClient();
   const { data, error } = await db
@@ -30,11 +40,20 @@ export async function getActiveRules(): Promise<EngineRule[]> {
 }
 
 /** Pre-computes what the pure policy evaluator needs but can't fetch itself:
- *  rolling counts for velocity rules and today's spend for per-day caps. */
+ *  rolling counts for velocity rules and today's spend for per-day caps.
+ *
+ *  `customerId` is what makes a `scope: "per_customer"` velocity rule mean
+ *  anything. That scope has been in the schema since the start, and
+ *  `draft_policy` offers it to the model as a rule it can generate — but the
+ *  count was only ever filtered by agent, so a per-customer rule behaved
+ *  identically to a per-agent one and nothing said so. No active rule used it,
+ *  so nothing was wrong in practice; it was a trapdoor waiting for the first
+ *  merchant who wrote "don't contact the same customer twice a week". */
 export async function getAggregates(
   agentId: string,
   rules: EngineRule[],
-  currency: string
+  currency: string,
+  customerId?: string
 ): Promise<EvaluationAggregates> {
   const db = createAdminClient();
   const velocityCounts: Record<string, number> = {};
@@ -44,12 +63,32 @@ export async function getAggregates(
   for (const rule of velocityRules) {
     const params = rule.params as VelocityParams;
     const since = new Date(Date.now() - params.window_seconds * 1000).toISOString();
-    const { data, error } = await db
-      .from("traces")
-      .select("action_type, params")
-      .eq("agent_id", agentId)
-      .eq("mode", "enforce")
-      .gte("created_at", since);
+
+    // A per-customer rule counts what this customer has been subjected to,
+    // across every agent — "don't hit this person repeatedly" is a fact about
+    // the person, and scoping it to one agent would let a second identity
+    // reset the count. A per-agent rule counts what this agent has done.
+    let query = db.from("traces").select("id").eq("mode", "enforce").gte("created_at", since);
+    const velocityScope = scopedActionTypes(rule);
+    if (velocityScope) query = query.in("action_type", velocityScope);
+    if (params.scope === "per_customer") {
+      // Nothing to count against when the action names no customer: an
+      // unattributed action cannot have hit anyone too often. Leaving the
+      // filter off here would silently make it a per-agent rule again, which
+      // is the exact bug this replaced.
+      if (!customerId) {
+        velocityCounts[rule.id] = 0;
+        continue;
+      }
+      // customerId lives inside the jsonb params rather than a column. Traces
+      // written before it was persisted have none, so they are invisible to
+      // this count -- correct, since there is no way to know who they were for.
+      query = query.eq("params->>customerId", customerId);
+    } else {
+      query = query.eq("agent_id", agentId);
+    }
+
+    const { data, error } = await query;
     assertNoSupabaseError(error);
     velocityCounts[rule.id] = (data ?? []).length;
   }
@@ -60,13 +99,16 @@ export async function getAggregates(
   for (const rule of capRules) {
     const params = rule.params as CapParams;
     if (params.scope !== "per_day" || params.currency !== currency) continue;
-    const { data, error } = await db
+    let capQuery = db
       .from("traces")
       .select("action_type, params")
       .eq("agent_id", agentId)
       .eq("mode", "enforce")
       .eq("decision", "allow")
       .gte("created_at", todayStart.toISOString());
+    const capScope = scopedActionTypes(rule);
+    if (capScope) capQuery = capQuery.in("action_type", capScope);
+    const { data, error } = await capQuery;
     assertNoSupabaseError(error);
     dailyAmountSoFar[rule.id] = (data ?? []).reduce((sum, row) => {
       const p = row.params as { amount?: number; currency?: string } | null;

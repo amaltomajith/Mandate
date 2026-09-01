@@ -7,6 +7,7 @@ const ACTION_TYPE_LABELS: Record<string, string> = {
   "order.create": "New purchase order",
   "refund.create": "Refund",
   "subscription.create": "New subscription",
+  "payment_link.create": "Campaign payment link",
   // `payout.create` is no longer an accepted action type (RazorpayX needs a
   // registered business Razorpay gates, so it could never execute here — see
   // src/lib/razorpay/actions.ts). Its label stays because traces recorded

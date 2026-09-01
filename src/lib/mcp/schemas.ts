@@ -16,6 +16,33 @@ export const RefundCreateParams = z.object({
   paymentId: z.string(),
 });
 
+/**
+ * A payment link is the campaign orchestrator's money action: the agent picks a
+ * customer, decides an offer, and creates a link for the discounted amount.
+ *
+ * `discountPaise` is carried alongside rather than folded into `amount`.
+ * `amount` stays what it is for every other action -- what the customer is
+ * asked to pay -- so caps and step-up thresholds keep one consistent meaning
+ * across every action type. The giveaway is a separate quantity a merchant may
+ * want bounded separately, and conflating the two would have made "cap orders
+ * at 20,000" silently mean something different for links.
+ *
+ * `notify` is off by default. Razorpay sends the email/SMS itself when it is
+ * on, and a campaign run against synthetic customers should not be mailing
+ * anyone -- an opt-in flag is the difference between a demo and an incident.
+ */
+export const PaymentLinkCreateParams = z.object({
+  description: z.string().max(2048),
+  customerName: z.string(),
+  customerEmail: z.string().email().optional(),
+  customerContact: z.string().optional(),
+  discountPaise: z.number().int().nonnegative().default(0),
+  campaignId: z.string().uuid().optional(),
+  notify: z.boolean().default(false),
+  expiresInHours: z.number().int().positive().max(720).optional(),
+  notes: z.record(z.string(), z.string()).optional(),
+});
+
 export const SubscriptionCreateParams = z.object({
   planName: z.string(),
   period: z.enum(["daily", "weekly", "monthly", "yearly"]),
@@ -42,6 +69,15 @@ export const ActionInput = z.discriminatedUnion("actionType", [
     customerId: z.string().uuid().optional(),
     forkFrom: z.string().uuid().optional(),
     params: RefundCreateParams,
+  }),
+  z.object({
+    actionType: z.literal("payment_link.create"),
+    amount: z.number().int().positive(),
+    currency: z.string().length(3).default("INR"),
+    category: z.string().optional(),
+    customerId: z.string().uuid().optional(),
+    forkFrom: z.string().uuid().optional(),
+    params: PaymentLinkCreateParams,
   }),
   z.object({
     actionType: z.literal("subscription.create"),
