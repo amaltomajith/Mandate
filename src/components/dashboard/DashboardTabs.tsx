@@ -11,6 +11,8 @@ import { HorizonPanel } from "./HorizonPanel";
 import { ThresholdTuner } from "./ThresholdTuner";
 import { SimulationPanel } from "./SimulationPanel";
 import { ConversationalCheckout } from "./ConversationalCheckout";
+import { SellableCatalog } from "./SellableCatalog";
+import { StorefrontCard } from "./StorefrontCard";
 import { RevenueImpactPanel } from "./RevenueImpactPanel";
 import { TransactionsView } from "./TransactionsView";
 import { MandatesPanel } from "./MandatesPanel";
@@ -129,7 +131,15 @@ export function DashboardTabs(props: Props) {
 
       {tab === "buy" && (
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-          <ConversationalCheckout />
+          {/* Left: act. Right: what acting would currently be permitted to do —
+              the two halves answer each other, so a refusal in the checkout has
+              its explanation sitting beside it rather than needing a tab
+              switch to find. */}
+          <div className="flex flex-col gap-5">
+            <ConversationalCheckout />
+            <StorefrontCard />
+          </div>
+          <SellableCatalog />
         </div>
       )}
 
