@@ -8,6 +8,7 @@ import { AgentTrustPanel } from "./AgentTrustPanel";
 import { PolicyRulesPanel } from "./PolicyRulesPanel";
 import { PolicyHealthPanel } from "./PolicyHealthPanel";
 import { HorizonPanel } from "./HorizonPanel";
+import { ThresholdTuner } from "./ThresholdTuner";
 import { SimulationPanel } from "./SimulationPanel";
 import { RevenueImpactPanel } from "./RevenueImpactPanel";
 import { TransactionsView } from "./TransactionsView";
@@ -130,6 +131,7 @@ export function DashboardTabs(props: Props) {
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
           <PolicyRulesPanel rules={rules} highlightRuleId={highlightRuleId} />
           <div className="space-y-5">
+            <ThresholdTuner />
             <PolicyHealthPanel deterministicIssues={deterministicIssues} />
             <HorizonPanel />
           </div>

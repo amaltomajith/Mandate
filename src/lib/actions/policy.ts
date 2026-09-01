@@ -6,6 +6,7 @@ import { requireDashboardUser } from "./authGuard";
 import { runSemanticPolicyAudit, type SemanticIssue } from "@/lib/policy/semanticAudit";
 import { suggestPolicyFix, type FixSuggestion } from "@/lib/policy/suggestFix";
 import type { Json } from "@/types/db";
+import { sweepThresholds, type ReplayAction, type ThresholdOutcome } from "@/lib/policy/thresholdSweep";
 
 /** `supersedeRuleIds` — rules the user chose to retire at the same moment
  *  this one activates, from the conflict-resolution UI in PolicyRulesPanel.
@@ -116,5 +117,107 @@ export async function applyPolicyFix(ruleId: string, proposedParams: Record<stri
   const db = createAdminClient();
   const { error } = await db.from("policy_rules").update({ params: proposedParams as unknown as Json }).eq("id", ruleId);
   if (error) throw error;
+  revalidatePath("/dashboard");
+}
+
+/**
+ * Replays a range of step-up thresholds against this merchant's own recent
+ * traffic so they can see the revenue/friction trade before committing to it.
+ *
+ * Only actions the step-up rule could plausibly have decided are sampled.
+ * Anything a cap or category ban refused is excluded rather than counted as
+ * "would clear" — those are refused at any threshold, and including them would
+ * make raising the dial look like it unlocks money a different rule was always
+ * going to stop.
+ */
+export async function replayStepUpThresholds(): Promise<{
+  currency: string;
+  currentThreshold: number | null;
+  sampleSize: number;
+  current: ThresholdOutcome | null;
+  options: ThresholdOutcome[];
+}> {
+  await requireDashboardUser();
+  const db = createAdminClient();
+
+  const { data: rules, error: rulesError } = await db
+    .from("policy_rules")
+    .select("id, type, params, status")
+    .eq("status", "active");
+  if (rulesError) throw rulesError;
+
+  const stepUp = (rules ?? []).find((r) => r.type === "step_up");
+  const stepUpParams = stepUp?.params as { threshold_amount?: number; currency?: string } | null;
+  const currency = stepUpParams?.currency ?? "INR";
+  const currentThreshold = typeof stepUpParams?.threshold_amount === "number" ? stepUpParams.threshold_amount : null;
+
+  const { data: traces, error: tracesError } = await db
+    .from("traces")
+    .select("action_type, params, decision, agent_id")
+    .eq("mode", "enforce")
+    .order("created_at", { ascending: false })
+    .limit(300);
+  if (tracesError) throw tracesError;
+
+  const sample: ReplayAction[] = [];
+  for (const t of traces ?? []) {
+    // A block was refused by a cap, a category ban or a rate limit — none of
+    // which the step-up threshold governs, so it stays refused whatever this
+    // dial is set to and does not belong in the sample.
+    if (t.decision === "block") continue;
+    const p = t.params as { amount?: number; currency?: string; category?: string } | null;
+    if (typeof p?.amount !== "number" || !p.currency) continue;
+    sample.push({
+      amount: p.amount,
+      currency: p.currency,
+      category: p.category,
+      actionType: t.action_type,
+      agentId: t.agent_id ?? "",
+    });
+  }
+
+  // Round numbers a merchant would actually pick, in paise.
+  const candidates = [200000, 500000, 800000, 1200000, 2000000];
+  const swept = sweepThresholds(currentThreshold ?? 500000, currency, sample, candidates);
+
+  return {
+    currency,
+    currentThreshold,
+    sampleSize: sample.length,
+    current: currentThreshold === null ? null : swept.current,
+    options: swept.options,
+  };
+}
+
+/**
+ * Proposes a new step-up threshold as a `pending_review` rule.
+ *
+ * Deliberately not applied directly, and deliberately not routed through
+ * draft_policy either. Going via the LLM would round-trip an exact number the
+ * merchant already chose through a model that might return a different one;
+ * writing it straight to active would let a revenue dial silently loosen a
+ * spending control. So it lands in the same review queue every other proposed
+ * rule goes through, where the existing conflict UI can retire the rule it
+ * replaces at the moment it activates.
+ */
+export async function proposeStepUpThreshold(thresholdAmount: number, currency: string) {
+  await requireDashboardUser();
+  if (!Number.isFinite(thresholdAmount) || thresholdAmount <= 0) {
+    throw new Error("A step-up threshold has to be a positive amount.");
+  }
+  const db = createAdminClient();
+
+  const rupees = (thresholdAmount / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+  const { error } = await db.from("policy_rules").insert({
+    type: "step_up",
+    name: `Step-up above ₹${rupees}`,
+    params: { threshold_amount: thresholdAmount, currency } as unknown as Json,
+    status: "pending_review",
+    source: "human",
+    rationale:
+      `Proposed from the threshold replay: chosen after seeing what this threshold would have done to the merchant's own recent traffic. Activating this should supersede the step-up rule it replaces — two step-up rules at different thresholds means the higher one never fires.`,
+  });
+  if (error) throw error;
+
   revalidatePath("/dashboard");
 }
