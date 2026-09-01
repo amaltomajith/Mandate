@@ -1,12 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { registerAgent, type RegisteredAgent } from "@/lib/actions/agents";
 import type { Agent } from "@/types/db";
 import type { TrustComponents } from "@/lib/trust/score";
-import { AgentCredentials } from "./AgentCredentials";
 import { TrustBreakdown } from "./TrustBreakdown";
-import { EmptyState, GhostButton, Icons, Panel, PrimaryButton } from "./ui";
+import { EmptyState, Icons, Panel } from "./ui";
 
 function trustColor(score: number): string {
   if (score >= 70) return "var(--decision-allow)";
@@ -20,18 +18,11 @@ function trustColor(score: number): string {
  * src/lib/trust/score.ts), just as a flat, scannable list: every agent,
  * at a glance, without touching the graph.
  *
- * "+ Register" closes a real inconsistency: once domains stopped being
- * hardcoded and became dashboard-creatable, agents still requiring a
- * terminal script to register was the odd one out. That script has since
- * been removed; this is the one registration path — src/lib/actions/agents.ts.
- *
- * On success it hands back the full credential set via AgentCredentials —
- * endpoint, agent id, and secret key together. That completeness matters:
- * an earlier version showed the secret alone, which made registration a
- * dead end, because `/api/mcp` resolves an agent by `keyid` and `keyid` is
- * the agent id. Shown exactly once, with nowhere to retrieve the secret
- * from afterwards — a real property of Web Bot Auth (never stored server
- * side), not a UI limitation to work around.
+ * There is no "register an agent" control here. This deployment runs a single
+ * agent, so a button minting credentials for a second one was a path to
+ * nowhere — the mechanism still exists (an agent is just a row with a public
+ * key; see src/lib/demo/shared.ts), it simply isn't a thing a merchant does
+ * from this screen while there is one agent to manage.
  *
  * `className="h-full"` on Panel plus `flex-1` in DashboardTabs.tsx lets
  * this stretch to fill whatever's left in the Overview sidebar below
@@ -40,32 +31,10 @@ function trustColor(score: number): string {
  */
 export function AgentTrustPanel({ agents }: { agents: Agent[] }) {
   const sorted = [...agents].sort((a, b) => b.trust_score - a.trust_score);
-  const [registering, setRegistering] = useState(false);
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [justRegistered, setJustRegistered] = useState<RegisteredAgent | null>(null);
   // One open at a time: the breakdown is detail-on-demand, and two expanded at
   // once in a sidebar this narrow just pushes everything out of view.
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  async function submit() {
-    if (!name.trim()) return;
-    setPending(true);
-    setError(null);
-    try {
-      const agent = await registerAgent(name, description);
-      setJustRegistered(agent);
-      setRegistering(false);
-      setName("");
-      setDescription("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't register the agent.");
-    } finally {
-      setPending(false);
-    }
-  }
 
   return (
     <Panel
@@ -73,55 +42,11 @@ export function AgentTrustPanel({ agents }: { agents: Agent[] }) {
       icon={<Icons.Sparkles />}
       accent="var(--entity-agent)"
       className="flex h-full flex-col"
-      action={
-        !registering &&
-        !justRegistered && (
-          <GhostButton onClick={() => setRegistering(true)} className="py-1! px-2.5! text-[10px]!">
-            + Register
-          </GhostButton>
-        )
-      }
     >
       <div className="flex flex-1 flex-col">
-        {justRegistered && (
-          <AgentCredentials agent={justRegistered} onDismiss={() => setJustRegistered(null)} />
-        )}
-
-        {registering && (
-          <div className="mb-3 rounded-xl border p-3 space-y-2" style={{ borderColor: "var(--panel-border-strong)", background: "var(--panel-2)" }}>
-            <input
-              autoFocus
-              placeholder="Agent name (e.g. Recovery Agent)"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-lg border px-2 py-1.5 text-xs"
-              style={{ borderColor: "var(--panel-border-strong)", background: "var(--panel)", color: "var(--foreground)" }}
-            />
-            <input
-              placeholder="Description (optional)"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full rounded-lg border px-2 py-1.5 text-xs"
-              style={{ borderColor: "var(--panel-border-strong)", background: "var(--panel)", color: "var(--foreground)" }}
-            />
-            {error && (
-              <p className="text-[10px]" style={{ color: "var(--decision-block)" }}>
-                {error}
-              </p>
-            )}
-            <div className="flex gap-2">
-              <PrimaryButton onClick={submit} disabled={pending || !name.trim()} className="flex-1">
-                {pending ? "Registering…" : "Register"}
-              </PrimaryButton>
-              <GhostButton onClick={() => setRegistering(false)} disabled={pending}>
-                Cancel
-              </GhostButton>
-            </div>
-          </div>
-        )}
 
         {sorted.length === 0 ? (
-          <EmptyState text="No agents yet — register one above, or click Run demo." />
+          <EmptyState text="No agents yet — start the simulated agent to see one." />
         ) : (
           <div className="space-y-3">
             {sorted.map((agent) => {

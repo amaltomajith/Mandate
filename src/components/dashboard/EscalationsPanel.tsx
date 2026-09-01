@@ -12,10 +12,16 @@ export function EscalationsPanel({
   escalations: Escalation[];
   tracesById: Record<string, Trace>;
 }) {
-  const pending = escalations.filter((e) => e.status === "pending");
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // `escalations` comes from the server and only refreshes on the dashboard's
+  // 4s poll, so without this a card sat there looking actionable for seconds
+  // after being approved — long enough to click again and get told it was
+  // already resolved, which reads as a bug rather than a double-click.
+  const [resolvedLocally, setResolvedLocally] = useState<Set<string>>(new Set());
+
+  const pending = escalations.filter((e) => e.status === "pending" && !resolvedLocally.has(e.id));
 
   function act(id: string, fn: (id: string) => Promise<void>) {
     setError(null);
@@ -23,8 +29,18 @@ export function EscalationsPanel({
     startTransition(async () => {
       try {
         await fn(id);
+        setResolvedLocally((prev) => new Set(prev).add(id));
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Action failed.");
+        const message = err instanceof Error ? err.message : "Action failed.";
+        // Already resolved isn't a failure — the outcome the merchant wanted
+        // is the outcome that holds. It only happens when a click lands twice
+        // before the poll catches up, so drop the card and stay quiet rather
+        // than showing a red banner for a non-problem.
+        if (message.includes("already resolved")) {
+          setResolvedLocally((prev) => new Set(prev).add(id));
+        } else {
+          setError(message);
+        }
       } finally {
         setBusyId(null);
       }

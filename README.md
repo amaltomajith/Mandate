@@ -152,9 +152,9 @@ The speed control matters. Calm and Busy stay inside the agent's velocity
 limit; **Stress deliberately outruns it**, so the rate limiter can be watched
 engaging rather than only described.
 
-**Register an agent** (Overview → Agent trust → *+ Register*) mints a real
-Ed25519 keypair and hands back the three values an external agent needs —
-endpoint, agent ID, secret key. The secret is shown once and never stored.
+**Onboarding another agent** is a row with a public key — there is no UI for it
+while this deployment runs a single agent. See *Mapping a transaction to an
+agent* in the architecture walkthrough for how an external one would connect.
 
 **Dashboard tabs:** Overview (3D entity graph, escalations, agent trust with a
 per-term score breakdown) · Transactions (every decision, with the rule that
