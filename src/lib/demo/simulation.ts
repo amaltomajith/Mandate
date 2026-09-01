@@ -76,13 +76,20 @@ function pickScenario(): Scenario {
 
 /** Skewed toward the cheaper end of the catalog, which is the ordinary shape
  *  of retail order sizes — not a statistical model, just not a flat random
- *  pick that would make every third order a standing desk. */
+ *  pick that would make every third order a standing desk.
+ *
+ *  Keys are real SKUs, and every catalog item is listed. A key matching
+ *  nothing falls through to the default weight in silence — which is exactly
+ *  what had been happening: "mat-01" was never a SKU (the yoga mat is
+ *  "yogamat-01"), so it drew the default 2 rather than the 4 written here,
+ *  and the USB-C hub was missing from the map entirely. */
 const ITEM_WEIGHTS: Record<string, number> = {
   "mouse-01": 5,
+  "hub-01": 4,
+  "yogamat-01": 4,
   "keyboard-01": 3,
   "stand-01": 3,
   "desk-01": 1,
-  "mat-01": 4,
 };
 
 function weightedItem(catalog: CatalogItem[]): CatalogItem {
@@ -292,7 +299,16 @@ export async function runSimulation(count: number = 1): Promise<SimulationSummar
       currency: "INR",
       category,
       customerId: customer.id,
-      params: { receipt: `sim-${Date.now()}-${i}`, notes: { scenario, source: "simulation" } },
+      params: {
+        receipt: `sim-${Date.now()}-${i}`,
+        // The SKU is written onto the trace rather than inferred later from
+        // the amount. Two products can share a price, and the scenarios that
+        // pick a random amount can land on one by coincidence — reading the
+        // product back out of the number would put a name on an order that
+        // never had one. Only catalog-backed orders carry it; the rest carry
+        // no product at all, and the order history says so.
+        notes: { scenario, source: "simulation", ...(boughtItem ? { sku: boughtItem.sku, item: boughtItem.name } : {}) },
+      },
     };
 
     const enforced = await client.callTool<ActionResult>("enforce_action", args);
@@ -355,7 +371,13 @@ export async function runSimulation(count: number = 1): Promise<SimulationSummar
             forkFrom: enforced.traceId,
             params: {
               receipt: `sim-upsell-${Date.now()}-${i}`,
-              notes: { scenario: "upsell", source: "simulation", upsell_of: boughtItem.sku },
+              notes: {
+                scenario: "upsell",
+                source: "simulation",
+                upsell_of: boughtItem.sku,
+                sku: offer.sku,
+                item: offer.name,
+              },
             },
           });
           totalAmountPaise += offer.priceInPaise;

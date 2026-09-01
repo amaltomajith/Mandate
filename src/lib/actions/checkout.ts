@@ -108,7 +108,10 @@ export async function buyFromRequest(request: string): Promise<CheckoutResult> {
     amount: item.priceInPaise,
     currency: "INR",
     category: item.category,
-    params: { receipt: `checkout-${Date.now()}`, notes: { source: "conversational-checkout" } },
+    params: {
+      receipt: `checkout-${Date.now()}`,
+      notes: { source: "conversational-checkout", sku: item.sku, item: item.name },
+    },
   });
 
   if (result.decision === "allow") {

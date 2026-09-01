@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Agent, Customer, Escalation, Mandate, PolicyRule, Trace } from "@/types/db";
+import type { Agent, Customer, Escalation, Mandate, PolicyRule, Product, Trace } from "@/types/db";
 import type { PolicyIssue } from "@/lib/policy/audit";
 import { EscalationsPanel } from "./EscalationsPanel";
 import { AgentTrustPanel } from "./AgentTrustPanel";
@@ -13,6 +13,7 @@ import { SimulationPanel } from "./SimulationPanel";
 import { ConversationalCheckout } from "./ConversationalCheckout";
 import { SellableCatalog } from "./SellableCatalog";
 import { StorefrontCard } from "./StorefrontCard";
+import { BuyingActivity } from "./BuyingActivity";
 import { RevenueImpactPanel } from "./RevenueImpactPanel";
 import { TransactionsView } from "./TransactionsView";
 import { MandatesPanel } from "./MandatesPanel";
@@ -39,6 +40,7 @@ interface Props {
   pendingCount: number;
   mandates: Mandate[];
   customers: Customer[];
+  products: Product[];
 }
 
 /**
@@ -48,7 +50,7 @@ interface Props {
  * instead of stacking everything into one increasingly long scroll.
  */
 export function DashboardTabs(props: Props) {
-  const { agents, rules, traces, escalations, tracesById, deterministicIssues, mandates, customers } = props;
+  const { agents, rules, traces, escalations, tracesById, deterministicIssues, mandates, customers, products } = props;
   const [tab, setTab] = useState<Tab>("overview");
   const [highlightRuleId, setHighlightRuleId] = useState<string | null>(null);
 
@@ -130,16 +132,22 @@ export function DashboardTabs(props: Props) {
       )}
 
       {tab === "buy" && (
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-          {/* Left: act. Right: what acting would currently be permitted to do —
-              the two halves answer each other, so a refusal in the checkout has
-              its explanation sitting beside it rather than needing a tab
-              switch to find. */}
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          {/* Left is the shop as it stands: buy something, and what the agent
+              could sell next. Right is the record of what it has already sold.
+              The earlier layout was forward-looking on both sides, so the tab
+              could not answer the first question anyone asks about a shop. */}
           <div className="flex flex-col gap-5">
             <ConversationalCheckout />
+            <SellableCatalog />
             <StorefrontCard />
           </div>
-          <SellableCatalog />
+          <BuyingActivity
+            traces={traces}
+            escalations={escalations}
+            products={products}
+            customers={customers}
+          />
         </div>
       )}
 

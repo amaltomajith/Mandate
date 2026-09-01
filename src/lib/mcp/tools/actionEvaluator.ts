@@ -96,7 +96,22 @@ export async function runActionEvaluation(
     parentTraceId: input.forkFrom ?? null,
     mode,
     actionType: input.actionType,
-    params: { amount: input.amount, currency: input.currency, category: input.category, ...input.params } as unknown as Json,
+    // Caller params first, authoritative fields last. `amount` here is what
+    // the revenue figures and the order history read, and it has to be the
+    // amount the policy engine actually judged; spread the other way round, a
+    // caller passing `params: { amount: 1 }` would have its order evaluated on
+    // the real amount but recorded — and reported — as one paisa.
+    //
+    // `customerId` is persisted alongside it because the mandate gate above
+    // already acted on it: a trace recording what was bought and by which
+    // agent, but not for whom, is an audit trail with a hole in it.
+    params: {
+      ...input.params,
+      amount: input.amount,
+      currency: input.currency,
+      category: input.category,
+      customerId: input.customerId ?? null,
+    } as unknown as Json,
     agentId,
     decision,
     ruleFiredId: match?.rule.id ?? null,

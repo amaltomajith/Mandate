@@ -67,7 +67,7 @@ async function withRetry<T>(query: () => PromiseLike<SupabaseResult<T>>, attempt
 export async function getDashboardData() {
   const supabase = createAdminClient();
 
-  const [agents, rules, traces, escalations, alerts, mandates, customers] = await Promise.all([
+  const [agents, rules, traces, escalations, alerts, mandates, customers, products] = await Promise.all([
     withRetry(() => supabase.from("agents").select("*").order("trust_score", { ascending: false })),
     withRetry(() => supabase.from("policy_rules").select("*").order("created_at", { ascending: false })),
     withRetry(() => supabase.from("traces").select("*").order("created_at", { ascending: false }).limit(300)),
@@ -82,9 +82,13 @@ export async function getDashboardData() {
     withRetry(() => supabase.from("alerts").select("*").order("created_at", { ascending: false }).limit(50)),
     withRetry(() => supabase.from("mandates").select("*").order("created_at", { ascending: false })),
     withRetry(() => supabase.from("customers").select("*").order("created_at", { ascending: false })),
+    // Unlimited on purpose: the order history names the product behind each
+    // trace by SKU lookup, and a truncated product list would silently turn
+    // some orders into unnamed ones. Handful of rows either way.
+    withRetry(() => supabase.from("products").select("*").order("name")),
   ]);
 
-  const errors = [agents, rules, traces, escalations, alerts, mandates, customers]
+  const errors = [agents, rules, traces, escalations, alerts, mandates, customers, products]
     .map((r) => r.error)
     .filter((e): e is NonNullable<typeof e> => e !== null);
 
@@ -122,6 +126,7 @@ export async function getDashboardData() {
     alerts: alerts.data ?? [],
     mandates: mandates.data ?? [],
     customers: customers.data ?? [],
+    products: products.data ?? [],
     loadError: errors[0]?.message ?? null,
   };
 }

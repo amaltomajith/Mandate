@@ -11,7 +11,7 @@ import type { Trace } from "@/types/db";
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const { agents, rules, traces, escalations, alerts, mandates, customers, loadError } = await getDashboardData();
+  const { agents, rules, traces, escalations, alerts, mandates, customers, products, loadError } = await getDashboardData();
   const tracesById: Record<string, Trace> = Object.fromEntries(traces.map((t) => [t.id, t]));
 
   const pendingEscalations = escalations.filter((e) => e.status === "pending").length;
@@ -94,6 +94,7 @@ export default async function DashboardPage() {
           pendingCount={pendingEscalations}
           mandates={mandates}
           customers={customers}
+          products={products}
 
         />
       </div>
