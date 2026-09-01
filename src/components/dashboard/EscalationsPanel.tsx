@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { approveEscalation, denyEscalation } from "@/lib/actions/escalations";
 import type { Escalation, Trace } from "@/types/db";
-import { actionTypeLabel, DangerButton, EmptyState, formatMoney, Icons, Panel, SuccessButton, relativeTime } from "./ui";
+import { actionTypeLabel, DangerButton, EmptyState, formatMoney, Icons, Panel, Spinner, SuccessButton, relativeTime } from "./ui";
 
 export function EscalationsPanel({
   escalations,
@@ -14,7 +14,10 @@ export function EscalationsPanel({
 }) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  // Which row AND which of its two actions — a single busy id made both
+  // buttons announce "Working…", so approving looked like it might also be
+  // denying. Only the button actually running says anything.
+  const [busy, setBusy] = useState<{ id: string; action: "approve" | "deny" } | null>(null);
   // `escalations` comes from the server and only refreshes on the dashboard's
   // 4s poll, so without this a card sat there looking actionable for seconds
   // after being approved — long enough to click again and get told it was
@@ -23,9 +26,9 @@ export function EscalationsPanel({
 
   const pending = escalations.filter((e) => e.status === "pending" && !resolvedLocally.has(e.id));
 
-  function act(id: string, fn: (id: string) => Promise<void>) {
+  function act(id: string, action: "approve" | "deny", fn: (id: string) => Promise<void>) {
     setError(null);
-    setBusyId(id);
+    setBusy({ id, action });
     startTransition(async () => {
       try {
         await fn(id);
@@ -42,7 +45,7 @@ export function EscalationsPanel({
           setError(message);
         }
       } finally {
-        setBusyId(null);
+        setBusy(null);
       }
     });
   }
@@ -58,7 +61,9 @@ export function EscalationsPanel({
       <div className="space-y-3">
         {pending.map((esc) => {
           const trace = tracesById[esc.trace_id];
-          const rowBusy = isPending && busyId === esc.id;
+          const rowBusy = isPending && busy?.id === esc.id;
+          const approving = rowBusy && busy?.action === "approve";
+          const denying = rowBusy && busy?.action === "deny";
           return (
             <div
               key={esc.id}
@@ -95,11 +100,25 @@ export function EscalationsPanel({
                 </>
               )}
               <div className="mt-3 flex gap-2">
-                <SuccessButton disabled={rowBusy} onClick={() => act(esc.id, approveEscalation)} className="flex-1">
-                  {rowBusy ? "Working…" : "Approve"}
+                <SuccessButton
+                  disabled={rowBusy}
+                  onClick={() => act(esc.id, "approve", approveEscalation)}
+                  className="flex-1"
+                >
+                  <span className="flex items-center justify-center gap-1.5">
+                    {approving && <Spinner />}
+                    {approving ? "Approving…" : "Approve"}
+                  </span>
                 </SuccessButton>
-                <DangerButton disabled={rowBusy} onClick={() => act(esc.id, denyEscalation)} className="flex-1">
-                  {rowBusy ? "Working…" : "Deny"}
+                <DangerButton
+                  disabled={rowBusy}
+                  onClick={() => act(esc.id, "deny", denyEscalation)}
+                  className="flex-1"
+                >
+                  <span className="flex items-center justify-center gap-1.5">
+                    {denying && <Spinner />}
+                    {denying ? "Denying…" : "Deny"}
+                  </span>
                 </DangerButton>
               </div>
             </div>

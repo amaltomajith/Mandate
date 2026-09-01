@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { pauseMandate, reactivateMandate, revokeMandate } from "@/lib/actions/mandates";
 import type { Agent, Customer, Mandate } from "@/types/db";
-import { DangerButton, EmptyState, GhostButton, Icons, Panel, SuccessButton, relativeTime } from "./ui";
+import { DangerButton, EmptyState, GhostButton, Icons, Panel, Spinner, SuccessButton, relativeTime } from "./ui";
 
 const TYPE_LABEL: Record<Mandate["type"], string> = {
   upi_autopay: "UPI Autopay",
@@ -30,26 +30,28 @@ export function MandatesPanel({ mandates, agents, customers }: { mandates: Manda
   const customerNameById = new Map(customers.map((c) => [c.id, c.name]));
 
   const [isPending, startTransition] = useTransition();
-  const [busyId, setBusyId] = useState<string | null>(null);
+  // Which row AND which action — a single busy id made every button on the row
+  // announce "Working…", so pausing looked like it might also be revoking.
+  const [busy, setBusy] = useState<{ id: string; action: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  function act(id: string, fn: (id: string) => Promise<void>) {
+  function act(id: string, action: string, fn: (id: string) => Promise<void>) {
     setError(null);
-    setBusyId(id);
+    setBusy({ id, action });
     startTransition(async () => {
       try {
         await fn(id);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Action failed.");
       } finally {
-        setBusyId(null);
+        setBusy(null);
       }
     });
   }
 
-  function actWithConfirm(id: string, confirmMessage: string, fn: (id: string) => Promise<void>) {
+  function actWithConfirm(id: string, action: string, confirmMessage: string, fn: (id: string) => Promise<void>) {
     if (!window.confirm(confirmMessage)) return;
-    act(id, fn);
+    act(id, action, fn);
   }
 
   return (
@@ -65,7 +67,8 @@ export function MandatesPanel({ mandates, agents, customers }: { mandates: Manda
       ) : (
         <div className="space-y-2.5">
           {mandates.map((m) => {
-            const busy = isPending && busyId === m.id;
+            const rowBusy = isPending && busy?.id === m.id;
+            const running = (action: string) => rowBusy && busy?.action === action;
             const status = STATUS_STYLE[m.status];
             return (
               <div key={m.id} className="rounded-xl border p-3.5" style={{ borderColor: "var(--panel-border)", background: "var(--panel-2)" }}>
@@ -92,35 +95,48 @@ export function MandatesPanel({ mandates, agents, customers }: { mandates: Manda
                 <div className="mt-3 flex gap-2">
                   {m.status === "active" && (
                     <>
-                      <GhostButton disabled={busy} onClick={() => act(m.id, pauseMandate)} className="flex-1">
-                        {busy ? "Working…" : "Pause"}
+                      <GhostButton disabled={rowBusy} onClick={() => act(m.id, "pause", pauseMandate)} className="flex-1">
+                        <span className="flex items-center justify-center gap-1.5">
+                          {running("pause") && <Spinner />}
+                          {running("pause") ? "Pausing…" : "Pause"}
+                        </span>
                       </GhostButton>
                       <DangerButton
-                        disabled={busy}
+                        disabled={rowBusy}
                         onClick={() =>
                           actWithConfirm(
                             m.id,
+                            "revoke",
                             "Revoke this mandate? This agent will be blocked from acting on this customer's behalf immediately, and revocation can't be undone — a new mandate would be needed to resume.",
                             revokeMandate
                           )
                         }
                         className="flex-1"
                       >
-                        {busy ? "Working…" : "Revoke"}
+                        <span className="flex items-center justify-center gap-1.5">
+                          {running("revoke") && <Spinner />}
+                          {running("revoke") ? "Revoking…" : "Revoke"}
+                        </span>
                       </DangerButton>
                     </>
                   )}
                   {m.status === "paused" && (
                     <>
-                      <SuccessButton disabled={busy} onClick={() => act(m.id, reactivateMandate)} className="flex-1">
-                        {busy ? "Working…" : "Resume"}
+                      <SuccessButton disabled={rowBusy} onClick={() => act(m.id, "resume", reactivateMandate)} className="flex-1">
+                        <span className="flex items-center justify-center gap-1.5">
+                          {running("resume") && <Spinner />}
+                          {running("resume") ? "Resuming…" : "Resume"}
+                        </span>
                       </SuccessButton>
                       <DangerButton
-                        disabled={busy}
-                        onClick={() => actWithConfirm(m.id, "Revoke this mandate permanently?", revokeMandate)}
+                        disabled={rowBusy}
+                        onClick={() => actWithConfirm(m.id, "revoke", "Revoke this mandate permanently?", revokeMandate)}
                         className="flex-1"
                       >
-                        {busy ? "Working…" : "Revoke"}
+                        <span className="flex items-center justify-center gap-1.5">
+                          {running("revoke") && <Spinner />}
+                          {running("revoke") ? "Revoking…" : "Revoke"}
+                        </span>
                       </DangerButton>
                     </>
                   )}

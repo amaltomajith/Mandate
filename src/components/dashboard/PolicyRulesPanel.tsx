@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { approvePolicyRule, deactivatePolicyRule, deletePolicyRule, reactivatePolicyRule, rejectPolicyRule } from "@/lib/actions/policy";
 import type { PolicyRule } from "@/types/db";
-import { DangerButton, EmptyState, GhostButton, Icons, Panel, SuccessButton, relativeTime } from "./ui";
+import { DangerButton, EmptyState, GhostButton, Icons, Panel, Spinner, SuccessButton, relativeTime } from "./ui";
 
 function ParamsLine({ rule }: { rule: PolicyRule }) {
   const p = rule.params as Record<string, unknown>;
@@ -41,27 +41,29 @@ export function PolicyRulesPanel({
   const inactive = rules.filter((r) => r.status === "superseded");
 
   const [isPending, startTransition] = useTransition();
-  const [busyId, setBusyId] = useState<string | null>(null);
+  // Which row AND which action — one busy id made every button on a row say
+  // "Working…" at once, so activating looked like it might also be rejecting.
+  const [busy, setBusy] = useState<{ id: string; action: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [supersedeChoices, setSupersedeChoices] = useState<Record<string, Set<string>>>({});
 
-  function act(id: string, fn: () => Promise<void>) {
+  function act(id: string, action: string, fn: () => Promise<void>) {
     setError(null);
-    setBusyId(id);
+    setBusy({ id, action });
     startTransition(async () => {
       try {
         await fn();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Action failed.");
       } finally {
-        setBusyId(null);
+        setBusy(null);
       }
     });
   }
 
-  function actWithConfirm(id: string, confirmMessage: string, fn: () => Promise<void>) {
+  function actWithConfirm(id: string, action: string, confirmMessage: string, fn: () => Promise<void>) {
     if (!window.confirm(confirmMessage)) return;
-    act(id, fn);
+    act(id, action, fn);
   }
 
   function toggleSupersede(pendingId: string, conflictId: string) {
@@ -87,7 +89,8 @@ export function PolicyRulesPanel({
             Pending review
           </p>
           {pendingReview.map((rule) => {
-            const busy = isPending && busyId === rule.id;
+            const rowBusy = isPending && busy?.id === rule.id;
+            const running = (action: string) => rowBusy && busy?.action === action;
             // Same-type rules are the ones that can actually shadow each
             // other — a cap never competes with a step-up.
             const conflicts = active.filter((r) => r.type === rule.type);
@@ -143,20 +146,26 @@ export function PolicyRulesPanel({
 
                 <div className="mt-3 flex gap-2">
                   <SuccessButton
-                    disabled={busy}
-                    onClick={() => act(rule.id, () => approvePolicyRule(rule.id, Array.from(chosen)))}
+                    disabled={rowBusy}
+                    onClick={() => act(rule.id, "activate", () => approvePolicyRule(rule.id, Array.from(chosen)))}
                     className="flex-1"
                   >
-                    {busy ? "Working…" : "Activate"}
+                    <span className="flex items-center justify-center gap-1.5">
+                      {running("activate") && <Spinner />}
+                      {running("activate") ? "Activating…" : "Activate"}
+                    </span>
                   </SuccessButton>
-                  <DangerButton disabled={busy} onClick={() => act(rule.id, () => rejectPolicyRule(rule.id))} className="flex-1">
-                    {busy ? "Working…" : "Reject"}
+                  <DangerButton disabled={rowBusy} onClick={() => act(rule.id, "reject", () => rejectPolicyRule(rule.id))} className="flex-1">
+                    <span className="flex items-center justify-center gap-1.5">
+                      {running("reject") && <Spinner />}
+                      {running("reject") ? "Rejecting…" : "Reject"}
+                    </span>
                   </DangerButton>
                   <GhostButton
-                    disabled={busy}
-                    onClick={() => actWithConfirm(rule.id, `Permanently delete the draft "${rule.name}"? This can't be undone.`, () => deletePolicyRule(rule.id))}
+                    disabled={rowBusy}
+                    onClick={() => actWithConfirm(rule.id, "delete", `Permanently delete the draft "${rule.name}"? This can't be undone.`, () => deletePolicyRule(rule.id))}
                   >
-                    {busy ? "…" : "Delete"}
+                    {running("delete") ? <Spinner /> : "Delete"}
                   </GhostButton>
                 </div>
               </div>
@@ -171,7 +180,7 @@ export function PolicyRulesPanel({
       {active.length === 0 && <EmptyState text="No active rules yet — click Run demo, it seeds them." />}
       <div className="mb-4 space-y-1">
         {active.map((rule) => {
-          const busy = isPending && busyId === rule.id;
+          const rowBusy = isPending && busy?.id === rule.id;
           const highlighted = highlightRuleId === rule.id;
           return (
             <div
@@ -185,12 +194,12 @@ export function PolicyRulesPanel({
               </span>
               <span className="flex shrink-0 items-center gap-2">
                 <span className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                  <GhostButton disabled={busy} onClick={() => act(rule.id, () => deactivatePolicyRule(rule.id))} className="py-1! px-2! text-[10px]!">
+                  <GhostButton disabled={rowBusy} onClick={() => act(rule.id, "update", () => deactivatePolicyRule(rule.id))} className="py-1! px-2! text-[10px]!">
                     {busy ? "…" : "Deactivate"}
                   </GhostButton>
                   <GhostButton
-                    disabled={busy}
-                    onClick={() => actWithConfirm(rule.id, `Permanently delete "${rule.name}"? This can't be undone — if it's ever fired, this will fail and tell you to deactivate instead.`, () => deletePolicyRule(rule.id))}
+                    disabled={rowBusy}
+                    onClick={() => actWithConfirm(rule.id, "delete", `Permanently delete "${rule.name}"? This can't be undone — if it's ever fired, this will fail and tell you to deactivate instead.`, () => deletePolicyRule(rule.id))}
                     className="py-1! px-2! text-[10px]!"
                   >
                     {busy ? "…" : "Delete"}
@@ -210,7 +219,7 @@ export function PolicyRulesPanel({
           </p>
           <div className="space-y-1">
             {inactive.map((rule) => {
-              const busy = isPending && busyId === rule.id;
+              const rowBusy = isPending && busy?.id === rule.id;
               const supersededByName = rule.superseded_by ? rules.find((r) => r.id === rule.superseded_by)?.name : null;
               const highlighted = highlightRuleId === rule.id;
               return (
@@ -227,12 +236,12 @@ export function PolicyRulesPanel({
                     </span>
                   </span>
                   <span className="flex shrink-0 gap-1">
-                    <GhostButton disabled={busy} onClick={() => act(rule.id, () => reactivatePolicyRule(rule.id))} className="py-1! px-2! text-[10px]!">
+                    <GhostButton disabled={rowBusy} onClick={() => act(rule.id, "update", () => reactivatePolicyRule(rule.id))} className="py-1! px-2! text-[10px]!">
                       {busy ? "…" : "Reactivate"}
                     </GhostButton>
                     <GhostButton
-                      disabled={busy}
-                      onClick={() => actWithConfirm(rule.id, `Permanently delete "${rule.name}"? This can't be undone.`, () => deletePolicyRule(rule.id))}
+                      disabled={rowBusy}
+                      onClick={() => actWithConfirm(rule.id, "delete", `Permanently delete "${rule.name}"? This can't be undone.`, () => deletePolicyRule(rule.id))}
                       className="py-1! px-2! text-[10px]!"
                     >
                       {busy ? "…" : "Delete"}

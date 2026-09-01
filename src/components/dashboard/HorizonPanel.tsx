@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { submitManualPolicyDraft, triggerHorizonExample } from "@/lib/actions/horizon";
-import { GhostButton, Icons, Panel, PrimaryButton } from "./ui";
+import { GhostButton, Icons, Panel, PrimaryButton, Spinner } from "./ui";
 
 interface DraftResult {
   ruleId: string;
@@ -67,7 +67,10 @@ export function HorizonPanel() {
 
       <div className="flex gap-2">
         <PrimaryButton disabled={isPending || !text.trim()} onClick={runManual} className="flex-1">
-          {isPending ? "Drafting…" : "Draft from text"}
+          <span className="flex items-center justify-center gap-1.5">
+            {isPending && <Spinner />}
+            {isPending ? "Drafting…" : "Draft from text"}
+          </span>
         </PrimaryButton>
         <GhostButton disabled={isPending} onClick={runHorizon} className="flex-1">
           Try an example

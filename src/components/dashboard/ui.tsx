@@ -106,6 +106,29 @@ export function PrimaryButton({ children, ...props }: React.ButtonHTMLAttributes
   );
 }
 
+/**
+ * Inline activity indicator for a button mid-action. Inherits `currentColor`
+ * so it works on any button colour without a variant per button, and the
+ * track/arc split reads as motion at 14px where a pulsing dot just looks like
+ * a rendering glitch.
+ */
+export function Spinner({ size = 12 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      className="animate-spin"
+      aria-hidden="true"
+      style={{ flexShrink: 0 }}
+    >
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" opacity="0.28" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function SuccessButton({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button

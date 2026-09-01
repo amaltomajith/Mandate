@@ -5,7 +5,7 @@ import { applyPolicyFix, runPolicyAudit, suggestFixForIssue } from "@/lib/action
 import type { PolicyIssue } from "@/lib/policy/audit";
 import type { SemanticIssue } from "@/lib/policy/semanticAudit";
 import type { FixSuggestion } from "@/lib/policy/suggestFix";
-import { GhostButton, Icons, Panel, SuccessButton } from "./ui";
+import { GhostButton, Icons, Panel, SuccessButton, Spinner } from "./ui";
 
 const SEVERITY_COLOR = {
   critical: "var(--decision-block)",
@@ -54,7 +54,10 @@ function FixCard({ fix, onApplied }: { fix: FixSuggestion; onApplied: () => void
         </p>
       )}
       <SuccessButton disabled={isPending || applied} onClick={apply} className="mt-2 w-full">
-        {applied ? "Applied" : isPending ? "Applying…" : "Apply this fix"}
+        <span className="flex items-center justify-center gap-1.5">
+          {isPending && <Spinner />}
+          {applied ? "Applied" : isPending ? "Applying…" : "Apply this fix"}
+        </span>
       </SuccessButton>
     </div>
   );
@@ -92,7 +95,10 @@ function IssueRow({ issue, onRefresh }: { issue: Issue; onRefresh: () => void })
 
       {issue.affectedRuleIds.length > 0 && !fixes && (
         <GhostButton disabled={isPending} onClick={suggestFix} className="mt-2 py-1! px-2.5! text-[11px]!">
-          {isPending ? "Thinking…" : "Suggest a fix"}
+          <span className="flex items-center justify-center gap-1.5">
+            {isPending && <Spinner />}
+            {isPending ? "Thinking…" : "Suggest a fix"}
+          </span>
         </GhostButton>
       )}
 
@@ -166,7 +172,10 @@ export function PolicyHealthPanel({ deterministicIssues }: { deterministicIssues
           Want a second, judgment-call pass? Ask the LLM to review coverage.
         </p>
         <GhostButton onClick={runAudit} disabled={isPending} className="shrink-0">
-          {isPending ? "Reviewing…" : "Run AI review"}
+          <span className="flex items-center justify-center gap-1.5">
+            {isPending && <Spinner />}
+            {isPending ? "Reviewing…" : "Run AI review"}
+          </span>
         </GhostButton>
       </div>
 

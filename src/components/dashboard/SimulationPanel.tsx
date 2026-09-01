@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { stepSimulation } from "@/lib/actions/simulation";
 import type { SimulationEvent, SimulationSummary } from "@/lib/demo/simulation";
 import { formatMoney } from "@/lib/format";
-import { GhostButton, decisionColor } from "./ui";
+import { GhostButton, decisionColor, Spinner } from "./ui";
 
 /**
  * The simulated agent's controls — and the only "run something" surface on the
@@ -146,7 +146,10 @@ export function SimulationPanel() {
             {activeSpeed.label} ▾
           </button>
           <GhostButton onClick={stepOnce} disabled={isPending || running} className="px-3">
-            {isPending ? "Deciding…" : "Step once"}
+            <span className="flex items-center justify-center gap-1.5">
+              {isPending && <Spinner />}
+              {isPending ? "Deciding…" : "Step once"}
+            </span>
           </GhostButton>
           <GhostButton onClick={() => setRunning((v) => !v)} className="px-4">
             {running ? "Stop" : "Start"}
