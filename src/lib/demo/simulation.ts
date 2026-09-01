@@ -119,7 +119,14 @@ export async function ensureSomeActiveMandates(): Promise<number> {
   const { id: agentId } = await ensureAgentIdentity(db, SIM_AGENT);
   const customers = await ensureSyntheticCustomers(db);
 
-  const { data: existing } = await db.from("mandates").select("customer_id").eq("status", "active");
+  // Scoped to THIS agent. A mandate belonging to a deleted agent still reads
+  // as active but authorizes nobody, so counting it here left the book
+  // permanently one short of the target while looking full.
+  const { data: existing } = await db
+    .from("mandates")
+    .select("customer_id")
+    .eq("status", "active")
+    .eq("agent_id", agentId);
   const alreadyHeld = new Set((existing ?? []).map((m) => m.customer_id));
   if (alreadyHeld.size >= TARGET_ACTIVE_MANDATES) return 0;
 

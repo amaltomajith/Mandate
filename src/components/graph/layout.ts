@@ -89,12 +89,21 @@ export function computeLayout(
   // Mandates orbit close above their agent — a standing authorization, not a
   // one-off event like a transaction, so it reads visually as "attached to"
   // the agent rather than spiraling away below it like the trace history.
+  // A mandate authorizes ONE agent to act for ONE customer, so a mandate whose
+  // agent no longer exists authorizes nobody — checkMandateGate looks it up by
+  // (agent_id, customer_id) and can never match one. It is inert.
+  //
+  // Such rows used to land in an "__unassigned__" bucket, get positioned at the
+  // origin, and render floating with no edge (mandateEdges skips them, having
+  // no agent to draw from) while still showing an "ACTIVE — AUTHORIZED" badge.
+  // That is a node claiming a relationship that does not exist, so it is left
+  // out of the layout rather than drawn as an unexplained outlier.
   const byAgentMandates = new Map<string, Mandate[]>();
   for (const mandate of mandates) {
-    const key = mandate.agent_id ?? "__unassigned__";
-    const list = byAgentMandates.get(key) ?? [];
+    if (!mandate.agent_id || !agentPositionById[mandate.agent_id]) continue;
+    const list = byAgentMandates.get(mandate.agent_id) ?? [];
     list.push(mandate);
-    byAgentMandates.set(key, list);
+    byAgentMandates.set(mandate.agent_id, list);
   }
 
   const positionedMandates: PositionedMandate[] = [];
