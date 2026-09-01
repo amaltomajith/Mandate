@@ -24,7 +24,27 @@ export interface CrossSellResult {
   pitch: string;
 }
 
-const SYSTEM_PROMPT = `You are a merchant's cross-sell assistant. Given a product catalog (JSON array of {sku, name, description, category}) and the sku of an item a customer just bought, pick the ONE remaining catalog item that most naturally complements it — something a real customer buying the first item would plausibly also want on the same order. If nothing in the catalog is a good complement, respond with "sku": null. Respond with ONLY a JSON object shaped like {"sku": string | null, "pitch": string} — pitch is one persuasive sentence a shopper would find convincing, or "" if sku is null. Never invent a sku that isn't in the provided catalog.`;
+/**
+ * Wording matters more than it looks here, and the first version got it wrong.
+ *
+ * It offered `"sku": null` as a co-equal option — "if nothing is a good
+ * complement, respond with null" — and the model took it. Measured against
+ * this catalog with scripts/bench-llm.ts, it declined roughly two times in
+ * three, on a 120B model. That is not the model being weak; it is the prompt
+ * inviting a shrug, and a cross-sell agent that shrugs is worth nothing.
+ *
+ * A real shop assistant does not hold out for a perfect pairing. In a focused
+ * catalog almost everything pairs with almost everything in some plausible
+ * way, so the instruction now asks for the best available pairing and reserves
+ * null for a genuinely unrelated catalog. The grounding check below is
+ * unchanged and still rejects an invented SKU, so pushing the model to answer
+ * cannot push it into answering with something that does not exist.
+ */
+const SYSTEM_PROMPT = `You are a merchant's cross-sell assistant. Given a product catalog (JSON array of {sku, name, description, category}) and the sku of an item a customer just bought, pick the ONE remaining catalog item most likely to be added to the same order.
+
+Assume a complement usually exists. In a focused catalog most items pair with most others in some plausible way — a desk with a stand, a keyboard with a mouse, a hub with anything that plugs into a laptop, a mat with anything else in a home setup. Reach for the best available pairing rather than holding out for a perfect one. Answer with "sku": null ONLY when the catalog contains nothing a buyer of this item could plausibly also want, which should be rare.
+
+Respond with ONLY a JSON object shaped like {"sku": string | null, "pitch": string} — pitch is one persuasive sentence a shopper would find convincing, or "" if sku is null. Never invent a sku that isn't in the provided catalog.`;
 
 export async function suggestCrossSell(catalog: CatalogItem[], justBoughtSku: string): Promise<CrossSellResult | null> {
   const candidates = catalog.filter((i) => i.sku !== justBoughtSku);
