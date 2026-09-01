@@ -34,6 +34,10 @@ export interface Order {
   category: string;
   amountPaise: number;
   currency: string;
+  /** Present only on orders placed after customerId began being persisted on
+   *  the trace. Segmentation needs the id, not the name -- a name is not an
+   *  identity. */
+  customerId: string | null;
   customerName: string | null;
   outcome: OrderOutcome;
   reasoning: string | null;
@@ -147,6 +151,7 @@ export function deriveOrders(
       category: params.category ?? "—",
       amountPaise: typeof params.amount === "number" ? params.amount : 0,
       currency: params.currency ?? "INR",
+      customerId: params.customerId ?? null,
       customerName: params.customerId ? customerName.get(params.customerId) ?? null : null,
       outcome,
       reasoning: trace.reasoning,
