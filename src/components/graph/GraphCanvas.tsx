@@ -5,7 +5,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { Grid, Html, Line, OrbitControls, Stars } from "@react-three/drei";
 import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import type * as THREE from "three";
-import type { Agent, Customer, Mandate, PolicyRule, Trace } from "@/types/db";
+import type { Agent, Customer, Escalation, Mandate, PolicyRule, Trace } from "@/types/db";
 import { computeLayout, type Vec3 } from "./layout";
 import { DECISION_COLORS, ENTITY_COLORS } from "./colors";
 import { actionTypeLabel, formatMoney } from "@/lib/format";
@@ -21,8 +21,24 @@ const RULE_TYPE_LABELS: Record<PolicyRule["type"], string> = {
 const DECISION_LABELS: Record<Trace["decision"], string> = {
   allow: "Allowed",
   block: "Blocked",
-  escalate: "Escalated — needs approval",
+  escalate: "Escalated",
   protocol_reject: "Rejected — invalid signature",
+};
+
+/**
+ * An escalation's decision never changes — the trace records that a human was
+ * asked, and that stays true forever. Whether anyone has since *answered* is a
+ * separate fact, living on the escalation row.
+ *
+ * Labelling from `trace.decision` alone conflated the two, so an escalation
+ * approved hours ago still read "needs approval" for the rest of time. That
+ * flatly contradicted the Escalations panel sitting beside it saying the queue
+ * was clear, which makes the queue look broken rather than empty.
+ */
+const ESCALATION_STATUS_SUFFIX: Record<Escalation["status"], string> = {
+  pending: " — needs approval",
+  approved: " — approved",
+  denied: " — denied",
 };
 
 const MANDATE_TYPE_LABELS: Record<Mandate["type"], string> = {
@@ -47,7 +63,7 @@ const MANDATE_STATUS_LABELS: Record<Mandate["status"], string> = {
 type HoverInfo =
   | { kind: "agent"; agent: Agent; position: Vec3 }
   | { kind: "rule"; rule: PolicyRule; position: Vec3 }
-  | { kind: "trace"; trace: Trace; position: Vec3 }
+  | { kind: "trace"; trace: Trace; position: Vec3; escalationStatus?: Escalation["status"] }
   | { kind: "mandate"; mandate: Mandate; customerName: string; position: Vec3 }
   | null;
 
@@ -159,7 +175,17 @@ function MandateNode({
   );
 }
 
-function TraceNode({ trace, position, onHover }: { trace: Trace; position: Vec3; onHover: (h: HoverInfo) => void }) {
+function TraceNode({
+  trace,
+  position,
+  escalationStatus,
+  onHover,
+}: {
+  trace: Trace;
+  position: Vec3;
+  escalationStatus?: Escalation["status"];
+  onHover: (h: HoverInfo) => void;
+}) {
   const groupRef = useRef<THREE.Group>(null);
   const ringRef = useRef<THREE.Mesh>(null);
   const shockwaveRef = useRef<THREE.Mesh>(null);
@@ -225,7 +251,7 @@ function TraceNode({ trace, position, onHover }: { trace: Trace; position: Vec3;
       position={position}
       onPointerOver={(e) => {
         e.stopPropagation();
-        onHover({ kind: "trace", trace, position });
+        onHover({ kind: "trace", trace, position, escalationStatus });
       }}
       onPointerOut={(e) => {
         e.stopPropagation();
@@ -283,7 +309,15 @@ function HoverPanel({ info }: { info: HoverInfo }) {
   } else {
     const p = info.trace.params as { amount?: number; currency?: string } | null;
     title = actionTypeLabel(info.trace.action_type) + (p?.amount && p?.currency ? ` · ${formatMoney(p.amount, p.currency)}` : "");
-    badge = { text: DECISION_LABELS[info.trace.decision], color: DECISION_COLORS[info.trace.decision] };
+    // A trace with no escalation row at all is one that never needed a human;
+    // only append a status when there is genuinely one to report.
+    const escalationStatus = info.escalationStatus;
+    const suffix =
+      info.trace.decision === "escalate" && escalationStatus ? ESCALATION_STATUS_SUFFIX[escalationStatus] : "";
+    badge = {
+      text: DECISION_LABELS[info.trace.decision] + suffix,
+      color: DECISION_COLORS[info.trace.decision],
+    };
     lines = [info.trace.reasoning ?? ""];
   }
 
@@ -325,15 +359,23 @@ function Scene({
   traces,
   mandates,
   customers,
+  escalations,
 }: {
   agents: Agent[];
   rules: PolicyRule[];
   traces: Trace[];
   mandates: Mandate[];
   customers: Customer[];
+  escalations: Escalation[];
 }) {
   const [hover, setHover] = useState<HoverInfo>(null);
   const visibleTraces = useMemo(() => traces.slice(0, MAX_VISIBLE_TRACES), [traces]);
+  // Whether an escalation has been answered lives on the escalation row, not
+  // the trace — see ESCALATION_STATUS_SUFFIX for why that distinction matters.
+  const escalationStatusByTrace = useMemo(
+    () => new Map(escalations.map((e) => [e.trace_id, e.status])),
+    [escalations]
+  );
   const layout = useMemo(
     () => computeLayout(agents, rules, visibleTraces, mandates),
     [agents, rules, visibleTraces, mandates]
@@ -435,7 +477,13 @@ function Scene({
         />
       ))}
       {layout.traces.map((p) => (
-        <TraceNode key={p.trace.id} trace={p.trace} position={p.position} onHover={setHover} />
+        <TraceNode
+          key={p.trace.id}
+          trace={p.trace}
+          position={p.position}
+          escalationStatus={escalationStatusByTrace.get(p.trace.id)}
+          onHover={setHover}
+        />
       ))}
 
       <HoverPanel info={hover} />
@@ -461,18 +509,20 @@ export function GraphCanvas({
   traces,
   mandates = [],
   customers = [],
+  escalations = [],
 }: {
   agents: Agent[];
   rules: PolicyRule[];
   traces: Trace[];
   mandates?: Mandate[];
   customers?: Customer[];
+  escalations?: Escalation[];
 }) {
   return (
     <Canvas camera={{ position: [9, 7, 9], fov: 50 }} className="h-full w-full" dpr={[1, 1.75]}>
       <color attach="background" args={["#05060a"]} />
       <fog attach="fog" args={["#05060a", 14, 34]} />
-      <Scene agents={agents} rules={rules} traces={traces} mandates={mandates} customers={customers} />
+      <Scene agents={agents} rules={rules} traces={traces} mandates={mandates} customers={customers} escalations={escalations} />
     </Canvas>
   );
 }
