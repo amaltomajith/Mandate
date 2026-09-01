@@ -1,7 +1,7 @@
 import { fetchCatalog, type CatalogItem } from "./catalog";
 import { suggestCrossSell } from "./crossSell";
 import { MandateClient } from "./mandateClient";
-import { createAdminClient, ensureAgentIdentity } from "./shared";
+import { createAdminClient, ensureAgentIdentity, moneyLabel } from "./shared";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
@@ -187,6 +187,42 @@ interface ActionResult {
   traceId: string;
 }
 
+
+/**
+ * Asks the policy engine what this customer can actually be sold right now.
+ *
+ * This is the control plane working as a *sales* input rather than only a
+ * gate. An agent that proposes blind wastes its best pitch on something that
+ * bounces; an agent that can ask first always offers the most valuable thing
+ * that will clear. Same rules, opposite use.
+ *
+ * Probing is free: velocity aggregates count only `mode=enforce` traces
+ * (getAggregates in traceHelpers.ts), so simulating a dozen candidates costs
+ * the agent nothing against its own rate limit. If that ever changed, this
+ * would quietly start rate-limiting the agent for thinking.
+ *
+ * Descending by price on purpose — the question is not "what fits" but "what
+ * is the most valuable thing that fits".
+ */
+async function bestClearingItem(
+  client: MandateClient,
+  candidates: CatalogItem[],
+  customerId: string
+): Promise<CatalogItem | null> {
+  for (const item of [...candidates].sort((a, b) => b.priceInPaise - a.priceInPaise)) {
+    const probe = await client.callTool<ActionResult>("simulate_action", {
+      actionType: "order.create",
+      amount: item.priceInPaise,
+      currency: "INR",
+      category: item.category,
+      customerId,
+      params: { receipt: `probe-${Date.now()}-${item.sku}` },
+    });
+    if (probe.decision === "allow") return item;
+  }
+  return null;
+}
+
 /** Runs `count` simulated actions. The caller controls pacing — see
  *  SimulationPanel.tsx, where the merchant picks the interval. */
 export async function runSimulation(count: number = 1): Promise<SimulationSummary> {
@@ -277,37 +313,68 @@ export async function runSimulation(count: number = 1): Promise<SimulationSummar
     // breaches a cap is refused exactly as a customer-initiated purchase would
     // be. The agent proposing something does not privilege it.
     if (boughtItem && enforced.decision === "allow" && Math.random() < UPSELL_CHANCE) {
-      // A failed suggestion must never affect the purchase it followed —
-      // suggestCrossSell returns null on an LLM failure or an invented SKU.
+      // Taste first: the LLM picks a genuine complement over the real catalog.
+      // A failed suggestion returns null and never touches the purchase it
+      // followed.
       const suggestion = await suggestCrossSell(catalog, boughtItem.sku);
       if (suggestion) {
-        const upsellArgs = {
+        // Then constraint. Asking the engine BEFORE proposing is the whole
+        // point: without it the agent pitches its favourite complement and
+        // eats a refusal, losing a sale the merchant would have accepted at a
+        // different size.
+        const wanted = suggestion.item;
+        const probe = await client.callTool<ActionResult>("simulate_action", {
           actionType: "order.create",
-          amount: suggestion.item.priceInPaise,
+          amount: wanted.priceInPaise,
           currency: "INR",
-          category: suggestion.item.category,
+          category: wanted.category,
           customerId: customer.id,
-          forkFrom: enforced.traceId,
-          params: {
-            receipt: `sim-upsell-${Date.now()}-${i}`,
-            notes: { scenario: "upsell", source: "simulation", upsell_of: boughtItem.sku },
-          },
-        };
-        const upsell = await client.callTool<ActionResult>("enforce_action", upsellArgs);
-        totalAmountPaise += suggestion.item.priceInPaise;
-        if (upsell.decision === "allow") allowed++;
-        else if (upsell.decision === "escalate") escalated++;
-        else blocked++;
-
-        events.push({
-          scenario: "ordinary",
-          label: `Agent upsells: ${suggestion.item.name}`,
-          decision: upsell.decision,
-          reasoning: upsell.reasoning,
-          amountPaise: suggestion.item.priceInPaise,
-          isUpsell: true,
-          pitch: suggestion.pitch,
+          params: { receipt: `probe-${Date.now()}-${wanted.sku}` },
         });
+
+        let offer: CatalogItem | null = wanted;
+        let substituted = false;
+        if (probe.decision !== "allow") {
+          // What it wanted to sell won't clear. Rather than abandoning the
+          // upsell, fall back to the most valuable thing that will.
+          offer = await bestClearingItem(
+            client,
+            catalog.filter((c) => c.sku !== boughtItem.sku && c.sku !== wanted.sku),
+            customer.id
+          );
+          substituted = true;
+        }
+
+        if (offer) {
+          const upsell = await client.callTool<ActionResult>("enforce_action", {
+            actionType: "order.create",
+            amount: offer.priceInPaise,
+            currency: "INR",
+            category: offer.category,
+            customerId: customer.id,
+            forkFrom: enforced.traceId,
+            params: {
+              receipt: `sim-upsell-${Date.now()}-${i}`,
+              notes: { scenario: "upsell", source: "simulation", upsell_of: boughtItem.sku },
+            },
+          });
+          totalAmountPaise += offer.priceInPaise;
+          if (upsell.decision === "allow") allowed++;
+          else if (upsell.decision === "escalate") escalated++;
+          else blocked++;
+
+          events.push({
+            scenario: "ordinary",
+            label: `Agent upsells: ${offer.name}`,
+            decision: upsell.decision,
+            reasoning: substituted
+              ? `Wanted to offer ${wanted.name} (${moneyLabel(wanted.priceInPaise)}) but policy wouldn't clear it, so it offered the most valuable alternative that would. ${upsell.reasoning}`
+              : upsell.reasoning,
+            amountPaise: offer.priceInPaise,
+            isUpsell: true,
+            pitch: substituted ? undefined : suggestion.pitch,
+          });
+        }
       }
     }
   }

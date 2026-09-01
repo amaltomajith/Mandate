@@ -5,7 +5,9 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
  * the MCP route does for agents; see HANDOVER.md "two auth layers". `/api/mcp`
  * and `/api/wba-directory` are excluded here because they authenticate
  * themselves (Ed25519 request signatures / public data) and were never Clerk's
- * job to gate. `/architecture.html` is public documentation — gating it behind
+ * job to gate. `/api/catalog` is the machine-readable storefront, public by
+ * design so an AI buyer can discover the merchant before transacting with it.
+ * `/architecture.html` is public documentation — gating it behind
  * a sign-in would defeat the point of linking it from the sign-in page.
  *
  * Named `proxy.ts` per Next.js 16 (the file used to be `middleware.ts` —
@@ -16,6 +18,9 @@ const isPublicRoute = createRouteMatcher([
   "/sign-up(.*)",
   "/api/mcp",
   "/api/wba-directory",
+  // Discovery has to come before the signature: an agent that cannot read the
+  // catalog until it holds credentials is one that can never become a buyer.
+  "/api/catalog",
   "/architecture.html",
 ]);
 
