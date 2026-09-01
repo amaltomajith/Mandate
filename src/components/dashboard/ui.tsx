@@ -1,5 +1,13 @@
 import type { ReactNode } from "react";
 
+/**
+ * `bodyClassName` exists so a panel can own a scroll region instead of growing
+ * without limit. A panel in a fixed-height column must let its body shrink and
+ * scroll, which needs `min-h-0` on the flex child — without it a flex item
+ * refuses to shrink below its content and pushes the whole layout taller,
+ * which is exactly how a growing escalation queue used to stretch the entity
+ * graph off the bottom of the screen.
+ */
 export function Panel({
   title,
   icon,
@@ -8,6 +16,7 @@ export function Panel({
   action,
   children,
   className,
+  bodyClassName,
 }: {
   title: string;
   icon?: ReactNode;
@@ -16,16 +25,17 @@ export function Panel({
   action?: ReactNode;
   children: ReactNode;
   className?: string;
+  bodyClassName?: string;
 }) {
   return (
-    <section className={`panel-card relative overflow-hidden rounded-2xl p-5 ${className ?? ""}`}>
+    <section className={`panel-card relative flex flex-col overflow-hidden rounded-2xl p-5 ${className ?? ""}`}>
       {accent && (
         <div
           className="pointer-events-none absolute inset-x-0 top-0 h-[3px] opacity-80"
           style={{ background: accent }}
         />
       )}
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex shrink-0 items-center justify-between">
         <div className="flex items-center gap-2.5">
           {icon && (
             <span
@@ -47,7 +57,7 @@ export function Panel({
         </div>
         {action}
       </div>
-      {children}
+      <div className={`min-h-0 flex-1 ${bodyClassName ?? ""}`}>{children}</div>
     </section>
   );
 }

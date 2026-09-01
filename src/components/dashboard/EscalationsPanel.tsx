@@ -35,15 +35,12 @@ export function EscalationsPanel({
         setResolvedLocally((prev) => new Set(prev).add(id));
       } catch (err) {
         const message = err instanceof Error ? err.message : "Action failed.";
-        // Already resolved isn't a failure — the outcome the merchant wanted
-        // is the outcome that holds. It only happens when a click lands twice
-        // before the poll catches up, so drop the card and stay quiet rather
-        // than showing a red banner for a non-problem.
-        if (message.includes("already resolved")) {
-          setResolvedLocally((prev) => new Set(prev).add(id));
-        } else {
-          setError(message);
-        }
+        // A conflicting resolution ("already approved" when denying, or vice
+        // versa) means the queue moved on: drop the card rather than leaving a
+        // stale one sitting there, but still say what happened, because the
+        // outcome is not the one this click asked for.
+        setError(message);
+        if (message.includes("already")) setResolvedLocally((prev) => new Set(prev).add(id));
       } finally {
         setBusy(null);
       }
@@ -51,7 +48,16 @@ export function EscalationsPanel({
   }
 
   return (
-    <Panel title="Escalations" icon={<Icons.Escalation />} accent="var(--decision-escalate)" count={pending.length}>
+    <Panel
+      title="Escalations"
+      icon={<Icons.Escalation />}
+      accent="var(--decision-escalate)"
+      count={pending.length}
+      // Capped rather than free-growing: a busy queue used to stretch this
+      // column and take the entity graph beside it with it.
+      className="max-h-[46%] shrink-0"
+      bodyClassName="overflow-y-auto pr-1"
+    >
       {error && (
         <p className="mb-3 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: "var(--decision-block)", color: "var(--decision-block)", background: "color-mix(in srgb, var(--decision-block) 14%, transparent)" }}>
           {error}
@@ -67,34 +73,33 @@ export function EscalationsPanel({
           return (
             <div
               key={esc.id}
-              className="rounded-xl border p-3.5"
-              style={{ borderColor: "var(--panel-border)", background: "var(--panel-2)" }}
+              className="rounded-xl border p-3.5 transition-opacity"
+              style={{
+                borderColor: "color-mix(in srgb, var(--decision-escalate) 30%, var(--panel-border))",
+                background: "var(--panel-2)",
+                opacity: rowBusy ? 0.6 : 1,
+              }}
             >
-              <div className="flex items-center justify-between">
-                <span
-                  className="rounded-md px-1.5 py-0.5 text-[10px] font-bold tracking-wide"
-                  style={{ background: "color-mix(in srgb, var(--decision-escalate) 15%, transparent)", color: "var(--decision-escalate)" }}
-                >
-                  NEEDS APPROVAL
-                </span>
-                <span className="text-[11px]" style={{ color: "var(--muted-2)" }}>
-                  {relativeTime(esc.created_at)}
-                </span>
-              </div>
               {trace && (
                 <>
-                  <div className="mt-2 flex items-baseline justify-between gap-2">
-                    <p className="text-sm font-medium">{actionTypeLabel(trace.action_type)}</p>
-                    {(() => {
-                      const p = trace.params as { amount?: number; currency?: string } | null;
-                      return p?.amount && p?.currency ? (
-                        <p className="text-sm font-semibold tabular-nums" style={{ color: "var(--decision-escalate)" }}>
-                          {formatMoney(p.amount, p.currency)}
-                        </p>
-                      ) : null;
-                    })()}
+                  {/* Amount first and large: it is the thing a merchant decides
+                      on, and it is what distinguishes one queued item from the
+                      next when several are waiting. */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[19px] font-semibold leading-none tabular-nums" style={{ color: "var(--decision-escalate)" }}>
+                        {(() => {
+                          const p = trace.params as { amount?: number; currency?: string } | null;
+                          return p?.amount && p?.currency ? formatMoney(p.amount, p.currency) : "—";
+                        })()}
+                      </p>
+                      <p className="mt-1.5 truncate text-[12px] font-medium">{actionTypeLabel(trace.action_type)}</p>
+                    </div>
+                    <span className="shrink-0 text-[10px]" style={{ color: "var(--muted-2)" }}>
+                      {relativeTime(esc.created_at)}
+                    </span>
                   </div>
-                  <p className="mt-1 text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                  <p className="mt-2 text-[11px] leading-relaxed" style={{ color: "var(--muted)" }}>
                     {trace.reasoning}
                   </p>
                 </>

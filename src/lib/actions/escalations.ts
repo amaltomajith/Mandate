@@ -26,7 +26,14 @@ export async function approveEscalation(escalationId: string) {
     .eq("id", escalationId)
     .single();
   if (escError || !escalation) throw new Error("Escalation not found.");
-  if (escalation.status !== "pending") throw new Error("Escalation was already resolved.");
+  // Idempotent on the outcome the caller asked for. A second approve lands
+  // whenever a click repeats before the dashboard's poll catches up, and
+  // re-approving something already approved is the same end state — throwing
+  // there turned a harmless double-click into a server error in the log and a
+  // red banner in the UI. A conflicting resolution is still an error, because
+  // silently "approving" something a human denied would be a real one.
+  if (escalation.status === "approved") return;
+  if (escalation.status !== "pending") throw new Error("This escalation was already denied.");
 
   const { data: trace, error: traceError } = await db
     .from("traces")
@@ -67,7 +74,8 @@ export async function denyEscalation(escalationId: string) {
 
   const { data: escalation, error } = await db.from("escalations").select("*").eq("id", escalationId).single();
   if (error || !escalation) throw new Error("Escalation not found.");
-  if (escalation.status !== "pending") throw new Error("Escalation was already resolved.");
+  if (escalation.status === "denied") return;
+  if (escalation.status !== "pending") throw new Error("This escalation was already approved.");
 
   await db
     .from("escalations")

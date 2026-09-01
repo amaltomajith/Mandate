@@ -94,8 +94,13 @@ export function DashboardTabs(props: Props) {
               enough to push the graph below the fold; keeping it underneath
               means the graph's position never depends on how much the
               simulation has produced. */}
-          <div className="grid flex-1 grid-cols-1 gap-5 lg:grid-cols-[1fr_390px]">
-            <div className="relative min-h-[560px] overflow-hidden rounded-2xl panel-card-lg">
+          {/* Height is pinned rather than content-driven. Previously the row
+              grew with the sidebar, so every new escalation made the graph
+              taller and pushed the page down — the graph became unusable to
+              orbit precisely because the system was busy. Now the column
+              scrolls internally and the graph keeps a stable viewport. */}
+          <div className="grid grid-cols-1 gap-5 lg:h-[calc(100vh-13rem)] lg:min-h-[600px] lg:grid-cols-[1fr_400px]">
+            <div className="relative min-h-[560px] overflow-hidden rounded-2xl panel-card-lg lg:min-h-0">
               <div
                 className="pointer-events-none absolute inset-x-0 top-0 z-10 h-24"
                 style={{ background: "linear-gradient(to bottom, rgba(5,6,10,0.6), transparent)" }}
@@ -108,11 +113,9 @@ export function DashboardTabs(props: Props) {
               <GraphLegend />
             </div>
 
-            <div className="flex flex-col gap-5">
+            <div className="flex min-h-0 flex-col gap-5">
               <EscalationsPanel escalations={escalations} tracesById={tracesById} />
-              <div className="flex-1">
-                <AgentTrustPanel agents={agents} />
-              </div>
+              <AgentTrustPanel agents={agents} rules={rules} />
             </div>
           </div>
 
