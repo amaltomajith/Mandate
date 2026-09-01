@@ -47,14 +47,18 @@ function isTransientNetworkError(error: { message: string }): boolean {
   return /fetch failed|econnreset|etimedout|enotfound|socket hang up/i.test(error.message);
 }
 
-async function withRetry<T>(query: () => PromiseLike<SupabaseResult<T>>, attempts = 3): Promise<SupabaseResult<T>> {
+async function withRetry<T>(query: () => PromiseLike<SupabaseResult<T>>, attempts = 4): Promise<SupabaseResult<T>> {
   let result = await query();
   for (
     let attempt = 1;
     attempt < attempts && result.error && (isTransientJwtClockError(result.error) || isTransientNetworkError(result.error));
     attempt++
   ) {
-    await sleep(300 * attempt);
+    // Grows faster than linearly: on a TLS-inspecting network the failures
+    // that get through the first retry tend to be a proxy renegotiating
+    // rather than a single dropped packet, and that takes longer to clear
+    // than 300ms.
+    await sleep(400 * attempt * attempt);
     result = await query();
   }
   return result;
@@ -93,7 +97,20 @@ export async function getDashboardData() {
       // is the difference between "TypeError: fetch failed" (tells you
       // nothing) and the actual OS-level reason underneath it.
       const cause = (e as { cause?: unknown }).cause;
-      console.error("[dashboardData] Supabase query failed:", e.message, cause ? { cause } : e);
+      const detail = cause ? { cause } : e;
+
+      // A network blip that survived four retries is still very likely
+      // transient — the dashboard re-polls every few seconds and the next
+      // attempt usually succeeds. console.error throws Next's full-screen dev
+      // overlay, which during a live demo is a far worse outcome than the
+      // momentary gap it is reporting. The failure is NOT hidden: it still
+      // logs, and `loadError` still renders a visible banner on the page.
+      // Anything that isn't a known-transient shape stays a hard error.
+      if (isTransientNetworkError(e)) {
+        console.warn("[dashboardData] transient network failure, will retry on next poll:", e.message, detail);
+      } else {
+        console.error("[dashboardData] Supabase query failed:", e.message, detail);
+      }
     }
   }
 
