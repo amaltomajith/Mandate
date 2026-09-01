@@ -45,6 +45,12 @@ export function SimulationPanel() {
   const [totals, setTotals] = useState({ allowed: 0, escalated: 0, blocked: 0, rejected: 0, amount: 0 });
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  // A tick is a real round trip — sign the request, verify the signature,
+  // evaluate policy, and on an allow actually call Razorpay — which takes a
+  // few seconds. Without saying so the feed just sits there and the thing
+  // looks stalled, so the pending action is shown as a row of its own and
+  // resolves in place into whatever the engine decided.
+  const [processing, setProcessing] = useState(false);
 
   // Guards against a slow round trip stacking requests on top of each other.
   const inFlight = useRef(false);
@@ -67,6 +73,7 @@ export function SimulationPanel() {
     async function tick() {
       if (inFlight.current) return;
       inFlight.current = true;
+      setProcessing(true);
       try {
         const summary = await stepSimulation(1);
         if (cancelled) return;
@@ -79,6 +86,7 @@ export function SimulationPanel() {
         setRunning(false);
       } finally {
         inFlight.current = false;
+        if (!cancelled) setProcessing(false);
       }
     }
 
@@ -92,11 +100,14 @@ export function SimulationPanel() {
 
   function stepOnce() {
     setError(null);
+    setProcessing(true);
     startTransition(async () => {
       try {
         absorb(await stepSimulation(1));
       } catch (err) {
         setError(err instanceof Error ? err.message : "Simulation step failed.");
+      } finally {
+        setProcessing(false);
       }
     });
   }
@@ -135,7 +146,7 @@ export function SimulationPanel() {
             {activeSpeed.label} ▾
           </button>
           <GhostButton onClick={stepOnce} disabled={isPending || running} className="px-3">
-            Step once
+            {isPending ? "Deciding…" : "Step once"}
           </GhostButton>
           <GhostButton onClick={() => setRunning((v) => !v)} className="px-4">
             {running ? "Stop" : "Start"}
@@ -183,8 +194,9 @@ export function SimulationPanel() {
         </div>
       )}
 
-      {feed.length > 0 && (
+      {(processing || feed.length > 0) && (
         <div className="mt-3 max-h-60 space-y-1.5 overflow-y-auto border-t pt-3 pr-1" style={{ borderColor: "var(--panel-border)" }}>
+          {processing && <PendingRow />}
           {feed.map((e, i) => {
             const color = decisionColor(e.decision);
             return (
@@ -213,6 +225,38 @@ export function SimulationPanel() {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The in-flight action, shown in the same shape as a decided one so it
+ * resolves in place rather than appearing from nowhere. The steps listed are
+ * the real ones the request goes through, in order — it isn't a generic
+ * spinner standing in for unknown work.
+ */
+function PendingRow() {
+  return (
+    <div
+      className="flex items-start gap-2.5 rounded-lg px-2 py-1.5"
+      style={{ background: "var(--panel-2)", border: "1px dashed var(--panel-border-strong)" }}
+    >
+      <span
+        className="mt-0.5 flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide"
+        style={{ background: "color-mix(in srgb, var(--entity-agent) 18%, transparent)", color: "var(--entity-agent)" }}
+      >
+        <span className="live-dot h-1 w-1 rounded-full" style={{ background: "var(--entity-agent)" }} />
+        Deciding
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[12px] font-medium" style={{ color: "var(--muted)" }}>
+          Agent action in flight
+        </p>
+        <p className="text-[11px] leading-snug" style={{ color: "var(--muted-2)" }}>
+          Signing the request, verifying it, checking the mandate, evaluating policy — then
+          calling Razorpay if it&apos;s allowed.
+        </p>
+      </div>
     </div>
   );
 }
