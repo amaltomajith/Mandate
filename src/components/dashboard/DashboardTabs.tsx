@@ -9,6 +9,7 @@ import { PolicyRulesPanel } from "./PolicyRulesPanel";
 import { PolicyHealthPanel } from "./PolicyHealthPanel";
 import { HorizonPanel } from "./HorizonPanel";
 import { SimulationPanel } from "./SimulationPanel";
+import { RevenueImpactPanel } from "./RevenueImpactPanel";
 import { TransactionsView } from "./TransactionsView";
 import { MandatesPanel } from "./MandatesPanel";
 import { GraphCanvas } from "@/components/graph/GraphCanvas";
@@ -89,11 +90,11 @@ export function DashboardTabs(props: Props) {
 
       {tab === "overview" && (
         <div className="flex flex-1 flex-col gap-5">
-          {/* Graph+sidebar first, fixed here regardless of anything below.
-              A run-something panel used to sit above this and could grow tall
-              enough to push the graph below the fold; keeping it underneath
-              means the graph's position never depends on how much the
-              simulation has produced. */}
+          {/* The scoreboard leads: what the control plane did to revenue is the
+              headline, and the graph explains how. Fixed height, so it can't
+              push the graph down as figures grow. */}
+          <RevenueImpactPanel traces={traces} escalations={escalations} />
+
           {/* Height is pinned rather than content-driven. Previously the row
               grew with the sidebar, so every new escalation made the graph
               taller and pushed the page down — the graph became unusable to

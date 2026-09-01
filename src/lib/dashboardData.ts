@@ -67,7 +67,14 @@ export async function getDashboardData() {
     withRetry(() => supabase.from("agents").select("*").order("trust_score", { ascending: false })),
     withRetry(() => supabase.from("policy_rules").select("*").order("created_at", { ascending: false })),
     withRetry(() => supabase.from("traces").select("*").order("created_at", { ascending: false }).limit(300)),
-    withRetry(() => supabase.from("escalations").select("*").order("created_at", { ascending: false }).limit(50)),
+    // Deliberately matched to the trace limit above, not a smaller number of
+    // its own. Escalations map 1:1 onto escalated traces, and the revenue
+    // panel reads an escalated trace with no matching escalation row as "still
+    // awaiting a decision". With a tighter cap here, approvals would silently
+    // fall out of the fetched set as they accumulate and the panel would start
+    // reporting settled revenue as pending — wrong in a way nothing on screen
+    // would reveal.
+    withRetry(() => supabase.from("escalations").select("*").order("created_at", { ascending: false }).limit(300)),
     withRetry(() => supabase.from("alerts").select("*").order("created_at", { ascending: false }).limit(50)),
     withRetry(() => supabase.from("mandates").select("*").order("created_at", { ascending: false })),
     withRetry(() => supabase.from("customers").select("*").order("created_at", { ascending: false })),
