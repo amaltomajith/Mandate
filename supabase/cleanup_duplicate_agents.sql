@@ -1,7 +1,7 @@
 -- Mandate — consolidate onto a single simulated agent
 --
 -- Not a schema migration; a one-off data cleanup, safe to skip if the roster
--- already looks right.
+-- already looks right, and safe to re-run.
 --
 -- Mandate never stores an agent's secret key, so an agent whose identity isn't
 -- pinned in the environment cannot be signed as again — every process that
@@ -17,18 +17,24 @@
 -- them: a trace whose agent no longer exists is unattributable, and an
 -- unattributable row in an audit log is worse than no row. Escalations and
 -- alerts cascade from traces automatically.
+--
+-- The predicate is written out twice rather than held in a temp table, purely
+-- so the SQL editor's linter doesn't flag a table created without RLS. A
+-- temporary table is session-scoped and unreachable through PostgREST, so that
+-- warning was a false positive — but this version simply avoids it.
 
 begin;
 
-create temporary table _defunct_agents on commit drop as
-select id
-from agents
-where name like 'Checkout Agent (%'      -- timestamp-suffixed duplicates
-   or name like 'Background Traffic Bot%' -- the retired second agent
-;
+delete from traces
+where agent_id in (
+  select id from agents
+  where name like 'Checkout Agent (%'        -- timestamp-suffixed duplicates
+     or name like 'Background Traffic Bot%'  -- the retired second agent
+);
 
-delete from traces where agent_id in (select id from _defunct_agents);
-delete from agents where id in (select id from _defunct_agents);
+delete from agents
+where name like 'Checkout Agent (%'
+   or name like 'Background Traffic Bot%';
 
 commit;
 
