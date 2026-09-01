@@ -120,10 +120,23 @@ npm run dev
 Sign in at `/login`, then use **Run demo** on the dashboard.
 
 > **Behind a TLS-inspecting proxy** (Sophos, Zscaler, most corporate or campus
-> networks)? Node ships its own CA bundle and will fail every Supabase call
-> with `UNABLE_TO_VERIFY_LEAF_SIGNATURE`, even though your browser is fine.
-> Start it with `NODE_OPTIONS=--use-system-ca` so Node trusts the same roots
-> your OS does.
+> networks)? The certificate your *server* sees for Supabase is signed by the
+> interceptor, not by Supabase. Your browser accepts it because the OS trusts
+> that root; Node ships its own CA bundle that doesn't, so every server-side
+> query fails with `fetch failed` / `UNABLE_TO_VERIFY_LEAF_SIGNATURE` while the
+> site looks fine in a browser.
+>
+> Export the interceptor's root certificate from your OS trust store and point
+> `.env.local` at it:
+>
+> ```bash
+> MANDATE_CA_CERT=/absolute/path/to/interceptor-root.pem
+> ```
+>
+> `npm run dev` goes through `scripts/dev.mjs`, which sets
+> `NODE_EXTRA_CA_CERTS` from that before starting Next — Node only reads it at
+> process start, so it can't be set from inside the app. A complete no-op if
+> the variable is absent, which is the normal case.
 
 ---
 
