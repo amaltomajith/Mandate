@@ -6,9 +6,9 @@ import { formatMoney } from "@/lib/format";
 import { GhostButton, Icons, Panel, Spinner, relativeTime } from "./ui";
 
 const DECISION_META: Record<SellableItem["decision"], { label: string; color: string }> = {
-  allow: { label: "Clears", color: "var(--decision-allow)" },
+  allow: { label: "Sells", color: "var(--decision-allow)" },
   escalate: { label: "Needs you", color: "var(--decision-escalate)" },
-  block: { label: "Refused", color: "var(--decision-block)" },
+  block: { label: "Blocked", color: "var(--decision-block)" },
 };
 
 /**
@@ -49,8 +49,20 @@ export function SellableCatalog() {
     return () => clearTimeout(id);
   }, [load]);
 
-  const total = snapshot ? snapshot.clearsValue + snapshot.needsApprovalValue + snapshot.refusedValue : 0;
-  const pct = (v: number) => (total > 0 ? (v / total) * 100 : 0);
+  // Counted, not summed. Adding up list prices produced a total of nothing in
+  // particular — not revenue, not inventory, not anything a merchant could act
+  // on — and "Rs 10,095 clears now" invites the question "Rs 10,095 of what?".
+  // How many of your products the agent can sell unaided is a question with a
+  // real answer.
+  const counts = snapshot
+    ? {
+        sells: snapshot.items.filter((i) => i.decision === "allow").length,
+        needsYou: snapshot.items.filter((i) => i.decision === "escalate").length,
+        blocked: snapshot.items.filter((i) => i.decision === "block").length,
+      }
+    : null;
+  const total = snapshot?.items.length ?? 0;
+  const pct = (n: number) => (total > 0 ? (n / total) * 100 : 0);
 
   return (
     <Panel
@@ -80,26 +92,43 @@ export function SellableCatalog() {
         </div>
       )}
 
-      {snapshot && (
+      {snapshot && counts && (
         <>
-          <div className="flex h-1.5 w-full overflow-hidden rounded-full" style={{ background: "var(--panel-border)" }}>
-            {pct(snapshot.clearsValue) > 0 && (
-              <div style={{ width: `${pct(snapshot.clearsValue)}%`, background: "var(--decision-allow)" }} />
+          <p className="text-[13px] leading-relaxed">
+            Your agent can sell{" "}
+            <span className="font-semibold" style={{ color: "var(--decision-allow)" }}>
+              {counts.sells} of {total}
+            </span>{" "}
+            products on its own.
+            {counts.needsYou > 0 && (
+              <>
+                {" "}
+                <span className="font-semibold" style={{ color: "var(--decision-escalate)" }}>
+                  {counts.needsYou}
+                </span>{" "}
+                need{counts.needsYou === 1 ? "s" : ""} your approval first.
+              </>
             )}
-            {pct(snapshot.needsApprovalValue) > 0 && (
-              <div style={{ width: `${pct(snapshot.needsApprovalValue)}%`, background: "var(--decision-escalate)" }} />
+            {counts.blocked > 0 && (
+              <>
+                {" "}
+                <span className="font-semibold" style={{ color: "var(--decision-block)" }}>
+                  {counts.blocked}
+                </span>{" "}
+                {counts.blocked === 1 ? "is" : "are"} blocked outright.
+              </>
             )}
-            {pct(snapshot.refusedValue) > 0 && (
-              <div style={{ width: `${pct(snapshot.refusedValue)}%`, background: "var(--decision-block)" }} />
-            )}
+          </p>
+
+          <div className="mt-2.5 flex h-1.5 w-full overflow-hidden rounded-full" style={{ background: "var(--panel-border)" }}>
+            {counts.sells > 0 && <div style={{ width: `${pct(counts.sells)}%`, background: "var(--decision-allow)" }} />}
+            {counts.needsYou > 0 && <div style={{ width: `${pct(counts.needsYou)}%`, background: "var(--decision-escalate)" }} />}
+            {counts.blocked > 0 && <div style={{ width: `${pct(counts.blocked)}%`, background: "var(--decision-block)" }} />}
           </div>
 
-          <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]" style={{ color: "var(--muted-2)" }}>
-            <Tally label="clears now" value={snapshot.clearsValue} color="var(--decision-allow)" />
-            <Tally label="needs approval" value={snapshot.needsApprovalValue} color="var(--decision-escalate)" />
-            <Tally label="refused" value={snapshot.refusedValue} color="var(--decision-block)" />
-            <span className="ml-auto">checked {relativeTime(snapshot.checkedAt)}</span>
-          </div>
+          <p className="mt-1.5 text-[10px]" style={{ color: "var(--muted-2)" }}>
+            checked {relativeTime(snapshot.checkedAt)}
+          </p>
 
           <div className="mt-3 space-y-1.5">
             {snapshot.items.map((item) => {
@@ -139,14 +168,3 @@ export function SellableCatalog() {
   );
 }
 
-function Tally({ label, value, color }: { label: string; value: number; color: string }) {
-  return (
-    <span className="flex items-center gap-1.5">
-      <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
-      <span className="font-semibold tabular-nums" style={{ color: "var(--foreground)" }}>
-        {formatMoney(value, "INR")}
-      </span>
-      {label}
-    </span>
-  );
-}

@@ -23,6 +23,11 @@ import { createAdminClient, ensureAgentIdentity } from "@/lib/demo/shared";
  * Costs nothing to run: velocity aggregates count only `enforce`-mode traces
  * (see getAggregates), so probing the whole catalog does not consume the
  * agent's rate limit or move any money.
+ *
+ * Returns per-item verdicts and nothing aggregated. Summing list prices across
+ * these buckets produced a number that measured nothing real — not revenue,
+ * not inventory — so the counting is left to the caller, where "5 of 6
+ * products" is a statement a merchant can actually act on.
  */
 
 export interface SellableItem {
@@ -37,9 +42,6 @@ export interface SellableItem {
 
 export interface SellableSnapshot {
   items: SellableItem[];
-  clearsValue: number;
-  needsApprovalValue: number;
-  refusedValue: number;
   checkedAt: string;
 }
 
@@ -68,9 +70,6 @@ export async function getSellableCatalog(): Promise<SellableSnapshot> {
   await client.initialize("mandate-sellable-check");
 
   const items: SellableItem[] = [];
-  let clearsValue = 0;
-  let needsApprovalValue = 0;
-  let refusedValue = 0;
 
   for (const item of catalog) {
     const probe = await client.callTool<ActionResult>("simulate_action", {
@@ -80,10 +79,6 @@ export async function getSellableCatalog(): Promise<SellableSnapshot> {
       category: item.category,
       params: { receipt: `sellable-${Date.now()}-${item.sku}` },
     });
-
-    if (probe.decision === "allow") clearsValue += item.priceInPaise;
-    else if (probe.decision === "escalate") needsApprovalValue += item.priceInPaise;
-    else refusedValue += item.priceInPaise;
 
     items.push({
       sku: item.sku,
@@ -98,9 +93,6 @@ export async function getSellableCatalog(): Promise<SellableSnapshot> {
 
   return {
     items: items.sort((a, b) => a.priceInPaise - b.priceInPaise),
-    clearsValue,
-    needsApprovalValue,
-    refusedValue,
     checkedAt: new Date().toISOString(),
   };
 }
