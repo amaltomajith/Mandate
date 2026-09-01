@@ -47,11 +47,27 @@ function isTransientNetworkError(error: { message: string }): boolean {
   return /fetch failed|econnreset|etimedout|enotfound|socket hang up/i.test(error.message);
 }
 
+/**
+ * The single answer to "is this worth panicking about", used by both the retry
+ * loop and the logging below.
+ *
+ * They were separate, and drifted: the retry loop treated the JWT clock error
+ * as transient and retried it four times, then the logging branch checked only
+ * the network predicate and reported it with console.error -- which throws
+ * Next's full-screen dev overlay. So the code retried an error *because it knew
+ * it was transient* and then announced it as fatal. One predicate for both
+ * decisions is the only way that stays consistent when the next failure shape
+ * gets added.
+ */
+function isTransient(error: { message: string }): boolean {
+  return isTransientJwtClockError(error) || isTransientNetworkError(error);
+}
+
 async function withRetry<T>(query: () => PromiseLike<SupabaseResult<T>>, attempts = 4): Promise<SupabaseResult<T>> {
   let result = await query();
   for (
     let attempt = 1;
-    attempt < attempts && result.error && (isTransientJwtClockError(result.error) || isTransientNetworkError(result.error));
+    attempt < attempts && result.error && isTransient(result.error);
     attempt++
   ) {
     // Grows faster than linearly: on a TLS-inspecting network the failures
@@ -103,15 +119,15 @@ export async function getDashboardData() {
       const cause = (e as { cause?: unknown }).cause;
       const detail = cause ? { cause } : e;
 
-      // A network blip that survived four retries is still very likely
-      // transient — the dashboard re-polls every few seconds and the next
-      // attempt usually succeeds. console.error throws Next's full-screen dev
-      // overlay, which during a live demo is a far worse outcome than the
+      // A known-transient failure that survived four retries is still very
+      // likely transient — the dashboard re-polls every few seconds and the
+      // next attempt usually succeeds. console.error throws Next's full-screen
+      // dev overlay, which during a live demo is a far worse outcome than the
       // momentary gap it is reporting. The failure is NOT hidden: it still
       // logs, and `loadError` still renders a visible banner on the page.
       // Anything that isn't a known-transient shape stays a hard error.
-      if (isTransientNetworkError(e)) {
-        console.warn("[dashboardData] transient network failure, will retry on next poll:", e.message, detail);
+      if (isTransient(e)) {
+        console.warn("[dashboardData] transient failure, will retry on next poll:", e.message, detail);
       } else {
         console.error("[dashboardData] Supabase query failed:", e.message, detail);
       }
