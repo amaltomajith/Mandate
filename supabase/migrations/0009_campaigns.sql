@@ -73,3 +73,20 @@ create index if not exists campaign_targets_status_idx on campaign_targets (stat
 -- new action never needs a migration to be recordable). Nothing to alter here
 -- for payment_link.create — noted so the absence reads as a decision rather
 -- than an oversight.
+
+-- Row Level Security, matching every other table in 0001_init.sql.
+--
+-- Both tables are read and written exclusively by server-side code holding the
+-- service role key, which bypasses RLS by design. Enabling it with no policies
+-- is therefore not a restriction on anything that exists — it is what stops the
+-- `anon` key, which is public and bundled into the browser, from reading a
+-- merchant's campaign plans, budgets, and customer targeting.
+--
+-- Deliberately no "authenticated read" policies, unlike the tables in 0001.
+-- Those date from when the dashboard read through a Supabase Auth session;
+-- since Clerk took over, every read goes through the service role and nothing
+-- authenticates to Postgres as `authenticated` at all. Granting a policy
+-- nothing uses would be widening access on the assumption someone might want
+-- it later, which is the wrong direction to guess in.
+alter table campaigns enable row level security;
+alter table campaign_targets enable row level security;
