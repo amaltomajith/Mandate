@@ -52,7 +52,11 @@ export function AgentTrustPanel({ agents, rules }: { agents: Agent[]; rules: Pol
       title="Agent trust"
       icon={<Icons.Sparkles />}
       accent="var(--entity-agent)"
-      className="min-h-0 flex-1"
+      // Sizes to its content instead of claiming half the column: the agent
+      // roster is small and stable, so a fixed share left a large void under
+      // one card while the escalation queue above was scrolling. Capped so a
+      // long roster still can't crowd out the queue.
+      className="max-h-[55%] shrink-0"
       bodyClassName="flex flex-col overflow-y-auto pr-1"
     >
       {sorted.length === 0 ? (
@@ -159,7 +163,7 @@ export function AgentTrustPanel({ agents, rules }: { agents: Agent[]; rules: Pol
         </div>
       )}
 
-      <p className="mt-auto pt-4 text-[10.5px] leading-relaxed" style={{ color: "var(--muted-2)" }}>
+      <p className="mt-3 shrink-0 text-[10.5px] leading-relaxed" style={{ color: "var(--muted-2)" }}>
         Every agent starts at 50 and moves with its own recent record. Below the floor, its actions
         are held for a human regardless of amount.
       </p>

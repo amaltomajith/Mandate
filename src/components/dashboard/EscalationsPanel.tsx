@@ -53,9 +53,11 @@ export function EscalationsPanel({
       icon={<Icons.Escalation />}
       accent="var(--decision-escalate)"
       count={pending.length}
-      // Capped rather than free-growing: a busy queue used to stretch this
-      // column and take the entity graph beside it with it.
-      className="max-h-[46%] shrink-0"
+      // Takes whatever the trust panel below doesn't need, and scrolls inside
+      // that rather than stretching the column — a busy queue used to push the
+      // entity graph beside it off the bottom of the screen. This is the panel
+      // that grows without bound, so it gets the flexible share.
+      className="min-h-0 flex-1"
       bodyClassName="overflow-y-auto pr-1"
     >
       {error && (
