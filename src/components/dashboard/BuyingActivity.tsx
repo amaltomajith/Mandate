@@ -56,7 +56,20 @@ export function BuyingActivity({ traces, escalations, products, customers }: Pro
   const leadRevenue = topSellers[0]?.revenuePaise ?? 0;
 
   return (
-    <Panel title="Buying activity" icon={<Icons.Sparkles />} accent="var(--decision-allow)">
+    <Panel
+      title="Buying activity"
+      icon={<Icons.Sparkles />}
+      accent="var(--decision-allow)"
+      /* Scope stated rather than implied. The dashboard holds the most recent
+         300 actions, so these are not lifetime totals, and a revenue figure
+         that quietly means "recently" is the kind of number that does not
+         survive being asked what it covers. */
+      action={
+        <span className="text-[10px]" style={{ color: "var(--muted-2)" }}>
+          last {traces.length} actions
+        </span>
+      }
+    >
       {orders.length === 0 ? (
         <EmptyState text="No orders yet. Buy something above, or start the simulation on the Overview tab." />
       ) : (
