@@ -211,7 +211,15 @@ export function SimulationPanel() {
                   {DECISION_LABEL[e.decision]}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[12px] font-medium">
+                  <p className="flex items-center gap-1.5 text-[12px] font-medium">
+                    {e.isUpsell && (
+                      <span
+                        className="shrink-0 rounded px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide"
+                        style={{ background: "color-mix(in srgb, var(--entity-mandate) 20%, transparent)", color: "var(--entity-mandate)" }}
+                      >
+                        Upsell
+                      </span>
+                    )}
                     {e.label}
                     {e.amountPaise > 0 && (
                       <span className="ml-1.5 tabular-nums" style={{ color: "var(--muted-2)" }}>
@@ -219,6 +227,11 @@ export function SimulationPanel() {
                       </span>
                     )}
                   </p>
+                  {e.pitch && (
+                    <p className="text-[11px] italic leading-snug" style={{ color: "var(--entity-mandate)" }}>
+                      &ldquo;{e.pitch}&rdquo;
+                    </p>
+                  )}
                   <p className="text-[11px] leading-snug" style={{ color: "var(--muted)" }}>
                     {e.reasoning}
                   </p>

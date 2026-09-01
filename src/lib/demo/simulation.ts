@@ -1,4 +1,5 @@
 import { fetchCatalog, type CatalogItem } from "./catalog";
+import { suggestCrossSell } from "./crossSell";
 import { MandateClient } from "./mandateClient";
 import { createAdminClient, ensureAgentIdentity } from "./shared";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -149,12 +150,24 @@ export async function ensureSomeActiveMandates(): Promise<number> {
   return created;
 }
 
+/** How often an allowed ordinary purchase is followed by the agent proposing
+ *  a complement. Not every purchase: an agent that upsells on all of them
+ *  reads as a script rather than a judgement, and the LLM call costs a second
+ *  or two on the tick it happens to land on. */
+const UPSELL_CHANCE = 0.3;
+
 export interface SimulationEvent {
   scenario: Scenario;
   label: string;
   decision: "allow" | "escalate" | "block" | "protocol_reject";
   reasoning: string;
   amountPaise: number;
+  /** An action the agent proposed off the back of another, rather than one the
+   *  customer came for. Revenue that exists because the agent suggested it. */
+  isUpsell?: boolean;
+  /** The agent's own pitch, shown so the upsell reads as reasoning rather than
+   *  a second random order. */
+  pitch?: string;
 }
 
 export interface SimulationSummary {
@@ -169,6 +182,9 @@ export interface SimulationSummary {
 interface ActionResult {
   decision: "allow" | "block" | "escalate";
   reasoning: string;
+  /** Needed so an upsell can be recorded as a child of the purchase that
+   *  prompted it — see UPSELL_CHANCE below. */
+  traceId: string;
 }
 
 /** Runs `count` simulated actions. The caller controls pacing — see
@@ -214,6 +230,7 @@ export async function runSimulation(count: number = 1): Promise<SimulationSummar
     let amount: number;
     let category: string;
     let label: string;
+    let boughtItem: CatalogItem | null = null;
 
     if (scenario === "high_value") {
       // Above the step-up threshold, so a human is asked. Randomised rather
@@ -227,6 +244,7 @@ export async function runSimulation(count: number = 1): Promise<SimulationSummar
       label = `Purchase in a banned category (${category})`;
     } else {
       const item = weightedItem(catalog);
+      boughtItem = item;
       amount = item.priceInPaise;
       category = item.category;
       label = `Purchase: ${item.name}`;
@@ -248,6 +266,50 @@ export async function runSimulation(count: number = 1): Promise<SimulationSummar
     else blocked++;
 
     events.push({ scenario, label, decision: enforced.decision, reasoning: enforced.reasoning, amountPaise: amount });
+
+    // The growth half of the loop: having sold something, the agent reasons
+    // over the real catalog for a genuine complement and tries to sell that
+    // too. Recorded with `forkFrom` so it is a child of the purchase that
+    // prompted it — which is what makes it attributable revenue rather than
+    // just another order, and what draws the edge in the entity graph.
+    //
+    // It goes through `enforce_action` like anything else, so an upsell that
+    // breaches a cap is refused exactly as a customer-initiated purchase would
+    // be. The agent proposing something does not privilege it.
+    if (boughtItem && enforced.decision === "allow" && Math.random() < UPSELL_CHANCE) {
+      // A failed suggestion must never affect the purchase it followed —
+      // suggestCrossSell returns null on an LLM failure or an invented SKU.
+      const suggestion = await suggestCrossSell(catalog, boughtItem.sku);
+      if (suggestion) {
+        const upsellArgs = {
+          actionType: "order.create",
+          amount: suggestion.item.priceInPaise,
+          currency: "INR",
+          category: suggestion.item.category,
+          customerId: customer.id,
+          forkFrom: enforced.traceId,
+          params: {
+            receipt: `sim-upsell-${Date.now()}-${i}`,
+            notes: { scenario: "upsell", source: "simulation", upsell_of: boughtItem.sku },
+          },
+        };
+        const upsell = await client.callTool<ActionResult>("enforce_action", upsellArgs);
+        totalAmountPaise += suggestion.item.priceInPaise;
+        if (upsell.decision === "allow") allowed++;
+        else if (upsell.decision === "escalate") escalated++;
+        else blocked++;
+
+        events.push({
+          scenario: "ordinary",
+          label: `Agent upsells: ${suggestion.item.name}`,
+          decision: upsell.decision,
+          reasoning: upsell.reasoning,
+          amountPaise: suggestion.item.priceInPaise,
+          isUpsell: true,
+          pitch: suggestion.pitch,
+        });
+      }
+    }
   }
 
   return { events, allowed, escalated, blocked, rejected, totalAmountPaise };

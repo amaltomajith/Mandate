@@ -455,8 +455,12 @@ function Scene({
       {ruleEdges.map((e, i) => (
         <Edge key={`re-${i}`} from={e.from} to={e.to} color={e.color} opacity={0.25} />
       ))}
+      {/* A parent link means "this action exists because that one did" — which
+          in practice is the agent upselling off a purchase. Coloured as the
+          revenue relationship it is, rather than the neutral white it used to
+          be when the only parent links were forked simulations. */}
       {forkEdges.map((e, i) => (
-        <Edge key={`fe-${i}`} from={e.from} to={e.to} color="#ffffff" opacity={0.3} dashed />
+        <Edge key={`fe-${i}`} from={e.from} to={e.to} color={ENTITY_COLORS.mandate} opacity={0.45} dashed />
       ))}
       {mandateEdges.map((e, i) => (
         <Edge key={`me-${i}`} from={e.from} to={e.to} color={e.color} opacity={0.4} />
