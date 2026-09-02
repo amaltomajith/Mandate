@@ -175,7 +175,14 @@ async function offerTo(
   const status =
     result.decision === "allow" ? "offered" : result.decision === "escalate" ? "held" : "refused";
 
-  await db.from("campaign_targets").insert({
+  // merchant_id is required (migration 0010) and the error is checked. Both
+  // matter, and their absence is why this silently wrote nothing at all: the
+  // column was added to every table when the instance became multi-tenant,
+  // this insert was written before that, and an unchecked insert failing is
+  // indistinguishable from one succeeding. Offers went out with real Razorpay
+  // links and left no record of who had received them.
+  const { error: targetError } = await db.from("campaign_targets").insert({
+    merchant_id: campaign.merchant_id,
     campaign_id: campaign.id,
     customer_id: member.customerId,
     trace_id: result.traceId ?? null,
@@ -185,6 +192,14 @@ async function offerTo(
     amount_paise: plan.unitChargePaise,
     discount_paise: plan.unitDiscountPaise,
   });
+  if (targetError) {
+    // A link exists at Razorpay but nothing here records it. Loud, because the
+    // budget is derived from these rows: losing one means the campaign
+    // undercounts what it has already given away.
+    throw new Error(
+      `Offer to ${member.name} was created at Razorpay but could not be recorded: ${targetError.message}`
+    );
+  }
 
   return {
     customerId: member.customerId,

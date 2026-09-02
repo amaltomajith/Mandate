@@ -62,7 +62,18 @@ export async function reconcileCampaign(db: SupabaseClient, campaignId: string):
       // nothing churns and `created_at` ordering stays meaningful.
       if (!next) continue;
 
-      await db.from("campaign_targets").update({ status: next }).eq("id", target.id);
+      const { error: updateError } = await db
+        .from("campaign_targets")
+        .update({ status: next })
+        .eq("id", target.id);
+      if (updateError) {
+        // Counted as unreadable rather than swallowed: a conversion that
+        // Razorpay confirmed but this failed to persist would be reported as
+        // still open on the next reconcile, understating revenue silently.
+        result.unreadable++;
+        console.warn(`[campaigns] could not record ${next} for target ${target.id}:`, updateError.message);
+        continue;
+      }
       if (next === "paid") {
         result.paid++;
         result.revenuePaise += Number(link.amount_paid ?? 0);

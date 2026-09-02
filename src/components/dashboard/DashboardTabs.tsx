@@ -14,17 +14,19 @@ import { ConversationalCheckout } from "./ConversationalCheckout";
 import { SellableCatalog } from "./SellableCatalog";
 import { StorefrontCard } from "./StorefrontCard";
 import { BuyingActivity } from "./BuyingActivity";
+import { CampaignsPanel } from "./CampaignsPanel";
 import { RevenueImpactPanel } from "./RevenueImpactPanel";
 import { TransactionsView } from "./TransactionsView";
 import { MandatesPanel } from "./MandatesPanel";
 import { GraphCanvas } from "@/components/graph/GraphCanvas";
 import { GraphLegend } from "@/components/graph/GraphLegend";
 
-type Tab = "overview" | "buy" | "transactions" | "policies" | "mandates";
+type Tab = "overview" | "buy" | "campaigns" | "transactions" | "policies" | "mandates";
 
 const TABS: { key: Tab; label: string; badge?: (props: Props) => number }[] = [
   { key: "overview", label: "Overview" },
   { key: "buy", label: "Buy" },
+  { key: "campaigns", label: "Campaigns" },
   { key: "transactions", label: "Transactions", badge: (p) => p.traces.length },
   { key: "policies", label: "Policies", badge: (p) => p.pendingCount + p.deterministicIssues.length },
   { key: "mandates", label: "Mandates", badge: (p) => p.mandates.filter((m) => m.status === "paused").length },
@@ -151,6 +153,8 @@ export function DashboardTabs(props: Props) {
           />
         </div>
       )}
+
+      {tab === "campaigns" && <CampaignsPanel />}
 
       {tab === "transactions" && <TransactionsView traces={traces} agents={agents} rules={rules} onJumpToRule={jumpToRule} />}
 
