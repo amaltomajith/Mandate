@@ -1,36 +1,57 @@
 @import "tailwindcss";
 
 :root {
-  /* Rich dark control-plane theme — Razorpay navy/blue as the accent system,
-     not the canvas. */
-  --background: #05070d;
-  --background-2: #090c15;
-  --foreground: #eaeefa;
-  --panel: #0d1018;
-  --panel-2: #131726;
+  /* Black, white, and the violet.
+     -------------------------------------------------------------------
+     The previous theme was Razorpay navy-and-blue, which made the product
+     look like a Razorpay screen rather than a thing that SITS IN FRONT of
+     Razorpay. This one is near-neutral black and white with a single violet
+     accent, taken from the hero shader so the landing page and the dashboard
+     are demonstrably the same product.
+
+     The greys carry a whisper of violet (hue ~265) rather than being pure
+     neutral -- a mid-grey with no hue bias next to a saturated accent always
+     reads as unconsidered. */
+  --background: #050507;
+  --background-2: #08080c;
+  --foreground: #f3f1fb;
+  --panel: #0c0c12;
+  --panel-2: #14141f;
   --panel-border: rgba(255, 255, 255, 0.08);
-  --panel-border-strong: rgba(255, 255, 255, 0.15);
-  --muted: #939bb5;
-  --muted-2: #5f6683;
+  --panel-border-strong: rgba(255, 255, 255, 0.16);
+  --muted: #9a96b2;
+  --muted-2: #625e79;
 
-  --brand-navy: #0c2651;
-  --brand-blue: #2f8fff;
-  --brand-blue-dark: #1c74e0;
-  --brand-blue-soft: rgba(47, 143, 255, 0.14);
+  /* The three shader colors are the brand. Nothing else needs to be. */
+  --brand-violet: #7c5cff;
+  --brand-violet-deep: #5227ff;
+  --brand-pink: #ff9ffc;
+  --brand-violet-soft: rgba(124, 92, 255, 0.16);
 
-  --entity-agent: #4f9dff;
-  --entity-mandate: #a78bfa;
-  --entity-transaction: #e4e7f2;
-  --entity-rule: #f5b342;
-  --entity-customer: #34d399;
+  --entity-agent: #ffffff;
+  --entity-mandate: #7c5cff;
+  /* Deliberately neutral: a transaction node is just an event, and its RING
+     carries the verdict. Painting the sphere as well left nothing for the
+     verdict to contrast against. */
+  --entity-transaction: #6e6a85;
+  --entity-rule: #ff9ffc;
+  --entity-customer: #b8b3d9;
 
-  --decision-allow: #34d399;
-  --decision-block: #f87171;
-  --decision-escalate: #f5b342;
-  --decision-reject: #c084fc;
+  --decision-allow: #ffffff;
+  --decision-block: #ff3b5c;
+  --decision-escalate: #ff9ffc;
+  --decision-reject: #c4b5fd;
 
-  --shadow-card: 0 1px 0 0 rgba(255, 255, 255, 0.04) inset, 0 1px 2px 0 rgba(0, 0, 0, 0.4);
-  --shadow-card-lg: 0 1px 0 0 rgba(255, 255, 255, 0.05) inset, 0 24px 48px -20px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  /* An escalation that a human has ANSWERED is not the same state as one still
+     waiting, and it used to render in the same amber forever -- so a queue that
+     had been cleared hours ago still looked like a wall of pending work. These
+     two are the answered states. Denied is deliberately the quietest colour on
+     the board: it is settled, and nothing about it wants attention. */
+  --decision-approved: #6ee7c7;
+  --decision-denied: #565270;
+
+  --shadow-card: 0 1px 0 0 rgba(255, 255, 255, 0.04) inset, 0 1px 2px 0 rgba(0, 0, 0, 0.5);
+  --shadow-card-lg: 0 1px 0 0 rgba(255, 255, 255, 0.05) inset, 0 24px 48px -20px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
 @theme inline {
@@ -47,9 +68,9 @@ html {
 body {
   color: var(--foreground);
   background:
-    radial-gradient(1100px 560px at 10% -10%, rgba(47, 143, 255, 0.14), transparent 60%),
-    radial-gradient(900px 520px at 100% 0%, rgba(167, 139, 250, 0.1), transparent 55%),
-    radial-gradient(1000px 620px at 50% 115%, rgba(245, 179, 66, 0.05), transparent 60%),
+    radial-gradient(1100px 560px at 12% -10%, rgba(82, 39, 255, 0.2), transparent 62%),
+    radial-gradient(900px 520px at 100% 4%, rgba(255, 159, 252, 0.07), transparent 58%),
+    radial-gradient(1000px 620px at 50% 118%, rgba(124, 92, 255, 0.09), transparent 62%),
     var(--background);
   background-attachment: fixed;
   position: relative;
@@ -70,8 +91,8 @@ body::before {
 }
 
 ::selection {
-  background: var(--brand-blue);
-  color: #05070d;
+  background: var(--brand-violet);
+  color: #ffffff;
 }
 
 ::-webkit-scrollbar {
@@ -134,7 +155,7 @@ body::before {
 }
 
 .panel-glass {
-  background: rgba(13, 16, 24, 0.72);
+  background: rgba(8, 8, 12, 0.74);
   border: 1px solid var(--panel-border);
   box-shadow: var(--shadow-card);
   backdrop-filter: blur(20px);

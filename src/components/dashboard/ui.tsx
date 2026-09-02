@@ -108,7 +108,7 @@ export function PrimaryButton({ children, ...props }: React.ButtonHTMLAttributes
     <button
       {...props}
       className={`group relative overflow-hidden rounded-lg py-2 text-xs font-semibold text-white shadow-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50 ${props.className ?? ""}`}
-      style={{ background: "linear-gradient(135deg, #0d94fb, #0b7fd9)", ...props.style }}
+      style={{ background: "linear-gradient(135deg, #7c5cff, #5227ff)", ...props.style }}
     >
       <span className="relative z-10">{children}</span>
       <span className="absolute inset-0 -translate-x-full bg-white/20 transition-transform duration-500 group-hover:translate-x-full" />

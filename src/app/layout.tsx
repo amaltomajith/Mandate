@@ -25,11 +25,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       appearance={{
         theme: dark,
         variables: {
-          colorPrimary: "#2F8FFF",
-          colorBackground: "#0d1018",
-          colorInput: "#131726",
-          colorForeground: "#eaeefa",
-          colorMutedForeground: "#939bb5",
+          colorPrimary: "#7C5CFF",
+          colorBackground: "#0c0c12",
+          colorInput: "#14141f",
+          colorForeground: "#f3f1fb",
+          colorMutedForeground: "#9a96b2",
           colorNeutral: "#ffffff",
           borderRadius: "0.75rem",
         },

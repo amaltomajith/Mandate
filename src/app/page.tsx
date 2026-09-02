@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import GradientWaves from "@/components/landing/GradientWaves";
-import CardNav from "@/components/landing/CardNav";
+import { SiteNav } from "@/components/landing/SiteNav";
 import CurvedLoop from "@/components/landing/CurvedLoop";
 import { DecisionFlow } from "@/components/landing/DecisionFlow";
 import { MandateMark } from "@/components/brand/MandateMark";
@@ -22,38 +22,6 @@ export const metadata = {
     "Mandate sits between any AI agent and Razorpay. Every order, refund and mandate an agent proposes is checked against caps, velocity limits and category rules before money moves — and every decision leaves a trace naming the rule that fired.",
 };
 
-const NAV_ITEMS = [
-  {
-    label: "How it works",
-    bgColor: "#141829",
-    textColor: "#eaeefa",
-    links: [
-      { label: "The decision path", href: "#how" },
-      { label: "Policy rules", href: "#rules" },
-      { label: "Why it exists", href: "#why" },
-    ],
-  },
-  {
-    label: "Protocol",
-    bgColor: "#171b2e",
-    textColor: "#eaeefa",
-    links: [
-      { label: "What is actually built", href: "#protocol" },
-      { label: "The independent buyer", href: "#buyer" },
-      { label: "Trust scoring", href: "#trust" },
-    ],
-  },
-  {
-    label: "Project",
-    bgColor: "#1b1830",
-    textColor: "#eaeefa",
-    links: [
-      { label: "Source on GitHub", href: "https://github.com/amaltomajith/Mandate" },
-      { label: "Architecture, end to end", href: "/architecture.html" },
-      { label: "Open the dashboard", href: "/dashboard" },
-    ],
-  },
-];
 
 /** The engine evaluates these in order and stops at the first match. The order
  *  is the design: a blocked category should never be rescued by a generous cap. */
@@ -137,9 +105,9 @@ export default async function LandingPage() {
                toward the horizon color, so making that black makes most of the
                shader black. fogDepth sets how much of the field is near enough
                to be opaque at all; at the default 15 almost none of it was. */
-            horizonColor="#0c2651"
-            waveColor="#2f8fff"
-            crestColor="#b8a6ff"
+            horizonColor="#5227ff"
+            waveColor="#ff9ffc"
+            crestColor="#efe7ff"
             speed={0.28}
             amplitude={2.6}
             waveScale={0.72}
@@ -151,7 +119,7 @@ export default async function LandingPage() {
             height={5.2}
             fogDepth={26}
             detail="medium"
-            brightness={1.05}
+            brightness={0.95}
             opacity={1}
             parallaxStrength={0.45}
             grainIntensity={0.04}
@@ -166,26 +134,16 @@ export default async function LandingPage() {
           className="pointer-events-none absolute inset-0 z-[1]"
           style={{
             background:
-              "linear-gradient(to bottom, rgba(5,7,13,0.82) 0%, rgba(5,7,13,0.46) 26%, rgba(5,7,13,0.14) 56%, rgba(5,7,13,0.42) 86%, var(--background) 100%)",
+              "linear-gradient(to bottom, rgba(5,5,7,0.72) 0%, rgba(5,5,7,0.6) 30%, rgba(5,5,7,0.42) 58%, rgba(5,5,7,0.2) 74%, rgba(5,5,7,0.5) 90%, var(--background) 100%)",
           }}
         />
 
-        <CardNav
-          logo={
-            <>
-              <MandateMark size={26} />
-              <span className="text-[15px] font-semibold tracking-tight">Mandate</span>
-            </>
-          }
-          items={NAV_ITEMS}
-          ctaLabel={signedIn ? "Dashboard" : "Get started"}
-          ctaHref={signedIn ? "/dashboard" : "/sign-up"}
-        />
+        <SiteNav signedIn={signedIn} />
 
         <div className="relative z-10 mx-auto flex w-full max-w-6xl flex-1 flex-col justify-center px-6 pb-20 pt-40 sm:px-8">
           <p
             className="font-mono text-[10px] uppercase tracking-[0.15em] sm:text-[11px] sm:tracking-[0.22em]"
-            style={{ color: "var(--brand-blue)" }}
+            style={{ color: "var(--brand-violet)" }}
           >
             Razorpay AI Buildathon 2026 &middot; Track 01
           </p>
@@ -195,7 +153,7 @@ export default async function LandingPage() {
             <br />
             <span
               style={{
-                background: "linear-gradient(100deg, #eaeefa 12%, #6fb4ff 52%, #a78bfa 92%)",
+                background: "linear-gradient(100deg, #ffffff 10%, #c9b6ff 46%, #ff9ffc 92%)",
                 WebkitBackgroundClip: "text",
                 backgroundClip: "text",
                 color: "transparent",
@@ -218,7 +176,7 @@ export default async function LandingPage() {
             <Link
               href={signedIn ? "/dashboard" : "/sign-up"}
               className="group relative overflow-hidden rounded-xl px-5 py-3 text-[13.5px] font-semibold text-white shadow-lg transition-all duration-200 hover:brightness-110"
-              style={{ background: "linear-gradient(135deg, #0d94fb, #0b7fd9)" }}
+              style={{ background: "linear-gradient(135deg, #7c5cff, #5227ff)" }}
             >
               <span className="relative z-10">
                 {signedIn ? "Open the dashboard" : "Open the dashboard"}
@@ -348,7 +306,7 @@ export default async function LandingPage() {
             <article key={b.title} id={b.id} className="panel-card flex flex-col rounded-2xl p-5">
               <p
                 className="font-mono text-[10.5px] uppercase tracking-[0.14em]"
-                style={{ color: "var(--brand-blue)" }}
+                style={{ color: "var(--brand-violet)" }}
               >
                 {b.kicker}
               </p>
@@ -420,7 +378,7 @@ export default async function LandingPage() {
                 <Link
                   href={signedIn ? "/dashboard" : "/sign-up"}
                   className="rounded-xl px-5 py-2.5 text-[13.5px] font-semibold text-white transition-all hover:brightness-110"
-                  style={{ background: "linear-gradient(135deg, #0d94fb, #0b7fd9)" }}
+                  style={{ background: "linear-gradient(135deg, #7c5cff, #5227ff)" }}
                 >
                   {signedIn ? "Open the dashboard" : "Get started"}
                 </Link>
@@ -490,7 +448,7 @@ function Section({
     <section id={id} className="mx-auto w-full max-w-6xl scroll-mt-24 px-6 py-16 sm:px-8 sm:py-20">
       <p
         className="font-mono text-[11px] uppercase tracking-[0.2em]"
-        style={{ color: "var(--brand-blue)" }}
+        style={{ color: "var(--brand-violet)" }}
       >
         {eyebrow}
       </p>

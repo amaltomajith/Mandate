@@ -42,7 +42,7 @@ function FitToNodes({ positions }: { positions: Vec3[] }) {
 
   return null;
 }
-import { DECISION_COLORS, ENTITY_COLORS } from "./colors";
+import { DECISION_COLORS, ENTITY_COLORS, traceColor } from "./colors";
 import { actionTypeLabel, formatMoney } from "@/lib/format";
 
 const RULE_TYPE_LABELS: Record<PolicyRule["type"], string> = {
@@ -229,7 +229,7 @@ function TraceNode({
   // render trips the react-hooks purity rule).
   const [mountedAt] = useState(() => Date.now());
   const isFresh = (mountedAt - new Date(trace.created_at).getTime()) / 1000 < 6;
-  const decisionColor = DECISION_COLORS[trace.decision];
+  const decisionColor = traceColor(trace.decision, escalationStatus);
   const isSevere = trace.decision === "block" || trace.decision === "protocol_reject";
 
   // The scene clock is shared across every node and keeps running for the
@@ -351,7 +351,7 @@ function HoverPanel({ info }: { info: HoverInfo }) {
       info.trace.decision === "escalate" && escalationStatus ? ESCALATION_STATUS_SUFFIX[escalationStatus] : "";
     badge = {
       text: DECISION_LABELS[info.trace.decision] + suffix,
-      color: DECISION_COLORS[info.trace.decision],
+      color: traceColor(info.trace.decision, escalationStatus),
     };
     lines = [info.trace.reasoning ?? ""];
   }
@@ -367,7 +367,7 @@ function HoverPanel({ info }: { info: HoverInfo }) {
           floats over the graph's own dark canvas, not the light dashboard shell. */}
       <div
         className="w-72 -translate-x-1/2 -translate-y-[calc(100%+14px)] rounded-xl border px-3.5 py-3 shadow-2xl backdrop-blur-md"
-        style={{ background: "rgba(9,11,18,0.97)", borderColor: "rgba(255,255,255,0.14)", color: "#f3f5fb" }}
+        style={{ background: "rgba(8,8,12,0.97)", borderColor: "rgba(255,255,255,0.14)", color: "#f3f1fb" }}
       >
         <p className="mb-1.5 text-[13px] font-semibold leading-snug">{title}</p>
         {badge && (
@@ -437,10 +437,14 @@ function Scene({
       if (!t.trace.rule_fired_id) continue;
       const rulePos = layout.rulePositionById[t.trace.rule_fired_id];
       if (!rulePos) continue;
-      edges.push({ from: t.position, to: rulePos, color: DECISION_COLORS[t.trace.decision] });
+      edges.push({
+        from: t.position,
+        to: rulePos,
+        color: traceColor(t.trace.decision, escalationStatusByTrace.get(t.trace.id)),
+      });
     }
     return edges;
-  }, [layout]);
+  }, [layout, escalationStatusByTrace]);
 
   const forkEdges = useMemo(() => {
     const edges: { from: Vec3; to: Vec3 }[] = [];

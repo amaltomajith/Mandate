@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { DECISION_COLORS, ENTITY_COLORS } from "./colors";
+import { DECISION_COLORS, ENTITY_COLORS, ESCALATION_OUTCOME_COLORS } from "./colors";
 
 const ENTITY_ITEMS = [
   { color: ENTITY_COLORS.agent, shape: "circle" as const, label: "AI agent", hint: "glow size = trust score" },
@@ -11,9 +11,15 @@ const ENTITY_ITEMS = [
   { color: ENTITY_COLORS.mandate, shape: "circle" as const, label: "Agent upsell", hint: "dashed line back to the purchase that prompted it" },
 ];
 
+/* Ordered as a story, not by severity: cleared on its own, then the three
+   things that can happen to an escalation, then the two refusals. The middle
+   three are the point -- an escalation is a state machine, and showing only
+   "escalated" hid the fact that two thirds of them are already resolved. */
 const DECISION_ITEMS = [
-  { color: DECISION_COLORS.allow, label: "Allowed" },
+  { color: DECISION_COLORS.allow, label: "Allowed automatically" },
   { color: DECISION_COLORS.escalate, label: "Escalated — needs your approval" },
+  { color: ESCALATION_OUTCOME_COLORS.approved, label: "Escalated — you approved it" },
+  { color: ESCALATION_OUTCOME_COLORS.denied, label: "Escalated — you denied it" },
   { color: DECISION_COLORS.block, label: "Blocked by policy" },
   { color: DECISION_COLORS.protocol_reject, label: "Rejected — invalid signature" },
 ];
@@ -48,7 +54,7 @@ export function GraphLegend() {
         onClick={() => setOpen(true)}
         aria-label="Show legend"
         className="absolute bottom-4 left-4 z-10 flex h-9 w-9 items-center justify-center rounded-full border text-[15px] font-semibold text-white/80 backdrop-blur-md transition-colors hover:text-white"
-        style={{ background: "rgba(9,11,18,0.82)", borderColor: "rgba(255,255,255,0.14)" }}
+        style={{ background: "rgba(8,8,12,0.84)", borderColor: "rgba(255,255,255,0.14)" }}
       >
         ?
       </button>
@@ -56,7 +62,7 @@ export function GraphLegend() {
   }
 
   return (
-    <div className="absolute bottom-4 left-4 z-10 w-64 rounded-xl border p-3.5 text-white backdrop-blur-md" style={{ background: "rgba(9,11,18,0.82)", borderColor: "rgba(255,255,255,0.1)" }}>
+    <div className="absolute bottom-4 left-4 z-10 w-64 rounded-xl border p-3.5 text-white backdrop-blur-md" style={{ background: "rgba(8,8,12,0.84)", borderColor: "rgba(255,255,255,0.1)" }}>
       <div className="mb-2 flex items-center justify-between">
         <p className="text-[10px] font-semibold uppercase tracking-wider text-white/50">What you&apos;re looking at</p>
         <button
