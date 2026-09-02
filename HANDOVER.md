@@ -17,47 +17,55 @@ shopping agent, or the merchant's own automation) and Razorpay's money-moving
 endpoints, enforces policy-as-code, escalates to a human when needed, and
 explains every decision by tracing a real graph.
 
-## 2. Status: what's built vs what's untested
+## 2. Status: what's built and what's proven
 
-**Built and verified (`npm run build` + `npm run lint` both pass clean):**
+`npx next build`, `npx tsc --noEmit` and `npx eslint src scripts` all pass clean.
 
-- Supabase Postgres schema, RLS policies (`supabase/migrations/0001_init.sql`)
-- MCP server (Streamable HTTP, session-based) with all 4 tools: `simulate_action`, `enforce_action`, `explain`, `draft_policy`
-- Policy engine: cap / velocity / category_block / step_up, fixed priority order, pure + unit-testable
-- Web Bot Auth-style request signing and verification (Ed25519, RFC 9421-shaped headers) wired into every MCP call
-- Razorpay/RazorpayX integration code for orders, refunds, payouts, subscriptions
-- Trust score formula, computed and stored per agent
-- Merchant dashboard, five real sections (§9c, §9d, §9g): Overview (graph + "Run demo" + escalations/alerts), Transactions (every trace, filterable/searchable), Policies (rule management + audit + Horizon), Domains (merchant-defined policy domains on a draggable canvas — not hardcoded, see §9g), Mandates (pause/resume/revoke an agent's standing authorization — enforced live, not cosmetic)
-- Policy governance (§9b): deactivate/reactivate any rule, conflict-aware approval, a deterministic gap/conflict checker (runs free on every load) plus an on-demand LLM review — labeled and never blended
-- 3D graph (react-three-fiber + postprocessing): entity hue, trust aura, decision rings, bloom/starfield/grid, hover inspect, fork/branch edges, an always-visible legend, a distinct block/reject shockwave effect, nodes that materialize in instead of popping (§9c)
-- Live alert toasts + a plain-language explainability pass (amounts render as "₹6,000" not raw paise, "order.create" renders as "New purchase order")
-- Real product catalog (Supabase `products` table) + LLM-reasoned cross-sell suggestions, grounded against hallucination — see §9a
-- Demo agent (dashboard button and CLI script, same implementation) that signs its own requests and runs the full demo scenario
-- Seed / key-generation CLI scripts
-- Full visual pass: rich dark control-plane theme (deep navy/black, Razorpay-inspired blue `#2F8FFF` as the accent) with a bloom-lit, starfield-and-grid 3D graph panel as the centerpiece. (A light "white/navy" variant was tried first and reverted — dark read as more premium for this product; the CSS tokens in `globals.css` are the single place to flip it back if that changes again.)
+**The system**
 
-**Fully configured and verified live, this session:**
+- Supabase Postgres, RLS on every table, ten migrations (`supabase/migrations/`)
+- **Per-merchant tenancy** - every table carries a `merchant_id`, the tenant is
+  resolved from the Ed25519 signature for agents and from Clerk for humans, and
+  the public endpoints live under `/api/m/<slug>/`. See section 13.
+- MCP server (Streamable HTTP, session-based), four tools: `simulate_action`,
+  `enforce_action`, `explain`, `draft_policy`
+- Policy engine: `category_block` > `cap` > `velocity` > `trust_floor` >
+  `step_up`, fixed priority, first match wins. Pure and DB-free, so it is
+  testable without a database and cannot drift from what the UI claims. Rules
+  can be scoped to specific action types.
+- Web Bot Auth (Ed25519, RFC 9421-shaped) on every MCP call, verified before
+  the policy engine sees anything
+- Razorpay test mode: `order.create`, `refund.create`, `subscription.create`
+  and `payment_link.create` - see section 6
+- Trust score over a 50-decision window, made consequential by `trust_floor`
+- **Local inference** - Ollama/granite4 by default, with prompts classified by
+  what they may send off-box. See section 5a.
+- **Campaign orchestrator** - segment, plan, governed payment links, conversion
+  read back from Razorpay. See section 14.
+- Dashboard: Overview (3D graph, revenue impact, escalations, agent trust), Buy
+  (conversational checkout, sellable catalog, buying activity), Transactions,
+  Policies (rules, audit, threshold tuner, Horizon), Mandates
 
-- Supabase project, schema applied, RLS in place
-- Razorpay test-mode keys (`RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET`)
-- Groq API key (`GROQ_API_KEY`) — see §5a, this replaced Gemini; the exact
-  `draft_policy` prompt was tested end-to-end against the live API
-- Clerk keys — signed in, dashboard confirmed rendering (dark theme, 3D graph,
-  hover tooltips all checked)
-- `npm run seed` run (policy domains, rules, catalog + sample customer); agent
-  identities are registered from the dashboard's Agent trust panel, or created
-  automatically on the first demo run
-- **`npm run demo:checkout` run partway, successfully**: MCP session
-  `initialize` → Web Bot Auth signature verify → `simulate_action` all
-  confirmed working together, live, for the first time. It stopped at the
-  first `enforce_action` call because RazorpayX (see §6) needs a registered
-  business account, which wasn't available — **fixed by switching the demo's
-  real-money action from `payout.create` to `order.create`** (§6), which only
-  needs the standard Razorpay keys already configured. Re-running the demo
-  script end to end is the very next step, not yet confirmed.
+**Measured, not asserted**
 
-Everything above except the last full re-run is real, not aspirational — this
-is closer to done than a fresh reader might assume from a "handover" doc.
+Every number below comes from a script in `scripts/` that anyone can re-run.
+
+- `scripts/bench-llm.ts` - the model contract suite, run against this
+  codebase's real prompts. Local granite4: **42/42**.
+- `scripts/verify-e2e.ts` - end to end, including tenant isolation. Creates two
+  throwaway merchants and tries to make each one see the other.
+- Payment links verified against Razorpay test mode: a real `plink_...` with a
+  live `short_url`, read back with its `status` and `amount_paid`.
+
+**Known limitations, stated plainly**
+
+- Nothing converts in test mode on its own. A payment link reaches `paid` only
+  if a human opens it and pays with a test card, so campaign conversion reads
+  0% until someone does. The reconciler is real; the demand is not there.
+- The dashboard reads the most recent 300 actions, and the panels making money
+  claims say so. These are not lifetime totals.
+- The campaign orchestrator has no UI yet - planner, orchestrator and
+  reconciler are libraries with no dashboard surface.
 
 ## 3. What changed from the original plan, and why
 
@@ -153,28 +161,72 @@ The "live self-defense" beat (`scripts/checkout-agent.ts`'s tampered request)
 is real: a corrupted signature is rejected in `/api/mcp/route.ts` *before* the
 MCP transport or policy engine ever see it, logged as `protocol_reject`.
 
-### 5a. LLM provider: Groq, not Gemini
+### 5a. LLM provider: local first, and classified by what it may send
 
-Gemini's free tier wasn't usable during this build, so `explain()` and
-`draft_policy()` run on **Groq** instead (`src/lib/llm/client.ts`), via the
-`openai` npm SDK pointed at `https://api.groq.com/openai/v1` — Groq's chat
-completions API is OpenAI-compatible, so no Groq-specific SDK dependency was
-needed. Model: `openai/gpt-oss-120b`. Groq's own docs list
-`llama-3.3-70b-versatile` as a production model, but it 404'd ("does not exist
-or you do not have access to it") on this account — the catalog is
-account/region-gated in ways the docs don't reflect. Don't trust the docs list
-a second time; verify with `GET https://api.groq.com/openai/v1/models` against
-the actual configured key before picking a model. Note also that `gpt-oss-120b`
-is a reasoning model — it spends tokens on hidden chain-of-thought before
-`message.content`, so neither caller sets `max_tokens` (capping it low
-truncates the real answer before it's written).
+Originally Gemini, then Groq (the free Gemini tier was not usable for this
+build). Now local by default, and the reason is not cost.
 
-`draft_policy` uses Groq's broadly-supported `json_object` response format
-plus a Zod schema validated on our side, rather than Groq's model-gated
-`json_schema` structured-output mode — more portable across whichever Groq
-model ends up configured. If Groq ever becomes unavailable, swapping the
-provider again means touching only `src/lib/llm/client.ts` and the two callers
-in `src/lib/mcp/tools/`.
+The semantic policy audit was posting every active rule - every cap, every
+threshold, every blocked category - to a third-party API. That is precisely the
+map `/api/m/<slug>/catalog` deliberately withholds from the public, on the
+grounds that publishing it would let an adversary structure underneath it.
+Withholding it from everyone and shipping it to a vendor are different
+decisions, and the product was making both.
+
+So `src/lib/llm/client.ts` classifies each of the six call sites:
+
+- `public` - `crossSell`, `shopper`. The catalog and a shopper's own sentence,
+  both already served unauthenticated. Safe anywhere.
+- `internal` - `explain`, `draftPolicy`, `semanticAudit`, `suggestFix`. Policy
+  configuration, thresholds, customer ids, full trace params.
+
+Under the default provider, `internal` prompts never leave the machine: with no
+local model reachable the call fails rather than falling back, because a
+fallback that silently ships the policy set off-box makes the classification
+decorative. `LLM_PROVIDER=groq` overrides deliberately and warns once - the
+guard is against accidents, not against a configured choice.
+
+Local inference is Ollama through its OpenAI-compatible endpoint, so the
+`openai` SDK works unmodified: `messages`, `temperature`, `response_format`
+JSON mode, `max_tokens` and `seed` are all supported, which covers every call
+made here. Their docs flag that layer as experimental; the native client is the
+escape hatch if it drifts.
+
+**Model choice was measured, not read off a benchmark table.** Every call here
+has a checkable contract - parse as JSON, satisfy a Zod schema, name a SKU that
+exists - so `scripts/bench-llm.ts` runs the real code paths and counts how often
+the contract holds.
+
+```
+                     Groq gpt-oss-120b     Local granite4 (2.1GB)
+crossSell                 15/18                  18/18
+shopper                   12/12                  12/12
+semanticAudit               2/2                    3/3
+  latency                13,352ms                 674ms
+draftPolicy                 n/a                    9/9
+```
+
+granite4 sits entirely on an 8GB GPU. `qwen3:8b` was tried as the larger
+alternative and is worse on every axis on this hardware: 6.0GB spills to CPU,
+4x slower, and it found zero issues in the policy audit where granite4 found
+one. Bigger was not better; fitting in VRAM was.
+
+One honest caveat the contract suite cannot capture: on the open-ended advisory
+task, gpt-oss-120b's *judgment* is still better. It spotted that a 5,000 step-up
+against a 20,000 cap puts most of the spending band behind approval; granite4
+did not. Local wins on structured extraction and speed, and loses a little on
+advice.
+
+**Two prompt bugs were found by measuring, and both looked like model
+failures.** Cross-sell offered `"sku": null` as a co-equal option and the model
+took it two times in three (33% -> 100% after rewording). `draft_policy` turned
+"Block any single order above 25,000" into a `category_block` - on *both*
+models, which is the shape of a prompt problem rather than a capability one, and
+the culprit was the word "block" sitting beside a rule type in the prompt
+(67% -> 100%).
+
+Setup: `winget install Ollama.Ollama`, then `ollama pull granite4`. Ollama adds
+a startup entry, so it survives a reboot.
 
 ### 5b. Dashboard auth: Clerk, not Supabase Auth
 
@@ -325,34 +377,47 @@ score = clamp(0, 100,
 
 Every agent starts at a neutral 50. See `src/lib/trust/score.ts`.
 
-## 8. Setup — do this before running anything
+## 8. Setup - do this before running anything
 
-1. **Supabase**: create a project at supabase.com. Copy the project URL,
-   anon/publishable key, and service_role/secret key into `.env.local` (copy
-   `.env.example` first). Run **both** `supabase/migrations/0001_init.sql`
-   **and** `0002_products.sql` against it via the SQL Editor — `0002` adds the
-   `products` table the demo's cross-sell reasoning (§9a) reads from; without
-   it, `runDemoScript` fails with a clear "table not found" error, not a
-   silent no-op. *Free-tier projects auto-pause after 7 days of inactivity —
-   open the dashboard once beforehand if it's been idle.*
-2. **Razorpay**: test-mode keys (Dashboard → Settings → API Keys) into
-   `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET`. This alone is enough to run the
-   demo script (§6 — it uses `order.create`, not RazorpayX payouts).
-3. **RazorpayX** (optional, needs a registered business — see §6): enable
-   test mode, add a dummy test balance, get the test `account_number` into
-   `RAZORPAYX_ACCOUNT_NUMBER`, and allowlist the calling IP. Only needed if
-   you want to exercise `payout.create` specifically.
-4. **Groq**: get a free key at console.groq.com/keys into `GROQ_API_KEY`.
-5. **Clerk**: create an application at clerk.com, copy the publishable and
+1. **Supabase**: create a project at supabase.com. Copy the project URL, the
+   publishable/anon key and the service_role/secret key into `.env.local` (copy
+   `.env.example` first). Then run every file in `supabase/migrations/` in
+   numeric order through the SQL Editor. They are additive and safe to re-run.
+   Migration `0010` is the one that makes the instance multi-tenant; nothing
+   works without it. *Free-tier projects auto-pause after 7 days idle - open the
+   Supabase dashboard once first if it has been sitting.*
+2. **Razorpay**: test-mode keys (Dashboard -> Settings -> API Keys) into
+   `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET`. Everything real here runs on those
+   two: orders, refunds and payment links. See section 6 for what is genuinely
+   server-to-server and what stops at Razorpay's own customer-facing step.
+3. **Clerk**: create an application at clerk.com, copy the publishable and
    secret keys into `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY`.
-6. `npm install`.
-7. `npm run dev`, sign up at `/sign-up` (Clerk, self-serve).
-8. On the dashboard, click **"Run demo"** — it seeds the policy rules, sets up
-   an agent identity, and runs the full scenario (§9) in one click. No further
-   CLI steps needed. (The CLI equivalents — `npm run seed` and
-   `npm run demo:checkout` — still work
-   individually if you want more control, and share the same underlying code
-   via `src/lib/demo/`.)
+4. **Local inference** (recommended): `winget install Ollama.Ollama`, then
+   `ollama pull granite4`. Ollama adds a startup entry, so it comes back after a
+   reboot. Without it, policy-sensitive prompts refuse to run rather than going
+   off-box - see section 5a for why that is the default, and set
+   `LLM_PROVIDER=groq` with a `GROQ_API_KEY` if you want the hosted path instead.
+5. `npm install`, then `npm run dev`, then sign up at `/sign-up`.
+
+Signing up creates your merchant and seeds it with the default policy rules and
+catalog, so the dashboard is a working shop with no activity in it. Press
+**Start** on the simulation panel to give it a pulse.
+
+**Verifying the install**
+
+```
+npx tsx scripts/bench-llm.ts     # the model contract suite, 42/42 on granite4
+npx tsx scripts/verify-e2e.ts    # end to end, including tenant isolation
+```
+
+Both need the dev server running. `verify-e2e` creates two throwaway merchants
+and deletes them afterwards, so it is safe to run against a live instance.
+
+**On a network that intercepts TLS** (corporate or campus proxies), export the
+proxy's root certificate and point `MANDATE_CA_CERT` at it in `.env.local`.
+`scripts/dev.mjs` picks it up and sets `NODE_EXTRA_CA_CERTS` before starting
+Next; without it, every Supabase call fails with an unhelpful
+`UNABLE_TO_VERIFY_LEAF_SIGNATURE`.
 
 ## 9. Demo script (the "one failure handled gracefully" beat, and closing the Track 01 gap)
 
@@ -635,125 +700,6 @@ step-up escalation, a dishonest structuring attempt caught by rate-limiting,
 a merchant's mandate revocation enforced live, and a forged request
 rejected before it reaches any of the above.
 
-### 9f. Background traffic: the dashboard has a pulse between demo runs
-
-"History only exists right after I click Run demo" was the real gap —
-clicking around the dashboard between runs showed the same static handful
-of transactions, which reads as a scripted prop, not a system. A new
-"Generate background activity" button (`src/lib/demo/backgroundTraffic.ts`,
-deliberately styled as a secondary, muted control next to the demo's
-primary one — this isn't a narrative beat) fires a burst of 12 real, signed
-MCP calls against the real catalog, attributed to a small pool of synthetic
-customers (`Priya Sharma`, `Arjun Mehta`, etc. — created once, reused
-after), so Transactions, Agent trust, and the policy audit all have
-something closer to a living system to show, on demand.
-
-**Explicitly not "PaySim-calibrated"**, despite that phrase in the original
-plan (§7a) this item traces back to — PaySim is Track 02's fraud-detection
-dataset, removed entirely (§10), and has nothing to do with Mandate's own
-traffic; resurrecting a dependency on it here would undo exactly the
-separation that removal was about. The amount distribution instead comes
-from this project's own real catalog, weighted toward the cheaper items
-(mouse, hub, yoga mat picked more often than the keyboard or desk) — the
-ordinary shape of e-commerce order sizes, not an invented statistical model
-and not secretly tied to a dataset this project deliberately doesn't use
-for this.
-
-Uses a separate agent identity ("Background Traffic Bot," reusing
-`BACKGROUND_AGENT_ID`/`BACKGROUND_AGENT_SECRET_KEY` if set — same
-reuse-or-register pattern as the Checkout Agent, extracted into
-`src/lib/demo/shared.ts` so the two demo entry points can't drift into
-different agent-identity logic) rather than the Checkout Agent, so
-background noise doesn't blend into the scripted demo's own trust-score
-history — the graph now shows two agents by default, a small preview of
-what §11's "second full demo agent" roadmap item would add more
-deliberately. Any escalation or block the burst happens to generate (the
-desk-equivalent item is rare but real) surfaces the same way any other
-alert does — no separate results list, the existing toast/escalations
-panels already do that job.
-
-**What this deliberately doesn't do**: run on its own without a click. See
-§11 — the generation logic is real and reusable from a scheduled route; now
-that the app is deployed (§9h has the URL), wiring an actual Vercel Cron job
-to hit it periodically is a real, small next step, not a hypothetical one.
-
-### 9g. Policy domains: merchant-defined, not hardcoded
-
-The user's own framing, close to verbatim: instead of one fixed pipeline,
-design **nodes** — each a business domain with its own data, constraints,
-and policy; incoming requests route to the relevant node; each node's AI
-reasons within its own rules when something doesn't cleanly comply; human-
-in-the-loop per node; all visually inspectable and reconfigurable, not
-fixed. A full research/strategy pass on this (comparing it honestly against
-prior art — Open Policy Agent for policy-as-code, LangGraph/CrewAI/Dify for
-graph-based agent orchestration) is preserved as a planning artifact; the
-short version of that research: nothing combines *visual, multi-domain,
-human-in-the-loop policy* with *a real payment rail underneath the first
-domain* the way this does. That's the honest differentiation — not "a
-node-based policy engine" (OPA already is one) or "a multi-agent
-orchestrator" (LangGraph already is one).
-
-**What's real, not a mockup:**
-
-- **`policy_domains`** (migration `0004_policy_domains.sql`) — actual rows,
-  not a hardcoded list. Each domain has a name, description, routing rules
-  (`match_action_types[]`, `match_categories[]`), a canvas position, and a
-  color. Exactly one domain is flagged `is_default` — the catch-all every
-  merchant needs so an action always resolves to *some* domain, never falls
-  through ungoverned.
-- **Routing is content-based, computed at evaluation time** (`resolveDomain`
-  in `src/lib/policy/domains.ts`), not literal drawn wires between nodes: an
-  action belongs to a domain if its action type or category matches that
-  domain's rules. `runActionEvaluation` (`src/lib/mcp/tools/actionEvaluator.ts`)
-  resolves the domain, then filters *both* the active policy rules *and* the
-  velocity/cap aggregates (`getAggregates` in `src/lib/mcp/traceHelpers.ts`)
-  down to that one domain before the evaluator ever runs — a mandate action
-  can never count toward a purchases-domain velocity limit, or vice versa.
-- **Two domains ship seeded** (`applySeedDomains` in `src/lib/demo/seedData.ts`):
-  "Purchases" (order/refund/payout, the default) and "Recurring Mandates"
-  (subscription.create only), each with its own independently-tuned rules —
-  purchases escalates above ₹5,000, mandates above ₹1,000, on purpose:
-  a mandate is a standing future liability, not a single bounded
-  transaction, so it's governed more tightly. Deliberately *not* split
-  around refund.create/payout.create instead (which the original research
-  pass considered) — neither is genuinely exercisable end-to-end here yet
-  (no captured payment exists anywhere in this system to refund; payouts
-  still need the RazorpayX business registration §6 covers), so that split
-  would have produced two empty, unconvincing domain cards instead of two
-  real ones.
-- **A merchant can add real new domains** ("Logistics," anything) from the
-  **Domains** tab (`src/components/dashboard/PolicyDomainsCanvas.tsx`):
-  name it, tell it which action types or categories belong to it, and it
-  immediately starts governing matching traffic with its own (initially
-  empty) rule set — `src/lib/actions/domains.ts` has the CRUD. Cards are
-  draggable (native pointer events, no new dependency) and the position
-  persists on drop.
-- **Cross-domain false positives got fixed, not just avoided.** The
-  deterministic policy audit (`src/lib/policy/audit.ts`) and the pending-
-  rule conflict check (`PolicyRulesPanel.tsx`) both used to compare *every*
-  active rule of the same type against every other, globally. Once two
-  domains can have independently different thresholds of the same rule
-  type, that comparison produces real false positives (a mandates-domain
-  ₹1,000 step-up would look like it "kills" the purchases-domain ₹5,000
-  step-up, purely because the checker didn't know they never actually
-  compete). Both now scope every comparison to rules sharing the same
-  `domain_id` first.
-- **Domain assignment for a drafted rule is a human decision, not the
-  model's.** `draft_policy` (`src/lib/mcp/tools/draftPolicy.ts`) always
-  lands a new rule in the default domain; a domain dropdown on the pending-
-  review card (`PolicyRulesPanel.tsx`) lets a human move it before or after
-  approving, via a new `setRuleDomain` action — not a keyword-guessing
-  heuristic at draft time, which would be silently wrong instead of just
-  unreviewed.
-
-**What this deliberately doesn't do** (said out loud, not blurred): the
-canvas drag is arrangement only, not a literal wiring diagram of live
-execution — there's no drawn connection line you rewire to change routing;
-routing rules are edited via a small form on each card instead. There's
-also no per-domain trust score yet (trust is still per-agent, §7) and no
-UI for merging/splitting domains after the fact. Both are natural next
-steps, not gaps in what's already real.
-
 ### 9h. Live deployment
 
 Pushed to [github.com/amaltomajith/Mandate](https://github.com/amaltomajith/Mandate) and deployed on Vercel
@@ -818,14 +764,14 @@ isn't built. None of these have a dead button in the UI.
 - **True push-based Realtime.** Traded for a 4s poll when auth moved to Clerk
   — see §5b for why that's a deliberate tradeoff, not a shortcut.
 - **A real "continuously running regardless of who's watching" scheduler**
-  for the background traffic generator (§9f) — it's on-demand (a dashboard
+  for the simulation panel — it's on-demand (a dashboard
   button) rather than a Vercel Cron job or similar, since this session had
   no deployed instance yet to schedule against. The generation logic itself
   is real and already reusable from a cron route if/when one gets added;
   only the "runs on its own" part is roadmap.
 - **Statistical anomaly flagging** (outlier amounts, sudden rate spikes) —
   the honest reason this isn't built yet is that it needs real transaction
-  volume to mean anything. §9f's background traffic generator now provides
+  volume to mean anything. The simulation panel now provides
   that volume on demand, but building an anomaly detector against a
   still-small, on-demand-generated history would produce something
   confidently wrong, not "advanced" — the same judgment call as declining to
@@ -836,46 +782,157 @@ isn't built. None of these have a dead button in the UI.
 ## 12. Where things live
 
 ```
-supabase/migrations/0001_init.sql     schema, RLS (now largely vestigial — see §5b)
-supabase/migrations/0002_products.sql product catalog (§9a's cross-sell reasoning reads from this)
-supabase/migrations/0004_policy_domains.sql  policy_domains table + policy_rules.domain_id (§9g)
-src/types/db.ts                       hand-written Database types
-src/lib/policy/                       rule types + pure evaluator + audit.ts (deterministic gap
-                                       checker, domain-scoped) + semanticAudit.ts (LLM layer) +
-                                       suggestFix.ts (LLM-proposed, human-applied fixes, §9b) +
-                                       domains.ts (domain resolution/matching, §9g)
-src/lib/trust/score.ts                trust formula
-src/lib/webBotAuth/                   keys, canonical signing, sign, verify
-src/lib/razorpay/                     SDK client, RazorpayX REST client, action dispatch
-src/lib/mcp/                          schemas, server (4 tools), session store, trace helpers
-src/lib/llm/                          Groq client (explain, draft_policy, cross-sell reasoning)
-src/lib/actions/                      dashboard server actions (escalations, policy, mandates,
-                                       domains (§9g), horizon, demo, backgroundTraffic)
-src/lib/demo/                         catalog.ts (products), crossSell.ts (LLM-reasoned upsells,
-                                       §9a), seedData.ts, MandateClient, runDemoScript — shared by
-                                       the dashboard's "Run demo" button AND the CLI scripts;
-                                       shared.ts (agent-identity reuse, §9f); backgroundTraffic.ts
-                                       (§9f, the "Generate background activity" button)
-src/lib/supabase/admin.ts             the only Supabase client left — service role, storage-only
-src/proxy.ts                          Clerk middleware
-src/app/api/mcp/route.ts              the MCP endpoint (verify → session → transport)
-src/app/api/wba-directory/route.ts    public key directory
-src/app/login/, src/app/sign-up/      Clerk auth routes
-src/app/dashboard/                    merchant UI
-src/components/auth/AuthShell.tsx     split-hero shell around Clerk's components (also the onboarding copy)
-src/components/brand/MandateMark.tsx  shared logo mark
-src/components/graph/                 3D graph + legend (layout.ts is the pure/testable part;
-                                       GraphCanvas.tsx has the block-shockwave/materialize-in effects)
-src/components/dashboard/             DashboardTabs (Overview/Transactions/Policies/Domains/Mandates),
-                                       TransactionsView, MandatesPanel (§9d),
-                                       PolicyDomainsCanvas (§9g), AgentTrustPanel,
-                                       PolicyHealthPanel, AlertsBell (header dropdown, not a panel
-                                       anymore), panels, buttons, DemoRunner, BackgroundTrafficButton
-                                       (§9f), toasts, live poll refresher
-scripts/                              seed, checkout-agent — thin CLI wrappers around src/lib/demo/
+supabase/migrations/          0001 schema+RLS, 0002 products, 0005-0008 rule-type
+                              changes and the removal of policy domains,
+                              0009 campaigns, 0010 merchants (tenancy)
+src/types/db.ts               hand-written Database types
+src/lib/merchant.ts           tenant resolution - Clerk for humans, the verified
+                              agent for MCP. Nothing takes a merchant id from
+                              outside. (section 14)
+src/lib/policy/               rule types, pure evaluator, audit.ts (deterministic
+                              gap checker), semanticAudit.ts + suggestFix.ts (LLM,
+                              internal-only), thresholdSweep.ts (the tuner's replay)
+src/lib/trust/score.ts        trust formula, 50-decision window
+src/lib/webBotAuth/           keys, canonical signing, sign, verify
+src/lib/razorpay/             SDK client and action dispatch - the only place a
+                              real money call happens
+src/lib/mcp/                  schemas, server (4 tools), session store, trace
+                              helpers (getActiveRules / getAggregates / insertTrace,
+                              all merchant-scoped)
+src/lib/llm/client.ts         provider selection and the egress classification
+                              (section 5a)
+src/lib/campaigns/            planner, segment, orchestrator, conversion (section 15)
+src/lib/orders.ts             the audit trail read back as commerce
+src/lib/revenue.ts            revenue impact, derived from decisions that happened
+src/lib/actions/              dashboard server actions - escalations, policy,
+                              mandates, horizon, simulation, checkout, sellable
+src/lib/demo/                 catalog, crossSell (LLM upsells), shopper (intent),
+                              seedData, MandateClient, simulation
+src/lib/supabase/admin.ts     the only Supabase client - service role
+src/proxy.ts                  Clerk middleware
+src/app/api/m/[slug]/         the public surface, one merchant per slug:
+                              mcp (verify -> session -> transport),
+                              catalog (agent-readable storefront),
+                              wba-directory (that merchant's public keys)
+src/app/dashboard/            merchant UI
+src/components/graph/         3D graph + legend (layout.ts is the pure, testable part)
+src/components/dashboard/     DashboardTabs and every panel
+scripts/                      seed, bench-llm (model contracts), verify-e2e
+                              (isolation), regen (paced history), dev.mjs (TLS)
 ```
 
-## 13. Resuming in Antigravity
+## 13. Per-merchant tenancy
+
+Until migration 0010 every table was global: two people signing in with
+different Clerk accounts saw the same traces, agents and rules. Fine for one
+person on one laptop, wrong for anything anyone else can clone and run.
+
+**The agent is the tenancy bridge.** An MCP request already proves which agent
+sent it, by verifying an Ed25519 signature against `agents.public_key`. So the
+tenant is resolved from cryptography, not from a field in a request body a
+caller could set to someone else's id. No MCP tool takes a merchant parameter,
+so no agent can name one.
+
+**`merchant_id` is `NOT NULL` on all ten tables.** That is what turned a
+delicate refactor into a mechanical one: every write that would have created an
+untenanted row failed to compile, and the compiler enumerated the call sites
+instead of anyone guessing at them. Reads are the opposite - an unscoped
+`select` compiles perfectly and returns other tenants' rows - so those were
+audited by hand, and the dashboard's filter is applied once in
+`getDashboardData`, the single place all its reads funnel through.
+
+**The endpoint carries the tenant**: `/api/m/<slug>/{mcp,catalog,wba-directory}`.
+That settles two things a global endpoint could not.
+
+- Key lookup is scoped to the addressed merchant, so an agent registered with
+  merchant A fails verification against B's endpoint as `unknown_keyid`, before
+  any policy runs. There is no window where a cross-tenant request has been
+  authenticated but not yet rejected.
+- A forged request becomes attributable. Its signature failed, so nothing it
+  claims can be trusted - but the URL is not a claim, it is where the request
+  was actually sent. Attributing protocol rejects by *claimed* keyid instead
+  would let anyone flood a competitor's audit trail by signing garbage with that
+  competitor's agent id, the same attack that keeps protocol rejects out of the
+  trust score.
+
+**Four holes closed that were not compile errors.** `getAggregates` was
+unscoped, so one merchant's traffic would have consumed another's rate budget -
+and unlike a display bug, that silently changes whether money moves. `explain`
+let any agent read any merchant's decision, including the rule that fired and
+its thresholds. The `draft_policy` backtest replayed every tenant's traces. And
+every by-id mutation in `policy.ts` and `mandates.ts` treated a row id as
+authorization; a uuid being unguessable in practice is not a security boundary.
+
+Uniqueness that was global is now per-merchant: two shops can both stock a
+`mouse-01`, two merchants can both name an agent "Checkout Agent".
+
+**New accounts are seeded** with the default rules and catalog on first sign-in.
+A merchant with no rules governs nothing and one with no catalog has nothing to
+sell, so without seeding "new account" would mean "nothing works" rather than
+"no activity yet".
+
+**The pre-tenancy data** went to an unclaimed `demo` merchant. Claiming it needs
+`MANDATE_CLAIM_DEMO_MERCHANT=true` set deliberately, then one sign-in - handing
+it to whoever signs in first would mean a stranger cloning this repo inherits
+the operator's traces, rules and agents.
+
+`scripts/verify-e2e.ts` proves the boundary rather than asserting it: it stands
+up two merchants and tries to make each one see or touch the other. Every
+isolation check is written so it fails if the scoping is removed, and where a
+check could pass trivially - an empty table returns nothing whether filtered or
+not - it asserts a control first, so the owner must see the row in the same
+instant the outsider does not.
+
+## 14. Campaign orchestrator
+
+Cross-sell is reactive: it waits for a purchase and makes it bigger. Real
+revenue, but bounded by traffic the merchant already had. A campaign goes the
+other way - pick customers out of the order history, decide an offer, and create
+the money action that might bring them back.
+
+Which is also why it belongs in this project rather than beside it. A discount
+is money given away. An agent running a campaign is spending the merchant's
+money, unattended, across many customers, and every send is exactly the kind of
+action Mandate exists to bound. The guardrails needed no new concepts: a `cap`
+scoped to `payment_link.create`, a `per_customer` velocity rule, a `step_up` so
+a large discount needs a human. Every offer lands in the same audit trail as
+everything else.
+
+**Payment links are the right money action** because their outcome is
+observable. Creating an order tells you nothing about whether anyone paid; a
+link carries a `status` that moves to `paid` and an `amount_paid`, so campaign
+revenue is fetched rather than claimed.
+
+**Planning splits the way `draft_policy` does.** The model produces a structured
+plan, a human approves it, and everything after is deterministic. "Bought a
+stand over a month ago and never bought a hub" is a query, not a judgment -
+putting it through a model would make the answer non-reproducible for no gain,
+and a campaign that targets a different set every time you look at it is not one
+anyone can approve. Every SKU the plan names is grounded against the real
+catalog, and a plan naming a phantom product is discarded rather than repaired:
+a segment referencing a phantom SKU silently matches nobody, which looks exactly
+like a campaign that found no audience.
+
+Prices and discounts are computed from the catalog, never taken from the model.
+A model that can state a price can state it wrong.
+
+**Budget is checked before each action, not after** - spending past the budget
+and then noticing is not a budget - and committed discount is summed from the
+targets rather than stored, the same reasoning as `totalExecuted` in
+`revenue.ts`: a stored total is a second source of truth that drifts the first
+time an update fails halfway.
+
+Two bugs surfaced while building it, both directly on the campaign path.
+`per_customer` velocity had never worked - the scope was in the schema and
+`draft_policy` offered it to the model, but `getAggregates` only ever filtered
+by agent, so a per-customer rule behaved identically to a per-agent one. That is
+*the* guardrail on a campaign. And rules could not be scoped by action type, so
+campaign spend could not be bounded separately from order spend.
+
+Not yet built: the dashboard UI, and simulated demand. Without the latter,
+conversion reads 0% in test mode because nothing pays a link on its own.
+
+## 15. Resuming in Antigravity
 
 Paste this file plus the relevant `src/lib/...` files for whatever phase
 you're extending — this file is written to stand alone as context. The
