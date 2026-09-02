@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireDashboardUser } from "./authGuard";
+import { getCurrentMerchant } from "@/lib/merchant";
 import { executeRealAction } from "@/lib/razorpay/actions";
 import { ActionInput } from "@/lib/mcp/schemas";
 import { recomputeTrust } from "@/lib/mcp/traceHelpers";
@@ -18,12 +19,14 @@ import type { Json } from "@/types/db";
  */
 export async function approveEscalation(escalationId: string) {
   const user = await requireDashboardUser();
+  const merchant = await getCurrentMerchant();
   const db = createAdminClient();
 
   const { data: escalation, error: escError } = await db
     .from("escalations")
     .select("*")
     .eq("id", escalationId)
+    .eq("merchant_id", merchant.id)
     .single();
   if (escError || !escalation) throw new Error("Escalation not found.");
   // Idempotent on the outcome the caller asked for. A second approve lands
@@ -39,6 +42,7 @@ export async function approveEscalation(escalationId: string) {
     .from("traces")
     .select("*")
     .eq("id", escalation.trace_id)
+    .eq("merchant_id", merchant.id)
     .single();
   if (traceError || !trace) throw new Error("Underlying trace not found.");
 
@@ -61,7 +65,7 @@ export async function approveEscalation(escalationId: string) {
     .eq("id", escalationId);
   await db
     .from("alerts")
-    .insert({ trace_id: trace.id, severity: "info", message: `Escalation approved by ${user.email ?? user.id} — action executed.` });
+    .insert({ merchant_id: merchant.id, trace_id: trace.id, severity: "info", message: `Escalation approved by ${user.email ?? user.id} — action executed.` });
 
   if (trace.agent_id) await recomputeTrust(trace.agent_id);
 
@@ -70,9 +74,15 @@ export async function approveEscalation(escalationId: string) {
 
 export async function denyEscalation(escalationId: string) {
   const user = await requireDashboardUser();
+  const merchant = await getCurrentMerchant();
   const db = createAdminClient();
 
-  const { data: escalation, error } = await db.from("escalations").select("*").eq("id", escalationId).single();
+  const { data: escalation, error } = await db
+    .from("escalations")
+    .select("*")
+    .eq("id", escalationId)
+    .eq("merchant_id", merchant.id)
+    .single();
   if (error || !escalation) throw new Error("Escalation not found.");
   if (escalation.status === "denied") return;
   if (escalation.status !== "pending") throw new Error("This escalation was already approved.");
@@ -83,7 +93,7 @@ export async function denyEscalation(escalationId: string) {
     .eq("id", escalationId);
   await db
     .from("alerts")
-    .insert({ trace_id: escalation.trace_id, severity: "info", message: `Escalation denied by ${user.email ?? user.id}.` });
+    .insert({ merchant_id: merchant.id, trace_id: escalation.trace_id, severity: "info", message: `Escalation denied by ${user.email ?? user.id}.` });
 
   revalidatePath("/dashboard");
 }

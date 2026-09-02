@@ -13,11 +13,20 @@ import { getLLM } from "@/lib/llm/client";
  *  the reasoning is being returned as-is. Callers that show this to a
  *  merchant should not present a deterministic sentence as a generated one. */
 export async function explainTrace(
+  merchantId: string,
   traceId: string
 ): Promise<{ explanation: string; traceId: string; elaborated: boolean }> {
   const db = createAdminClient();
 
-  const { data: trace, error } = await db.from("traces").select("*").eq("id", traceId).single();
+  // Scoped: without the merchant filter, any agent could read any other
+  // merchant's decision by guessing a trace id, and the explanation returns the
+  // rule that fired and its thresholds.
+  const { data: trace, error } = await db
+    .from("traces")
+    .select("*")
+    .eq("id", traceId)
+    .eq("merchant_id", merchantId)
+    .single();
   if (error || !trace) throw new Error(`Trace ${traceId} not found`);
 
   const [ruleResult, agentResult, childCountResult] = await Promise.all([

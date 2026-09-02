@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Agent, Customer, Escalation, Mandate, PolicyRule, Product, Trace } from "@/types/db";
+import type { Agent, Customer, Escalation, Mandate, Merchant, PolicyRule, Product, Trace } from "@/types/db";
 import type { PolicyIssue } from "@/lib/policy/audit";
 import { EscalationsPanel } from "./EscalationsPanel";
 import { AgentTrustPanel } from "./AgentTrustPanel";
@@ -41,6 +41,7 @@ interface Props {
   mandates: Mandate[];
   customers: Customer[];
   products: Product[];
+  merchant: Merchant;
 }
 
 /**
@@ -50,7 +51,7 @@ interface Props {
  * instead of stacking everything into one increasingly long scroll.
  */
 export function DashboardTabs(props: Props) {
-  const { agents, rules, traces, escalations, tracesById, deterministicIssues, mandates, customers, products } = props;
+  const { agents, rules, traces, escalations, tracesById, deterministicIssues, mandates, customers, products, merchant } = props;
   const [tab, setTab] = useState<Tab>("overview");
   const [highlightRuleId, setHighlightRuleId] = useState<string | null>(null);
 
@@ -140,7 +141,7 @@ export function DashboardTabs(props: Props) {
           <div className="flex flex-col gap-5">
             <ConversationalCheckout />
             <SellableCatalog />
-            <StorefrontCard />
+            <StorefrontCard slug={merchant.slug} />
           </div>
           <BuyingActivity
             traces={traces}

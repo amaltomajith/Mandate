@@ -76,7 +76,14 @@ const RETIRED_RULE_NAMES = [
   "Rapid-repeat guard: 6 actions / 2 min per agent",
 ];
 
-export async function applySeedRules(db: SupabaseClient): Promise<{ created: number; migrated: boolean }> {
+/** Seeds one merchant's starting policy set and demo customer. Every query is
+ *  scoped to that merchant: without the scope, a second merchant signing up
+ *  would find its seed rules "already existing" because another merchant had
+ *  the same rule names, and would end up governed by nothing. */
+export async function applySeedRules(
+  db: SupabaseClient,
+  merchantId: string
+): Promise<{ created: number; migrated: boolean }> {
   let created = 0;
   let migrated = false;
 
@@ -84,15 +91,17 @@ export async function applySeedRules(db: SupabaseClient): Promise<{ created: num
     .from("policy_rules")
     .update({ status: "superseded" })
     .in("name", RETIRED_RULE_NAMES)
+    .eq("merchant_id", merchantId)
     .eq("status", "active")
     .select("id");
   if (retiredError) throw retiredError;
   migrated = (retired?.length ?? 0) > 0;
 
   for (const rule of SEED_RULES) {
-    const { data: existing } = await db.from("policy_rules").select("id").eq("name", rule.name).maybeSingle();
+    const { data: existing } = await db.from("policy_rules").select("id").eq("merchant_id", merchantId).eq("name", rule.name).maybeSingle();
     if (existing) continue;
     const { error } = await db.from("policy_rules").insert({
+      merchant_id: merchantId,
       type: rule.type,
       name: rule.name,
       params: rule.params,
@@ -104,9 +113,9 @@ export async function applySeedRules(db: SupabaseClient): Promise<{ created: num
     created++;
   }
 
-  const { data: existingCustomer } = await db.from("customers").select("id").eq("name", SEED_CUSTOMER.name).maybeSingle();
+  const { data: existingCustomer } = await db.from("customers").select("id").eq("merchant_id", merchantId).eq("name", SEED_CUSTOMER.name).maybeSingle();
   if (!existingCustomer) {
-    const { error } = await db.from("customers").insert(SEED_CUSTOMER);
+    const { error } = await db.from("customers").insert({ ...SEED_CUSTOMER, merchant_id: merchantId });
     if (error) throw error;
   }
 

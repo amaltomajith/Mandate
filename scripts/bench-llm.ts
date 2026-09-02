@@ -52,6 +52,7 @@ import { currentProvider, localAvailable } from "../src/lib/llm/client";
 import { MandateClient } from "../src/lib/demo/mandateClient";
 import { ensureAgentIdentity } from "../src/lib/demo/shared";
 import type { PolicyRule } from "../src/types/db";
+import { merchantForScript } from "./lib/merchant";
 
 const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
   auth: { autoRefreshToken: false, persistSession: false },
@@ -130,8 +131,9 @@ async function main() {
   console.log(`provider for internal prompts: ${await currentProvider("internal")}`);
   console.log(`model: ${process.env.LOCAL_LLM_MODEL ?? "granite4"} (local) · runs per case: ${RUNS}`);
 
-  const catalog = await fetchCatalog(db);
-  const { data: ruleRows } = await db.from("policy_rules").select("*").eq("status", "active");
+  const merchant = await merchantForScript(db);
+  const catalog = await fetchCatalog(db, merchant.id);
+  const { data: ruleRows } = await db.from("policy_rules").select("*").eq("merchant_id", merchant.id).eq("status", "active");
   const rules = (ruleRows ?? []) as PolicyRule[];
   const skus = catalog.map((c) => c.sku);
 
@@ -226,13 +228,13 @@ async function main() {
   let mcp: MandateClient | null = null;
   let mcpError: string | null = null;
   try {
-    const { id: agentId, secretKeyBase64 } = await ensureAgentIdentity(db, {
+    const { id: agentId, secretKeyBase64 } = await ensureAgentIdentity(db, merchant.id, {
       envIdVar: "SIM_AGENT_ID",
       envSecretVar: "SIM_AGENT_SECRET_KEY",
       name: "Checkout Agent",
       description: "An AI buyer agent transacting on behalf of customers.",
     });
-    mcp = new MandateClient(baseUrl, agentId, secretKeyBase64);
+    mcp = new MandateClient(baseUrl, merchant.slug, agentId, secretKeyBase64);
     await mcp.initialize("mandate-llm-benchmark");
   } catch (err) {
     mcpError = `dev server unreachable at ${baseUrl} — start it to measure draft_policy`;

@@ -29,11 +29,12 @@ function scopedActionTypes(rule: EngineRule): string[] | null {
   return Array.isArray(scope) && scope.length > 0 ? (scope as string[]) : null;
 }
 
-export async function getActiveRules(): Promise<EngineRule[]> {
+export async function getActiveRules(merchantId: string): Promise<EngineRule[]> {
   const db = createAdminClient();
   const { data, error } = await db
     .from("policy_rules")
     .select("id, type, name, params")
+    .eq("merchant_id", merchantId)
     .eq("status", "active");
   assertNoSupabaseError(error);
   return data ?? [];
@@ -50,6 +51,7 @@ export async function getActiveRules(): Promise<EngineRule[]> {
  *  so nothing was wrong in practice; it was a trapdoor waiting for the first
  *  merchant who wrote "don't contact the same customer twice a week". */
 export async function getAggregates(
+  merchantId: string,
   agentId: string,
   rules: EngineRule[],
   currency: string,
@@ -68,7 +70,15 @@ export async function getAggregates(
     // across every agent — "don't hit this person repeatedly" is a fact about
     // the person, and scoping it to one agent would let a second identity
     // reset the count. A per-agent rule counts what this agent has done.
-    let query = db.from("traces").select("id").eq("mode", "enforce").gte("created_at", since);
+    // Scoped by merchant before anything else. Without it, one merchant's
+    // traffic would consume another's rate budget -- and unlike a display bug,
+    // that one silently changes whether money moves.
+    let query = db
+      .from("traces")
+      .select("id")
+      .eq("merchant_id", merchantId)
+      .eq("mode", "enforce")
+      .gte("created_at", since);
     const velocityScope = scopedActionTypes(rule);
     if (velocityScope) query = query.in("action_type", velocityScope);
     if (params.scope === "per_customer") {
@@ -102,6 +112,7 @@ export async function getAggregates(
     let capQuery = db
       .from("traces")
       .select("action_type, params")
+      .eq("merchant_id", merchantId)
       .eq("agent_id", agentId)
       .eq("mode", "enforce")
       .eq("decision", "allow")
@@ -165,6 +176,7 @@ export async function checkMandateGate(agentId: string, customerId: string): Pro
  *  pause, or revoke. Silently no-ops without a customerId: a subscription
  *  with nobody to attribute it to isn't a governable mandate. */
 export async function recordMandateFromSubscription(
+  merchantId: string,
   agentId: string,
   customerId: string | null | undefined,
   razorpayRef: string,
@@ -173,6 +185,7 @@ export async function recordMandateFromSubscription(
   if (!customerId) return;
   const db = createAdminClient();
   const { error } = await db.from("mandates").insert({
+    merchant_id: merchantId,
     agent_id: agentId,
     customer_id: customerId,
     type: "upi_autopay",
@@ -196,6 +209,7 @@ export async function getAgentTrustScore(agentId: string): Promise<number | unde
 }
 
 export interface InsertTraceInput {
+  merchantId: string;
   parentTraceId?: string | null;
   mode: TraceMode;
   actionType: string;
@@ -212,6 +226,7 @@ export async function insertTrace(input: InsertTraceInput) {
   const { data, error } = await db
     .from("traces")
     .insert({
+      merchant_id: input.merchantId,
       parent_trace_id: input.parentTraceId ?? null,
       mode: input.mode,
       action_type: input.actionType,
@@ -228,19 +243,20 @@ export async function insertTrace(input: InsertTraceInput) {
   return data;
 }
 
-export async function createEscalationForTrace(traceId: string) {
+export async function createEscalationForTrace(merchantId: string, traceId: string) {
   const db = createAdminClient();
-  const { error } = await db.from("escalations").insert({ trace_id: traceId });
+  const { error } = await db.from("escalations").insert({ merchant_id: merchantId, trace_id: traceId });
   assertNoSupabaseError(error);
 }
 
 export async function createAlert(
+  merchantId: string,
   traceId: string | null,
   severity: Database["public"]["Tables"]["alerts"]["Row"]["severity"],
   message: string
 ) {
   const db = createAdminClient();
-  const { error } = await db.from("alerts").insert({ trace_id: traceId, severity, message });
+  const { error } = await db.from("alerts").insert({ merchant_id: merchantId, trace_id: traceId, severity, message });
   assertNoSupabaseError(error);
 }
 

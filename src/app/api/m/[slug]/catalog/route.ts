@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getMerchantBySlug } from "@/lib/merchant";
 
 export const runtime = "nodejs";
 
@@ -24,12 +25,18 @@ export const runtime = "nodejs";
  * specific action clear?" without revealing the shape of the rule that decides
  * it. Useful to an honest buyer, useless as a map for a dishonest one.
  */
-export async function GET() {
+export async function GET(_req: Request, ctx: { params: Promise<{ slug: string }> }) {
+  const { slug } = await ctx.params;
   const db = createAdminClient();
+  const merchant = await getMerchantBySlug(db, slug);
+  if (!merchant) {
+    return NextResponse.json({ error: "unknown_merchant", slug }, { status: 404 });
+  }
 
   const { data: products, error } = await db
     .from("products")
     .select("sku, name, description, price_paise, category")
+    .eq("merchant_id", merchant.id)
     .order("price_paise", { ascending: true });
 
   if (error) {

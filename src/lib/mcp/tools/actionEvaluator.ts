@@ -2,6 +2,8 @@ import "server-only";
 import { evaluatePolicy } from "@/lib/policy/engine";
 import { executeRealAction } from "@/lib/razorpay/actions";
 import type { ActionInput } from "@/lib/mcp/schemas";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { getMerchantIdForAgent } from "@/lib/merchant";
 import {
   checkMandateGate,
   createAlert,
@@ -34,6 +36,14 @@ export async function runActionEvaluation(
   input: ActionInput,
   mode: "simulate" | "enforce"
 ): Promise<EvaluationOutcome> {
+  // The tenant, resolved from the agent the Ed25519 signature already proved --
+  // never from the request body. An agent has no way to name a merchant, so it
+  // has no way to name someone else's. Everything below is scoped by this, and
+  // an agent whose row cannot be read is refused rather than defaulted: the only
+  // safe thing to do with an action whose owner is unknown is not perform it.
+  const db = createAdminClient();
+  const merchantId = await getMerchantIdForAgent(db, agentId);
+
   // The mandate gate runs before the policy engine, not alongside it: a
   // revoked/paused mandate is a more fundamental "this agent isn't
   // authorized at all right now" check, and should short-circuit spend
@@ -62,8 +72,8 @@ export async function runActionEvaluation(
     // here rather than inside the evaluator so the evaluator stays pure and
     // DB-free — same contract every other input follows.
     const agentTrustScore = await getAgentTrustScore(agentId);
-    const rules = await getActiveRules();
-    const aggregates = await getAggregates(agentId, rules, input.currency, input.customerId);
+    const rules = await getActiveRules(merchantId);
+    const aggregates = await getAggregates(merchantId, agentId, rules, input.currency, input.customerId);
     match = evaluatePolicy(
       {
         actionType: input.actionType,
@@ -87,12 +97,13 @@ export async function runActionEvaluation(
     if (input.actionType === "subscription.create") {
       const subscriptionId = (razorpayResponse as { subscription?: { id?: string } } | null)?.subscription?.id;
       if (subscriptionId) {
-        await recordMandateFromSubscription(agentId, input.customerId, subscriptionId, razorpayResponse);
+        await recordMandateFromSubscription(merchantId, agentId, input.customerId, subscriptionId, razorpayResponse);
       }
     }
   }
 
   const trace = await insertTrace({
+    merchantId,
     parentTraceId: input.forkFrom ?? null,
     mode,
     actionType: input.actionType,
@@ -121,10 +132,10 @@ export async function runActionEvaluation(
 
   if (mode === "enforce") {
     if (decision === "escalate") {
-      await createEscalationForTrace(trace.id);
-      await createAlert(trace.id, "notable", `Escalation: ${reasoning}`);
+      await createEscalationForTrace(merchantId, trace.id);
+      await createAlert(merchantId, trace.id, "notable", `Escalation: ${reasoning}`);
     } else if (decision === "block") {
-      await createAlert(trace.id, "high", `Blocked: ${reasoning}`);
+      await createAlert(merchantId, trace.id, "high", `Blocked: ${reasoning}`);
     }
     await recomputeTrust(agentId);
   }

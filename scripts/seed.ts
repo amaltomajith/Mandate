@@ -13,6 +13,7 @@
 import "./lib/loadEnv";
 import { createClient } from "@supabase/supabase-js";
 import { applySeedRules } from "../src/lib/demo/seedData";
+import { merchantForScript } from "./lib/merchant";
 
 // Builds its own service-role client rather than importing
 // src/lib/supabase/admin.ts: that module is guarded with `import "server-only"`,
@@ -26,7 +27,7 @@ function createAdminClient() {
 
 async function main() {
   const db = createAdminClient();
-  const { created, migrated } = await applySeedRules(db);
+  const { created, migrated } = await applySeedRules(db, (await merchantForScript(db)).id);
 
   if (migrated) console.log("Retired an out-of-date velocity rule (superseded, not deleted — traces still cite it).");
   console.log(created > 0 ? `Created ${created} new rule(s).` : "All rules already existed — nothing to create.");

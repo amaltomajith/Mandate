@@ -97,15 +97,24 @@ function weightedItem(catalog: CatalogItem[]): CatalogItem {
   return weighted[Math.floor(Math.random() * weighted.length)];
 }
 
-async function ensureSyntheticCustomers(db: SupabaseClient): Promise<{ id: string; name: string }[]> {
+async function ensureSyntheticCustomers(db: SupabaseClient, merchantId: string): Promise<{ id: string; name: string }[]> {
   const result: { id: string; name: string }[] = [];
   for (const customer of SYNTHETIC_CUSTOMERS) {
-    const { data: existing } = await db.from("customers").select("id, name").eq("name", customer.name).maybeSingle();
+    const { data: existing } = await db
+      .from("customers")
+      .select("id, name")
+      .eq("merchant_id", merchantId)
+      .eq("name", customer.name)
+      .maybeSingle();
     if (existing) {
       result.push(existing);
       continue;
     }
-    const { data, error } = await db.from("customers").insert(customer).select("id, name").single();
+    const { data, error } = await db
+      .from("customers")
+      .insert({ ...customer, merchant_id: merchantId })
+      .select("id, name")
+      .single();
     if (error) throw error;
     result.push(data);
   }
@@ -122,10 +131,10 @@ async function ensureSyntheticCustomers(db: SupabaseClient): Promise<{ id: strin
  */
 const TARGET_ACTIVE_MANDATES = 3;
 
-export async function ensureSomeActiveMandates(): Promise<number> {
+export async function ensureSomeActiveMandates(merchantId: string): Promise<number> {
   const db = createAdminClient();
-  const { id: agentId } = await ensureAgentIdentity(db, SIM_AGENT);
-  const customers = await ensureSyntheticCustomers(db);
+  const { id: agentId } = await ensureAgentIdentity(db, merchantId, SIM_AGENT);
+  const customers = await ensureSyntheticCustomers(db, merchantId);
 
   // Scoped to THIS agent. A mandate belonging to a deleted agent still reads
   // as active but authorizes nobody, so counting it here left the book
@@ -133,6 +142,7 @@ export async function ensureSomeActiveMandates(): Promise<number> {
   const { data: existing } = await db
     .from("mandates")
     .select("customer_id")
+    .eq("merchant_id", merchantId)
     .eq("status", "active")
     .eq("agent_id", agentId);
   const alreadyHeld = new Set((existing ?? []).map((m) => m.customer_id));
@@ -144,6 +154,7 @@ export async function ensureSomeActiveMandates(): Promise<number> {
 
   for (const customer of candidates.slice(0, needed)) {
     const { error } = await db.from("mandates").insert({
+      merchant_id: merchantId,
       agent_id: agentId,
       customer_id: customer.id,
       type: "upi_autopay",
@@ -232,14 +243,14 @@ async function bestClearingItem(
 
 /** Runs `count` simulated actions. The caller controls pacing — see
  *  SimulationPanel.tsx, where the merchant picks the interval. */
-export async function runSimulation(count: number = 1): Promise<SimulationSummary> {
+export async function runSimulation(merchant: { id: string; slug: string }, count: number = 1): Promise<SimulationSummary> {
   const db = createAdminClient();
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
-  const { id: agentId, secretKeyBase64 } = await ensureAgentIdentity(db, SIM_AGENT);
-  const [catalog, customers] = await Promise.all([fetchCatalog(db), ensureSyntheticCustomers(db)]);
+  const { id: agentId, secretKeyBase64 } = await ensureAgentIdentity(db, merchant.id, SIM_AGENT);
+  const [catalog, customers] = await Promise.all([fetchCatalog(db, merchant.id), ensureSyntheticCustomers(db, merchant.id)]);
 
-  const client = new MandateClient(baseUrl, agentId, secretKeyBase64);
+  const client = new MandateClient(baseUrl, merchant.slug, agentId, secretKeyBase64);
   await client.initialize("mandate-simulation");
 
   const events: SimulationEvent[] = [];

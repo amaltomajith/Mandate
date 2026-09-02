@@ -1,5 +1,6 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getCurrentMerchant } from "@/lib/merchant";
 
 /**
  * Dashboard reads go through the service-role client (Clerk gates the routes;
@@ -82,11 +83,17 @@ async function withRetry<T>(query: () => PromiseLike<SupabaseResult<T>>, attempt
 
 export async function getDashboardData() {
   const supabase = createAdminClient();
+  // Every query below is scoped to this merchant. An unscoped read compiles
+  // perfectly and returns other tenants' rows, which is why the filter is
+  // applied here at the single place all dashboard reads funnel through rather
+  // than trusted to be remembered at each call site.
+  const merchant = await getCurrentMerchant();
+  const mine = <T,>(q: T & { eq: (c: string, v: string) => T }) => q.eq("merchant_id", merchant.id);
 
   const [agents, rules, traces, escalations, alerts, mandates, customers, products] = await Promise.all([
-    withRetry(() => supabase.from("agents").select("*").order("trust_score", { ascending: false })),
-    withRetry(() => supabase.from("policy_rules").select("*").order("created_at", { ascending: false })),
-    withRetry(() => supabase.from("traces").select("*").order("created_at", { ascending: false }).limit(300)),
+    withRetry(() => mine(supabase.from("agents").select("*").order("trust_score", { ascending: false }))),
+    withRetry(() => mine(supabase.from("policy_rules").select("*").order("created_at", { ascending: false }))),
+    withRetry(() => mine(supabase.from("traces").select("*").order("created_at", { ascending: false }).limit(300))),
     // Deliberately matched to the trace limit above, not a smaller number of
     // its own. Escalations map 1:1 onto escalated traces, and the revenue
     // panel reads an escalated trace with no matching escalation row as "still
@@ -94,14 +101,14 @@ export async function getDashboardData() {
     // fall out of the fetched set as they accumulate and the panel would start
     // reporting settled revenue as pending — wrong in a way nothing on screen
     // would reveal.
-    withRetry(() => supabase.from("escalations").select("*").order("created_at", { ascending: false }).limit(300)),
-    withRetry(() => supabase.from("alerts").select("*").order("created_at", { ascending: false }).limit(50)),
-    withRetry(() => supabase.from("mandates").select("*").order("created_at", { ascending: false })),
-    withRetry(() => supabase.from("customers").select("*").order("created_at", { ascending: false })),
+    withRetry(() => mine(supabase.from("escalations").select("*").order("created_at", { ascending: false }).limit(300))),
+    withRetry(() => mine(supabase.from("alerts").select("*").order("created_at", { ascending: false }).limit(50))),
+    withRetry(() => mine(supabase.from("mandates").select("*").order("created_at", { ascending: false }))),
+    withRetry(() => mine(supabase.from("customers").select("*").order("created_at", { ascending: false }))),
     // Unlimited on purpose: the order history names the product behind each
     // trace by SKU lookup, and a truncated product list would silently turn
     // some orders into unnamed ones. Handful of rows either way.
-    withRetry(() => supabase.from("products").select("*").order("name")),
+    withRetry(() => mine(supabase.from("products").select("*").order("name"))),
   ]);
 
   const errors = [agents, rules, traces, escalations, alerts, mandates, customers, products]
@@ -143,6 +150,7 @@ export async function getDashboardData() {
     mandates: mandates.data ?? [],
     customers: customers.data ?? [],
     products: products.data ?? [],
+    merchant,
     loadError: errors[0]?.message ?? null,
   };
 }

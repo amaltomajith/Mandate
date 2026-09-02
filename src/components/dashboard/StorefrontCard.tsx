@@ -16,26 +16,30 @@ import { Icons, Panel } from "./ui";
  * so what is displayed is what a deployed instance actually serves — a card
  * showing localhost on a live deployment would be worse than no card.
  */
-export function StorefrontCard() {
+export function StorefrontCard({ slug }: { slug: string }) {
   const [copied, setCopied] = useState<string | null>(null);
   const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  // Rendered from the signed-in merchant's own slug rather than hardcoded, so
+  // what is shown is the URL that actually serves this merchant. A card
+  // advertising someone else's storefront would be worse than no card.
+  const prefix = `/api/m/${slug}`;
 
   const endpoints = [
     {
       key: "catalog",
-      path: "/api/catalog",
+      path: `${prefix}/catalog`,
       title: "Storefront",
       blurb: "What's for sale, and how to buy it — the MCP endpoint, the signing scheme, and what each outcome means. Public, so an agent can find the merchant before it has credentials.",
     },
     {
       key: "directory",
-      path: "/api/wba-directory",
+      path: `${prefix}/wba-directory`,
       title: "Key directory",
       blurb: "Public keys for every registered agent, so anyone can verify a signature independently rather than taking this server's word for it.",
     },
     {
       key: "mcp",
-      path: "/api/mcp",
+      path: `${prefix}/mcp`,
       title: "Transact",
       blurb: "Where signed orders go. Every request is verified before any policy runs; an unsigned or tampered one never reaches the engine.",
     },

@@ -78,6 +78,7 @@ Only include the ONE key ("cap", "velocity", "category_block", "step_up", or "tr
  * "human-in-the-loop gate" for why that's a hard requirement, not a nicety.
  */
 export async function draftPolicy(
+  merchantId: string,
   text: string,
   source: "human" | "horizon",
   sourceLabel?: string
@@ -106,7 +107,7 @@ export async function draftPolicy(
   if (!params) throw new Error(`draft_policy: model chose type "${draft.type}" but didn't include its params object.`);
 
   const db = createAdminClient();
-  const existingRules = await getActiveRules();
+  const existingRules = await getActiveRules(merchantId);
 
   const conflictsWith = existingRules
     .filter((r) => r.type === draft.type)
@@ -115,6 +116,7 @@ export async function draftPolicy(
   const { data: inserted, error } = await db
     .from("policy_rules")
     .insert({
+      merchant_id: merchantId,
       type: draft.type,
       name: draft.name,
       params: params as unknown as Json,
@@ -131,6 +133,7 @@ export async function draftPolicy(
   const { data: recentTraces, error: tracesError } = await db
     .from("traces")
     .select("id, action_type, params, decision, agent_id")
+    .eq("merchant_id", merchantId)
     .eq("mode", "enforce")
     .order("created_at", { ascending: false })
     .limit(50);

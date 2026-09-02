@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireDashboardUser } from "./authGuard";
+import { getCurrentMerchant } from "@/lib/merchant";
 import { draftPolicy } from "@/lib/mcp/tools/draftPolicy";
 
 /**
@@ -15,7 +16,9 @@ const CURATED_HORIZON_EXAMPLE =
 
 export async function triggerHorizonExample() {
   await requireDashboardUser();
+  const merchant = await getCurrentMerchant();
   const result = await draftPolicy(
+    merchant.id,
     CURATED_HORIZON_EXAMPLE,
     "horizon",
     "Horizon (illustrative): RBI circular on UPI Autopay step-up"
@@ -26,7 +29,8 @@ export async function triggerHorizonExample() {
 
 export async function submitManualPolicyDraft(text: string) {
   await requireDashboardUser();
-  const result = await draftPolicy(text, "human");
+  const merchant = await getCurrentMerchant();
+  const result = await draftPolicy(merchant.id, text, "human");
   revalidatePath("/dashboard");
   return result;
 }

@@ -47,28 +47,33 @@ const identityCache = new Map<string, Promise<AgentIdentity>>();
 
 export async function ensureAgentIdentity(
   db: SupabaseClient,
+  merchantId: string,
   opts: { envIdVar: string; envSecretVar: string; name: string; description: string }
 ): Promise<AgentIdentity> {
-  const cached = identityCache.get(opts.envIdVar);
+  const cached = identityCache.get(`${merchantId}:${opts.envIdVar}`);
   if (cached) return cached;
 
   // Cache the in-flight promise, not just the result, so concurrent callers
   // can't race each other into registering two agents.
-  const pending = resolveAgentIdentity(db, opts);
-  identityCache.set(opts.envIdVar, pending);
+  // Keyed by merchant as well as env var: two merchants both running the
+  // simulation must not share one cached identity, or the second would
+  // transact as the first.
+  const pending = resolveAgentIdentity(db, merchantId, opts);
+  identityCache.set(`${merchantId}:${opts.envIdVar}`, pending);
   // A failed lookup must not poison the cache for the rest of the process.
-  pending.catch(() => identityCache.delete(opts.envIdVar));
+  pending.catch(() => identityCache.delete(`${merchantId}:${opts.envIdVar}`));
   return pending;
 }
 
 async function resolveAgentIdentity(
   db: SupabaseClient,
+  merchantId: string,
   opts: { envIdVar: string; envSecretVar: string; name: string; description: string }
 ): Promise<AgentIdentity> {
   const envId = process.env[opts.envIdVar];
   const envSecret = process.env[opts.envSecretVar];
   if (envId && envSecret) {
-    const { data } = await db.from("agents").select("id").eq("id", envId).maybeSingle();
+    const { data } = await db.from("agents").select("id").eq("id", envId).eq("merchant_id", merchantId).maybeSingle();
     if (data) return { id: envId, secretKeyBase64: envSecret, reused: true };
   }
 
@@ -77,11 +82,11 @@ async function resolveAgentIdentity(
   // suffix used to be unconditional, which leaked demo scaffolding into what
   // is meant to read as a merchant's real agent roster — "Background Traffic
   // Bot (06:59:50)" is not a name anyone would give an agent.
-  const { data: clash } = await db.from("agents").select("id").eq("name", opts.name).maybeSingle();
+  const { data: clash } = await db.from("agents").select("id").eq("merchant_id", merchantId).eq("name", opts.name).maybeSingle();
   const name = clash ? `${opts.name} (${new Date().toISOString().slice(11, 19)})` : opts.name;
   const { data, error } = await db
     .from("agents")
-    .insert({ name, description: opts.description, public_key: publicKey })
+    .insert({ merchant_id: merchantId, name, description: opts.description, public_key: publicKey })
     .select()
     .single();
   if (error) throw error;

@@ -29,12 +29,16 @@ export class MandateClient {
 
   constructor(
     private readonly baseUrl: string,
+    /** The merchant whose endpoint this client talks to. The path is part of
+     *  the signature base, so a client pointed at the wrong merchant fails
+     *  verification rather than acting on the wrong tenant. */
+    private readonly slug: string,
     private readonly agentId: string,
     private readonly secretKeyBase64: string
   ) {}
 
   private async post(body: unknown, expectResponse: boolean): Promise<unknown> {
-    const url = new URL("/api/mcp", this.baseUrl);
+    const url = new URL(`/api/m/${this.slug}/mcp`, this.baseUrl);
     const bodyText = JSON.stringify(body);
     const authority = url.host;
 
@@ -108,7 +112,7 @@ export class MandateClient {
   /** Deliberately sends a request with a corrupted signature — used to trigger and
    *  demonstrate the protocol-layer self-defense rejection, not a real tool call. */
   async sendTamperedRequest(): Promise<{ status: number; body: string }> {
-    const url = new URL("/api/mcp", this.baseUrl);
+    const url = new URL(`/api/m/${this.slug}/mcp`, this.baseUrl);
     const body = {
       jsonrpc: "2.0",
       id: this.nextId++,

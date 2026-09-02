@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireDashboardUser } from "./authGuard";
+import { getCurrentMerchant } from "@/lib/merchant";
 import { runSemanticPolicyAudit, type SemanticIssue } from "@/lib/policy/semanticAudit";
 import { suggestPolicyFix, type FixSuggestion } from "@/lib/policy/suggestFix";
 import type { Json } from "@/types/db";
@@ -14,9 +15,10 @@ import { sweepThresholds, type ReplayAction, type ThresholdOutcome } from "@/lib
  *  force a choice, it offers one. */
 export async function approvePolicyRule(ruleId: string, supersedeRuleIds: string[] = []) {
   await requireDashboardUser();
+  const merchant = await getCurrentMerchant();
   const db = createAdminClient();
 
-  const { error } = await db.from("policy_rules").update({ status: "active" }).eq("id", ruleId);
+  const { error } = await db.from("policy_rules").update({ status: "active" }).eq("id", ruleId).eq("merchant_id", merchant.id);
   if (error) throw error;
 
   if (supersedeRuleIds.length > 0) {
@@ -33,8 +35,9 @@ export async function approvePolicyRule(ruleId: string, supersedeRuleIds: string
 
 export async function rejectPolicyRule(ruleId: string) {
   await requireDashboardUser();
+  const merchant = await getCurrentMerchant();
   const db = createAdminClient();
-  const { error } = await db.from("policy_rules").update({ status: "rejected" }).eq("id", ruleId);
+  const { error } = await db.from("policy_rules").update({ status: "rejected" }).eq("id", ruleId).eq("merchant_id", merchant.id);
   if (error) throw error;
   revalidatePath("/dashboard");
 }
@@ -45,16 +48,18 @@ export async function rejectPolicyRule(ruleId: string) {
  *  null here, distinguishing "manually retired" from "replaced by rule X". */
 export async function deactivatePolicyRule(ruleId: string) {
   await requireDashboardUser();
+  const merchant = await getCurrentMerchant();
   const db = createAdminClient();
-  const { error } = await db.from("policy_rules").update({ status: "superseded", superseded_by: null }).eq("id", ruleId);
+  const { error } = await db.from("policy_rules").update({ status: "superseded", superseded_by: null }).eq("id", ruleId).eq("merchant_id", merchant.id);
   if (error) throw error;
   revalidatePath("/dashboard");
 }
 
 export async function reactivatePolicyRule(ruleId: string) {
   await requireDashboardUser();
+  const merchant = await getCurrentMerchant();
   const db = createAdminClient();
-  const { error } = await db.from("policy_rules").update({ status: "active", superseded_by: null }).eq("id", ruleId);
+  const { error } = await db.from("policy_rules").update({ status: "active", superseded_by: null }).eq("id", ruleId).eq("merchant_id", merchant.id);
   if (error) throw error;
   revalidatePath("/dashboard");
 }
@@ -66,11 +71,13 @@ export async function reactivatePolicyRule(ruleId: string) {
  *  matched anything is safe to remove outright. */
 export async function deletePolicyRule(ruleId: string) {
   await requireDashboardUser();
+  const merchant = await getCurrentMerchant();
   const db = createAdminClient();
 
   const { count, error: countError } = await db
     .from("traces")
     .select("id", { count: "exact", head: true })
+    .eq("merchant_id", merchant.id)
     .eq("rule_fired_id", ruleId);
   if (countError) throw countError;
   if (count && count > 0) {
@@ -81,18 +88,19 @@ export async function deletePolicyRule(ruleId: string) {
 
   // Clear any rule that lists this one as "replaced by," so the delete
   // doesn't fail on the superseded_by foreign key.
-  const { error: clearError } = await db.from("policy_rules").update({ superseded_by: null }).eq("superseded_by", ruleId);
+  const { error: clearError } = await db.from("policy_rules").update({ superseded_by: null }).eq("superseded_by", ruleId).eq("merchant_id", merchant.id);
   if (clearError) throw clearError;
 
-  const { error } = await db.from("policy_rules").delete().eq("id", ruleId);
+  const { error } = await db.from("policy_rules").delete().eq("id", ruleId).eq("merchant_id", merchant.id);
   if (error) throw error;
   revalidatePath("/dashboard");
 }
 
 export async function runPolicyAudit(): Promise<SemanticIssue[]> {
   await requireDashboardUser();
+  const merchant = await getCurrentMerchant();
   const db = createAdminClient();
-  const { data: rules, error } = await db.from("policy_rules").select("*");
+  const { data: rules, error } = await db.from("policy_rules").select("*").eq("merchant_id", merchant.id);
   if (error) throw error;
   return runSemanticPolicyAudit(rules ?? []);
 }
@@ -103,9 +111,10 @@ export async function suggestFixForIssue(
   affectedRuleIds: string[]
 ): Promise<FixSuggestion[]> {
   await requireDashboardUser();
+  const merchant = await getCurrentMerchant();
   if (affectedRuleIds.length === 0) return [];
   const db = createAdminClient();
-  const { data: rules, error } = await db.from("policy_rules").select("*").in("id", affectedRuleIds);
+  const { data: rules, error } = await db.from("policy_rules").select("*").eq("merchant_id", merchant.id).in("id", affectedRuleIds);
   if (error) throw error;
   return suggestPolicyFix(issueTitle, issueExplanation, rules ?? []);
 }
@@ -114,8 +123,9 @@ export async function suggestFixForIssue(
  *  requesting one — "suggest" never auto-applies. */
 export async function applyPolicyFix(ruleId: string, proposedParams: Record<string, unknown>) {
   await requireDashboardUser();
+  const merchant = await getCurrentMerchant();
   const db = createAdminClient();
-  const { error } = await db.from("policy_rules").update({ params: proposedParams as unknown as Json }).eq("id", ruleId);
+  const { error } = await db.from("policy_rules").update({ params: proposedParams as unknown as Json }).eq("id", ruleId).eq("merchant_id", merchant.id);
   if (error) throw error;
   revalidatePath("/dashboard");
 }
@@ -138,6 +148,7 @@ export async function replayStepUpThresholds(): Promise<{
   options: ThresholdOutcome[];
 }> {
   await requireDashboardUser();
+  const merchant = await getCurrentMerchant();
   const db = createAdminClient();
 
   const { data: rules, error: rulesError } = await db
@@ -154,6 +165,7 @@ export async function replayStepUpThresholds(): Promise<{
   const { data: traces, error: tracesError } = await db
     .from("traces")
     .select("action_type, params, decision, agent_id")
+    .eq("merchant_id", merchant.id)
     .eq("mode", "enforce")
     .order("created_at", { ascending: false })
     .limit(300);
@@ -202,6 +214,7 @@ export async function replayStepUpThresholds(): Promise<{
  */
 export async function proposeStepUpThreshold(thresholdAmount: number, currency: string) {
   await requireDashboardUser();
+  const merchant = await getCurrentMerchant();
   if (!Number.isFinite(thresholdAmount) || thresholdAmount <= 0) {
     throw new Error("A step-up threshold has to be a positive amount.");
   }
@@ -209,6 +222,7 @@ export async function proposeStepUpThreshold(thresholdAmount: number, currency: 
 
   const rupees = (thresholdAmount / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 });
   const { error } = await db.from("policy_rules").insert({
+    merchant_id: merchant.id,
     type: "step_up",
     name: `Step-up above ₹${rupees}`,
     params: { threshold_amount: thresholdAmount, currency } as unknown as Json,

@@ -3,13 +3,30 @@ import { getOrCreateSession, endSession } from "@/lib/mcp/sessionStore";
 import { verifySignedRequest } from "@/lib/webBotAuth/verify";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createAlert, insertTrace } from "@/lib/mcp/traceHelpers";
+import { getMerchantBySlug } from "@/lib/merchant";
 
 export const runtime = "nodejs";
 
-async function lookupPublicKey(keyid: string): Promise<string | null> {
-  const db = createAdminClient();
-  const { data } = await db.from("agents").select("public_key").eq("id", keyid).maybeSingle();
-  return data?.public_key ?? null;
+/**
+ * Key lookup, scoped to the merchant whose endpoint was addressed.
+ *
+ * This is what stops an agent registered with merchant A from acting on
+ * merchant B: B's endpoint does not know A's keyid, so verification fails with
+ * `unknown_keyid` before any policy runs. Scoping the lookup rather than
+ * checking the agent's merchant afterwards means there is no window where a
+ * cross-tenant request has been authenticated but not yet rejected.
+ */
+function lookupPublicKeyFor(merchantId: string) {
+  return async (keyid: string): Promise<string | null> => {
+    const db = createAdminClient();
+    const { data } = await db
+      .from("agents")
+      .select("public_key")
+      .eq("id", keyid)
+      .eq("merchant_id", merchantId)
+      .maybeSingle();
+    return data?.public_key ?? null;
+  };
 }
 
 /**
@@ -21,7 +38,13 @@ async function lookupPublicKey(keyid: string): Promise<string | null> {
  * See sessionStore.ts for why sessions (not a fresh transport per request) are
  * required for Streamable HTTP to work at all.
  */
-export async function POST(req: NextRequest) {
+export async function POST(req: NextRequest, ctx: { params: Promise<{ slug: string }> }) {
+  const { slug } = await ctx.params;
+  const merchant = await getMerchantBySlug(createAdminClient(), slug);
+  if (!merchant) {
+    return NextResponse.json({ error: "unknown_merchant", slug }, { status: 404 });
+  }
+
   const bodyText = await req.text();
   const url = new URL(req.url);
 
@@ -35,7 +58,7 @@ export async function POST(req: NextRequest) {
       "signature-input": req.headers.get("signature-input"),
       signature: req.headers.get("signature"),
     },
-    lookupPublicKey,
+    lookupPublicKey: lookupPublicKeyFor(merchant.id),
   });
 
   if (!verification.valid) {
@@ -46,7 +69,15 @@ export async function POST(req: NextRequest) {
       // Not even valid JSON — still a protocol_reject, not a parse error we surface.
     }
 
+    // Attributed to the merchant whose endpoint was addressed, not to any
+    // identity the request claims. The signature failed, so nothing in it can
+    // be trusted -- but the URL is not part of the claim, it is where the
+    // request was actually sent. Attributing by the claimed keyid instead would
+    // let anyone flood a competitor's audit trail by signing garbage with that
+    // competitor's agent id, the same attack that keeps protocol rejects out of
+    // the trust score.
     const trace = await insertTrace({
+      merchantId: merchant.id,
       mode: "enforce",
       actionType: `protocol.${attemptedMethod}`,
       params: { reason: verification.reason, detail: verification.detail ?? null },
@@ -54,7 +85,7 @@ export async function POST(req: NextRequest) {
       decision: "protocol_reject",
       reasoning: `Rejected at the protocol layer before reaching the policy engine: ${verification.reason}.`,
     });
-    await createAlert(trace.id, "high", `Rejected a malformed/tampered MCP request: ${verification.reason}`);
+    await createAlert(merchant.id, trace.id, "high", `Rejected a malformed/tampered MCP request: ${verification.reason}`);
 
     return NextResponse.json(
       { error: "signature_verification_failed", reason: verification.reason },

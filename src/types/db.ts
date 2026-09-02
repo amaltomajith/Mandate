@@ -26,8 +26,27 @@ export type CampaignTargetStatus = "pending" | "offered" | "paid" | "expired" | 
 export interface Database {
   public: {
     Tables: {
+      merchants: {
+        Row: {
+          id: string;
+          clerk_user_id: string | null;
+          name: string;
+          slug: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          clerk_user_id?: string | null;
+          name: string;
+          slug: string;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["merchants"]["Insert"]>;
+        Relationships: [];
+      };
       customers: {
         Row: {
+          merchant_id: string;
           id: string;
           name: string;
           email: string | null;
@@ -35,6 +54,7 @@ export interface Database {
           created_at: string;
         };
         Insert: {
+          merchant_id: string;
           id?: string;
           name: string;
           email?: string | null;
@@ -46,6 +66,7 @@ export interface Database {
       };
       agents: {
         Row: {
+          merchant_id: string;
           id: string;
           name: string;
           description: string | null;
@@ -57,6 +78,7 @@ export interface Database {
           created_at: string;
         };
         Insert: {
+          merchant_id: string;
           id?: string;
           name: string;
           description?: string | null;
@@ -72,6 +94,7 @@ export interface Database {
       };
       mandates: {
         Row: {
+          merchant_id: string;
           id: string;
           agent_id: string | null;
           customer_id: string | null;
@@ -82,6 +105,7 @@ export interface Database {
           created_at: string;
         };
         Insert: {
+          merchant_id: string;
           id?: string;
           agent_id?: string | null;
           customer_id?: string | null;
@@ -96,6 +120,7 @@ export interface Database {
       };
       policy_rules: {
         Row: {
+          merchant_id: string;
           id: string;
           type: PolicyRuleType;
           name: string;
@@ -108,6 +133,7 @@ export interface Database {
           created_by: string | null;
         };
         Insert: {
+          merchant_id: string;
           id?: string;
           type: PolicyRuleType;
           name: string;
@@ -124,6 +150,7 @@ export interface Database {
       };
       traces: {
         Row: {
+          merchant_id: string;
           id: string;
           parent_trace_id: string | null;
           mode: TraceMode;
@@ -137,6 +164,7 @@ export interface Database {
           created_at: string;
         };
         Insert: {
+          merchant_id: string;
           id?: string;
           parent_trace_id?: string | null;
           mode: TraceMode;
@@ -154,6 +182,7 @@ export interface Database {
       };
       escalations: {
         Row: {
+          merchant_id: string;
           id: string;
           trace_id: string;
           status: EscalationStatus;
@@ -162,6 +191,7 @@ export interface Database {
           created_at: string;
         };
         Insert: {
+          merchant_id: string;
           id?: string;
           trace_id: string;
           status?: EscalationStatus;
@@ -174,6 +204,7 @@ export interface Database {
       };
       alerts: {
         Row: {
+          merchant_id: string;
           id: string;
           trace_id: string | null;
           severity: AlertSeverity;
@@ -181,6 +212,7 @@ export interface Database {
           created_at: string;
         };
         Insert: {
+          merchant_id: string;
           id?: string;
           trace_id?: string | null;
           severity: AlertSeverity;
@@ -192,6 +224,7 @@ export interface Database {
       };
       campaigns: {
         Row: {
+          merchant_id: string;
           id: string;
           name: string;
           goal: string;
@@ -202,6 +235,7 @@ export interface Database {
           created_at: string;
         };
         Insert: {
+          merchant_id: string;
           id?: string;
           name: string;
           goal: string;
@@ -216,6 +250,7 @@ export interface Database {
       };
       campaign_targets: {
         Row: {
+          merchant_id: string;
           id: string;
           campaign_id: string;
           customer_id: string | null;
@@ -228,6 +263,7 @@ export interface Database {
           created_at: string;
         };
         Insert: {
+          merchant_id: string;
           id?: string;
           campaign_id: string;
           customer_id?: string | null;
@@ -244,6 +280,7 @@ export interface Database {
       };
       products: {
         Row: {
+          merchant_id: string;
           id: string;
           sku: string;
           name: string;
@@ -253,6 +290,7 @@ export interface Database {
           created_at: string;
         };
         Insert: {
+          merchant_id: string;
           id?: string;
           sku: string;
           name: string;
@@ -278,5 +316,6 @@ export type Alert = Database["public"]["Tables"]["alerts"]["Row"];
 export type Customer = Database["public"]["Tables"]["customers"]["Row"];
 export type Mandate = Database["public"]["Tables"]["mandates"]["Row"];
 export type Product = Database["public"]["Tables"]["products"]["Row"];
+export type Merchant = Database["public"]["Tables"]["merchants"]["Row"];
 export type Campaign = Database["public"]["Tables"]["campaigns"]["Row"];
 export type CampaignTarget = Database["public"]["Tables"]["campaign_targets"]["Row"];

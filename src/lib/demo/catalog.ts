@@ -66,22 +66,29 @@ export const SEED_PRODUCTS: CatalogItem[] = [
   },
 ];
 
-export async function applySeedProducts(db: SupabaseClient): Promise<{ created: number }> {
+export async function applySeedProducts(
+  db: SupabaseClient,
+  merchantId: string
+): Promise<{ created: number }> {
   let created = 0;
   for (const p of SEED_PRODUCTS) {
-    const { data: existing } = await db.from("products").select("id").eq("sku", p.sku).maybeSingle();
+    const { data: existing } = await db.from("products").select("id").eq("merchant_id", merchantId).eq("sku", p.sku).maybeSingle();
     if (existing) continue;
     const { error } = await db
       .from("products")
-      .insert({ sku: p.sku, name: p.name, description: p.description, price_paise: p.priceInPaise, category: p.category });
+      .insert({ merchant_id: merchantId, sku: p.sku, name: p.name, description: p.description, price_paise: p.priceInPaise, category: p.category });
     if (error) throw error;
     created++;
   }
   return { created };
 }
 
-export async function fetchCatalog(db: SupabaseClient): Promise<CatalogItem[]> {
-  const { data, error } = await db.from("products").select("sku, name, description, price_paise, category").order("name");
+export async function fetchCatalog(db: SupabaseClient, merchantId: string): Promise<CatalogItem[]> {
+  const { data, error } = await db
+    .from("products")
+    .select("sku, name, description, price_paise, category")
+    .eq("merchant_id", merchantId)
+    .order("name");
   if (error) throw error;
   return (data ?? []).map((p) => ({
     sku: p.sku,

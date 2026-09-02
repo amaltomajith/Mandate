@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireDashboardUser } from "./authGuard";
+import { getCurrentMerchant } from "@/lib/merchant";
 import { fetchCatalog, type CatalogItem } from "@/lib/demo/catalog";
 import { MandateClient } from "@/lib/demo/mandateClient";
 import { createAdminClient, ensureAgentIdentity, moneyLabel } from "@/lib/demo/shared";
@@ -53,13 +54,14 @@ const SIM_AGENT = {
 
 export async function buyFromRequest(request: string): Promise<CheckoutResult> {
   await requireDashboardUser();
+  const merchant = await getCurrentMerchant();
   const trimmed = request.trim();
   if (!trimmed) throw new Error("Say what you'd like to buy.");
 
   const db = createAdminClient();
   const steps: CheckoutStep[] = [];
 
-  const catalog = await fetchCatalog(db);
+  const catalog = await fetchCatalog(db, merchant.id);
   const intent = await interpretRequest(catalog, trimmed);
 
   if (!isChoice(intent)) {
@@ -98,9 +100,9 @@ export async function buyFromRequest(request: string): Promise<CheckoutResult> {
     };
   }
 
-  const { id: agentId, secretKeyBase64 } = await ensureAgentIdentity(db, SIM_AGENT);
+  const { id: agentId, secretKeyBase64 } = await ensureAgentIdentity(db, merchant.id, SIM_AGENT);
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-  const client = new MandateClient(baseUrl, agentId, secretKeyBase64);
+  const client = new MandateClient(baseUrl, merchant.slug, agentId, secretKeyBase64);
   await client.initialize("mandate-conversational-checkout");
 
   const result = await client.callTool<ActionResult>("enforce_action", {

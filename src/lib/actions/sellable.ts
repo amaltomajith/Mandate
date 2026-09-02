@@ -1,6 +1,7 @@
 "use server";
 
 import { requireDashboardUser } from "./authGuard";
+import { getCurrentMerchant } from "@/lib/merchant";
 import { fetchCatalog } from "@/lib/demo/catalog";
 import { MandateClient } from "@/lib/demo/mandateClient";
 import { createAdminClient, ensureAgentIdentity } from "@/lib/demo/shared";
@@ -52,10 +53,11 @@ interface ActionResult {
 
 export async function getSellableCatalog(): Promise<SellableSnapshot> {
   await requireDashboardUser();
+  const merchant = await getCurrentMerchant();
   const db = createAdminClient();
 
-  const catalog = await fetchCatalog(db);
-  const { id: agentId, secretKeyBase64 } = await ensureAgentIdentity(db, {
+  const catalog = await fetchCatalog(db, merchant.id);
+  const { id: agentId, secretKeyBase64 } = await ensureAgentIdentity(db, merchant.id, {
     envIdVar: "SIM_AGENT_ID",
     envSecretVar: "SIM_AGENT_SECRET_KEY",
     name: "Checkout Agent",
@@ -64,6 +66,7 @@ export async function getSellableCatalog(): Promise<SellableSnapshot> {
 
   const client = new MandateClient(
     process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+    merchant.slug,
     agentId,
     secretKeyBase64
   );

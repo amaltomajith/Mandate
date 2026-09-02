@@ -6,6 +6,8 @@ import { ActionInput, DraftPolicyInput, ExplainInput } from "./schemas";
 import { runActionEvaluation } from "./tools/actionEvaluator";
 import { explainTrace } from "./tools/explain";
 import { draftPolicy } from "./tools/draftPolicy";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { getMerchantIdForAgent } from "@/lib/merchant";
 
 type ToolExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
 
@@ -17,6 +19,15 @@ function requireAgentId(extra: ToolExtra): string {
     throw new Error("No verified agent identity on this request.");
   }
   return agentId;
+}
+
+/** The tenant for a tool call, derived from the agent the signature proved.
+ *  `explain` and `draft_policy` both read and write merchant-scoped data, so
+ *  they need it for the same reason the action evaluator does — and taking it
+ *  from the verified identity rather than the tool input means no tool has a
+ *  parameter an agent could use to reach into another merchant. */
+async function merchantOf(extra: ToolExtra): Promise<string> {
+  return getMerchantIdForAgent(createAdminClient(), requireAgentId(extra));
 }
 
 function toolResult(data: unknown) {
@@ -56,7 +67,7 @@ export function createMandateServer(): McpServer {
       description: "Returns a plain-language explanation of one past decision, grounded in its trace and the policy rule that fired (if any).",
       inputSchema: ExplainInput,
     },
-    async (input) => toolResult(await explainTrace(input.traceId))
+    async (input, extra) => toolResult(await explainTrace(await merchantOf(extra), input.traceId))
   );
 
   server.registerTool(
@@ -67,7 +78,7 @@ export function createMandateServer(): McpServer {
         "Turns a natural-language policy request or regulatory notice into a structured candidate rule, checks it against existing active rules, and backtests it against recent decisions. Always lands as pending_review — a human must approve it in the dashboard before it takes effect.",
       inputSchema: DraftPolicyInput,
     },
-    async (input) => toolResult(await draftPolicy(input.text, input.source, input.sourceLabel))
+    async (input, extra) => toolResult(await draftPolicy(await merchantOf(extra), input.text, input.source, input.sourceLabel))
   );
 
   return server;
