@@ -31,6 +31,19 @@ export function RevenueImpactPanel({
   const impact = useMemo(() => computeRevenueImpact(traces, escalations), [traces, escalations]);
   const executed = totalExecuted(impact);
 
+  // Largest first, and named as a merchant would name them rather than by
+  // action type. "payment_link.create" is our vocabulary, not theirs.
+  const ACTION_LABELS: Record<string, string> = {
+    "order.create": "orders",
+    "payment_link.create": "campaign links",
+    "refund.create": "refunds",
+    "subscription.create": "subscriptions",
+  };
+  const settledSplit = Object.entries(impact.byActionType)
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([type, value]) => [ACTION_LABELS[type] ?? type, value] as [string, number]);
+
   const decided = executed + impact.refused + impact.deniedAtGate;
   const share = (value: number) => (decided > 0 ? (value / decided) * 100 : 0);
 
@@ -43,11 +56,22 @@ export function RevenueImpactPanel({
             across the last {traces.length} actions
           </span>
         </div>
-        <div className="flex items-baseline gap-2">
-          <span className="text-[22px] font-semibold tabular-nums">{formatMoney(executed, "INR")}</span>
-          <span className="text-[11px]" style={{ color: "var(--muted)" }}>
-            moved
-          </span>
+        <div className="text-right">
+          <div className="flex items-baseline justify-end gap-2">
+            <span className="text-[22px] font-semibold tabular-nums">{formatMoney(executed, "INR")}</span>
+            <span className="text-[11px]" style={{ color: "var(--muted)" }}>
+              total money moved
+            </span>
+          </div>
+          {/* The scope, in the label rather than a tooltip. This figure counts
+              every action type; the Buy tab counts orders alone. Two numbers
+              called "moved" that disagree is a credibility problem for whoever
+              spots it first, so the arithmetic between them is shown. */}
+          <p className="mt-0.5 text-[10.5px] tabular-nums" style={{ color: "var(--muted-2)" }}>
+            {settledSplit.length > 0
+              ? settledSplit.map(([label, value]) => `${label} ${formatMoney(value, "INR")}`).join("  ·  ")
+              : "nothing settled yet"}
+          </p>
         </div>
       </div>
 

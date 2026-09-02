@@ -37,7 +37,11 @@ export interface SellableItem {
   description: string;
   category: string;
   priceInPaise: number;
-  decision: "allow" | "escalate" | "block";
+  /** `unknown` when this one probe failed. One bad answer becomes one honest
+   *  row rather than an error where five good rows should be — a merchant
+   *  looking at five verdicts and one gap is better informed than one looking
+   *  at a red box. */
+  decision: "allow" | "escalate" | "block" | "unknown";
   reasoning: string;
 }
 
@@ -72,27 +76,43 @@ export async function getSellableCatalog(): Promise<SellableSnapshot> {
   );
   await client.initialize("mandate-sellable-check");
 
-  const items: SellableItem[] = [];
-
-  for (const item of catalog) {
-    const probe = await client.callTool<ActionResult>("simulate_action", {
-      actionType: "order.create",
-      amount: item.priceInPaise,
-      currency: "INR",
-      category: item.category,
-      params: { receipt: `sellable-${Date.now()}-${item.sku}` },
-    });
-
-    items.push({
-      sku: item.sku,
-      name: item.name,
-      description: item.description,
-      category: item.category,
-      priceInPaise: item.priceInPaise,
-      decision: probe.decision,
-      reasoning: probe.reasoning,
-    });
-  }
+  // Probed in parallel. Verified before changing it: both the velocity count
+  // and the per-day cap sum in getAggregates filter on `mode = 'enforce'`, so
+  // simulate-mode probes are invisible to them and cannot race each other into
+  // spending a rate budget. Sequentially this took six round trips end to end,
+  // which is what left the panel sitting on "asking the engine about each
+  // item" long enough to read as hung.
+  //
+  // Per-item try/catch for the same reason the loop was the problem: one slow
+  // or failed probe used to reject the whole action, so a single bad answer
+  // replaced five good ones.
+  const items: SellableItem[] = await Promise.all(
+    catalog.map(async (item): Promise<SellableItem> => {
+      const base = {
+        sku: item.sku,
+        name: item.name,
+        description: item.description,
+        category: item.category,
+        priceInPaise: item.priceInPaise,
+      };
+      try {
+        const probe = await client.callTool<ActionResult>("simulate_action", {
+          actionType: "order.create",
+          amount: item.priceInPaise,
+          currency: "INR",
+          category: item.category,
+          params: { receipt: `sellable-${Date.now()}-${item.sku}` },
+        });
+        return { ...base, decision: probe.decision, reasoning: probe.reasoning };
+      } catch (err) {
+        return {
+          ...base,
+          decision: "unknown",
+          reasoning: `Couldn't check this one: ${err instanceof Error ? err.message : "the engine didn't answer"}`,
+        };
+      }
+    })
+  );
 
   return {
     items: items.sort((a, b) => a.priceInPaise - b.priceInPaise),

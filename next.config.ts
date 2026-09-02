@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Next's own dev-only indicator, bottom-left. It sits on every page whether
+  // or not anything is rendering, and on a projector beside a live dashboard it
+  // reads as a hung app rather than as a framework badge. It never ships to
+  // production; this only stops it during a demo.
+  devIndicators: false,
+
   async rewrites() {
     return [
       // Web Bot Auth's directory lives at a fixed well-known path, which is

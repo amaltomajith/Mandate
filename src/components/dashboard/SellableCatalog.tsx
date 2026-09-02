@@ -9,6 +9,7 @@ const DECISION_META: Record<SellableItem["decision"], { label: string; color: st
   allow: { label: "Sells", color: "var(--decision-allow)" },
   escalate: { label: "Needs you", color: "var(--decision-escalate)" },
   block: { label: "Blocked", color: "var(--decision-block)" },
+  unknown: { label: "Unknown", color: "var(--muted-2)" },
 };
 
 /**
@@ -59,6 +60,7 @@ export function SellableCatalog() {
         sells: snapshot.items.filter((i) => i.decision === "allow").length,
         needsYou: snapshot.items.filter((i) => i.decision === "escalate").length,
         blocked: snapshot.items.filter((i) => i.decision === "block").length,
+        unknown: snapshot.items.filter((i) => i.decision === "unknown").length,
       }
     : null;
   const total = snapshot?.items.length ?? 0;
@@ -109,6 +111,15 @@ export function SellableCatalog() {
                 need{counts.needsYou === 1 ? "s" : ""} your approval first.
               </>
             )}
+            {counts.unknown > 0 && (
+              <>
+                {" "}
+                <span className="font-semibold" style={{ color: "var(--muted-2)" }}>
+                  {counts.unknown}
+                </span>{" "}
+                couldn&apos;t be checked just now.
+              </>
+            )}
             {counts.blocked > 0 && (
               <>
                 {" "}
@@ -124,6 +135,7 @@ export function SellableCatalog() {
             {counts.sells > 0 && <div style={{ width: `${pct(counts.sells)}%`, background: "var(--decision-allow)" }} />}
             {counts.needsYou > 0 && <div style={{ width: `${pct(counts.needsYou)}%`, background: "var(--decision-escalate)" }} />}
             {counts.blocked > 0 && <div style={{ width: `${pct(counts.blocked)}%`, background: "var(--decision-block)" }} />}
+            {counts.unknown > 0 && <div style={{ width: `${pct(counts.unknown)}%`, background: "var(--muted-2)" }} />}
           </div>
 
           <p className="mt-1.5 text-[10px]" style={{ color: "var(--muted-2)" }}>

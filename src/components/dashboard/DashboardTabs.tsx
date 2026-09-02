@@ -160,7 +160,7 @@ export function DashboardTabs(props: Props) {
 
       {tab === "agents" && <AgentsPanel agents={agents} rules={rules} mandates={mandates} />}
 
-      {tab === "transactions" && <TransactionsView traces={traces} agents={agents} rules={rules} onJumpToRule={jumpToRule} />}
+      {tab === "transactions" && <TransactionsView traces={traces} agents={agents} customers={customers} rules={rules} onJumpToRule={jumpToRule} />}
 
       {tab === "policies" && (
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">

@@ -32,6 +32,22 @@ export interface RevenueImpact {
    *  executed figures above, never added on top of them. */
   upsell: number;
 
+  /**
+   * Settled money split by what kind of action produced it.
+   *
+   * Exists because two panels were reporting different totals under the same
+   * word. This function counts EVERY enforce-mode action -- orders, campaign
+   * payment links, refunds -- while the Buy tab's order history deliberately
+   * counts only `order.create`. Both were right; neither said which set it
+   * meant, and two figures labelled "moved" that disagree is a credibility
+   * problem whoever notices it first.
+   *
+   * Surfaced rather than resolved: collapsing them would mean either hiding
+   * campaign revenue from the headline or claiming a payment link is an order.
+   * The split makes the relationship arithmetic anyone can follow.
+   */
+  byActionType: Record<string, number>;
+
   counts: {
     clearedAutomatically: number;
     approvedThroughGate: number;
@@ -57,6 +73,7 @@ export function computeRevenueImpact(traces: Trace[], escalations: Escalation[])
     deniedAtGate: 0,
     refused: 0,
     upsell: 0,
+    byActionType: {},
     counts: {
       clearedAutomatically: 0,
       approvedThroughGate: 0,
@@ -72,6 +89,17 @@ export function computeRevenueImpact(traces: Trace[], escalations: Escalation[])
     // protocol_reject never carried a verified amount to begin with.
     if (trace.mode !== "enforce") continue;
     const amount = amountOf(trace);
+
+    // Settled means money reached Razorpay: allowed outright, or escalated and
+    // then approved by a human. Tracked alongside the buckets rather than
+    // derived from them, because the buckets are keyed by how a decision was
+    // reached and this is keyed by what was bought.
+    const settled =
+      trace.decision === "allow" ||
+      (trace.decision === "escalate" && escalationStatus.get(trace.id) === "approved");
+    if (settled) {
+      impact.byActionType[trace.action_type] = (impact.byActionType[trace.action_type] ?? 0) + amount;
+    }
 
     if (trace.decision === "allow") {
       impact.clearedAutomatically += amount;
@@ -111,8 +139,10 @@ export function computeRevenueImpact(traces: Trace[], escalations: Escalation[])
 }
 
 /** Money that actually reached Razorpay: cleared outright plus approved at the
- *  gate. Kept as a function rather than a stored field so it can never drift
- *  out of step with its two components. */
+ *  gate, across EVERY action type. Kept as a function rather than a stored
+ *  field so it can never drift out of step with its two components.
+ *
+ *  Wider than the Buy tab's order revenue on purpose — see `byActionType`. */
 export function totalExecuted(impact: RevenueImpact): number {
   return impact.clearedAutomatically + impact.approvedThroughGate;
 }

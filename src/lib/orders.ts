@@ -61,6 +61,18 @@ export interface BuyingSummary {
    *  number a merchant wants near 1: it is how much of their shop runs
    *  without them. */
   unaidedShare: number;
+  /**
+   * The same share weighted by money rather than by order count, and it is
+   * usually the more honest of the two.
+   *
+   * They diverge whenever the step-up threshold sits low against the cap: most
+   * orders are small and clear, most VALUE is in the few large ones that do
+   * not. Reporting only the count answers "how often do I get involved" while
+   * looking like an answer to "how much of my money runs without me". This is
+   * exactly the trade the threshold tuner exists to make visible, so stating
+   * the gap is stronger than leaving it to be found.
+   */
+  unaidedValueShare: number;
   /** Orders still sitting in the escalation queue — money neither earned nor
    *  lost, and the one figure here the merchant can move today. */
   awaitingCount: number;
@@ -165,7 +177,9 @@ export function deriveOrders(
 export function summarizeOrders(orders: Order[]): BuyingSummary {
   const placed = orders.filter((o) => o.outcome === "bought" || o.outcome === "approved");
   const revenuePaise = placed.reduce((sum, o) => sum + o.amountPaise, 0);
-  const unaided = placed.filter((o) => o.outcome === "bought").length;
+  const unaidedOrders = placed.filter((o) => o.outcome === "bought");
+  const unaided = unaidedOrders.length;
+  const unaidedValuePaise = unaidedOrders.reduce((sum, o) => sum + o.amountPaise, 0);
   const awaiting = orders.filter((o) => o.outcome === "awaiting");
 
   const upsells = placed.filter((o) => o.isUpsell);
@@ -185,6 +199,7 @@ export function summarizeOrders(orders: Order[]): BuyingSummary {
     revenuePaise,
     averageOrderPaise: placed.length > 0 ? Math.round(revenuePaise / placed.length) : 0,
     unaidedShare: placed.length > 0 ? unaided / placed.length : 0,
+    unaidedValueShare: revenuePaise > 0 ? unaidedValuePaise / revenuePaise : 0,
     awaitingCount: awaiting.length,
     awaitingPaise: awaiting.reduce((sum, o) => sum + o.amountPaise, 0),
     upsellOrders: upsells.length,

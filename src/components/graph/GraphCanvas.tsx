@@ -1,12 +1,47 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Grid, Html, Line, OrbitControls, Stars } from "@react-three/drei";
 import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import type * as THREE from "three";
+import { Vector3 } from "three";
 import type { Agent, Customer, Escalation, Mandate, PolicyRule, Trace } from "@/types/db";
 import { computeLayout, type Vec3 } from "./layout";
+
+/**
+ * Frames the whole cluster on first load.
+ *
+ * The camera sat at a fixed position chosen when the graph held a handful of
+ * nodes. As history accumulated the cluster grew past it — bottom clipped, two
+ * thirds of the viewport empty — which reads as a broken render rather than as
+ * a camera that needs moving.
+ *
+ * Runs once, not on every layout change: re-framing while someone is orbiting
+ * would yank the view out from under them, and the whole point of the graph is
+ * that it can be inspected by hand.
+ */
+function FitToNodes({ positions }: { positions: Vec3[] }) {
+  const { camera } = useThree();
+  const fitted = useRef(false);
+
+  useEffect(() => {
+    if (fitted.current || positions.length === 0) return;
+    fitted.current = true;
+
+    let max = 0;
+    for (const [x, y, z] of positions) max = Math.max(max, Math.hypot(x, y, z));
+    // A little past the outermost node, and never closer than the old default,
+    // so a nearly-empty graph does not end up inside the cluster.
+    const distance = Math.max(9, max * 1.9 + 3);
+    const direction = new Vector3(1, 0.78, 1).normalize();
+    camera.position.copy(direction.multiplyScalar(distance));
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
+  }, [positions, camera]);
+
+  return null;
+}
 import { DECISION_COLORS, ENTITY_COLORS } from "./colors";
 import { actionTypeLabel, formatMoney } from "@/lib/format";
 
@@ -491,6 +526,7 @@ function Scene({
       ))}
 
       <HoverPanel info={hover} />
+      <FitToNodes positions={layout.traces.map((t) => t.position)} />
       <OrbitControls makeDefault enableDamping dampingFactor={0.08} minDistance={3} maxDistance={30} />
 
       <EffectComposer multisampling={0}>

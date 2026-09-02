@@ -103,14 +103,17 @@ export default async function DashboardPage() {
   );
 }
 
+/** Pluralises by count. Done here rather than at each call site so a new chip
+ *  cannot reintroduce "1 agents" by forgetting. */
 function StatChip({ label, value, tone }: { label: string; value: number; tone?: string }) {
+  const shown = value === 1 && label.endsWith("s") ? label.slice(0, -1) : label;
   return (
     <div className="flex items-baseline gap-1.5">
       <span className="text-sm font-semibold tabular-nums" style={{ color: tone ?? "var(--foreground)" }}>
         {value}
       </span>
       <span className="text-[11px]" style={{ color: "var(--muted-2)" }}>
-        {label}
+        {shown}
       </span>
     </div>
   );

@@ -1,8 +1,22 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
-import type { Agent, Decision, PolicyRule, Trace } from "@/types/db";
+import type { Agent, Decision, PolicyRule, Trace , Customer } from "@/types/db";
 import { actionTypeLabel, formatMoney } from "@/lib/format";
+
+/**
+ * Makes a default-allow read as a decision rather than as nothing happening.
+ *
+ * "No policy rule matched — allowed by default" is accurate and sounds like an
+ * absence. Every active rule WAS evaluated and none of them objected, which is
+ * a different claim and the one this audit trail is meant to support.
+ */
+function explain(reasoning: string | null): string {
+  if (!reasoning) return "—";
+  return reasoning === "No policy rule matched — allowed by default."
+    ? "Checked against every active rule — none applied, so it cleared."
+    : reasoning;
+}
 import { decisionColor, relativeTime } from "./ui";
 
 const DECISION_LABEL: Record<Decision, string> = {
@@ -36,11 +50,13 @@ const FILTERS: { key: "all" | Decision; label: string }[] = [
 export function TransactionsView({
   traces,
   agents,
+  customers,
   rules,
   onJumpToRule,
 }: {
   traces: Trace[];
   agents: Agent[];
+  customers: Customer[];
   rules: PolicyRule[];
   onJumpToRule?: (ruleId: string) => void;
 }) {
@@ -49,6 +65,7 @@ export function TransactionsView({
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const agentNameById = useMemo(() => new Map(agents.map((a) => [a.id, a.name])), [agents]);
+  const customerNameById = useMemo(() => new Map(customers.map((c) => [c.id, c.name])), [customers]);
   const ruleById = useMemo(() => new Map(rules.map((r) => [r.id, r])), [rules]);
 
   const filtered = useMemo(() => {
@@ -116,7 +133,18 @@ export function TransactionsView({
             </thead>
             <tbody>
               {filtered.map((t) => {
-                const p = t.params as { amount?: number; currency?: string } | null;
+                const p = t.params as {
+                  amount?: number;
+                  currency?: string;
+                  customerId?: string | null;
+                  notes?: { item?: string; sku?: string };
+                } | null;
+                // The product and the customer are already on the trace. The
+                // audit trail is the artifact backing "every money action
+                // explainable", and a column of identical "New purchase order"
+                // rows explains nothing that the amount did not already say.
+                const product = p?.notes?.item ?? null;
+                const who = p?.customerId ? customerNameById.get(p.customerId) ?? null : null;
                 const color = decisionColor(t.decision);
                 const expanded = expandedId === t.id;
                 const rule = t.rule_fired_id ? ruleById.get(t.rule_fired_id) : null;
@@ -137,13 +165,19 @@ export function TransactionsView({
                           {DECISION_LABEL[t.decision]}
                         </span>
                       </td>
-                      <td className="py-2 pr-3">{actionTypeLabel(t.action_type)}</td>
+                      <td className="py-2 pr-3">
+                        <span className="block truncate">{product ?? actionTypeLabel(t.action_type)}</span>
+                        <span className="block truncate text-[10px]" style={{ color: "var(--muted-2)" }}>
+                          {product ? actionTypeLabel(t.action_type) : "—"}
+                          {who ? ` · ${who}` : ""}
+                        </span>
+                      </td>
                       <td className="py-2 pr-3 tabular-nums">{p?.amount && p?.currency ? formatMoney(p.amount, p.currency) : "—"}</td>
                       <td className="py-2 pr-3" style={{ color: "var(--muted)" }}>
                         {t.agent_id ? agentNameById.get(t.agent_id) ?? "Unknown agent" : "—"}
                       </td>
                       <td className="max-w-xs truncate py-2 pr-3" style={{ color: "var(--muted)" }} title={t.reasoning ?? ""}>
-                        {t.reasoning ?? "—"}
+                        {explain(t.reasoning)}
                       </td>
                       <td className="py-2 whitespace-nowrap" style={{ color: "var(--muted-2)" }}>
                         {relativeTime(t.created_at)}
@@ -153,7 +187,7 @@ export function TransactionsView({
                       <tr className="border-t" style={{ borderColor: "var(--panel-border)", background: "var(--panel-2)" }}>
                         <td colSpan={6} className="px-3 py-3">
                           <p className="text-[12px] leading-relaxed" style={{ color: "var(--foreground)" }}>
-                            {t.reasoning ?? "No reasoning recorded for this trace."}
+                            {explain(t.reasoning) ?? "No reasoning recorded for this trace."}
                           </p>
                           {rule ? (
                             <button

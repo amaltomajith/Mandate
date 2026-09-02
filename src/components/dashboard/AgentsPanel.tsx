@@ -89,8 +89,8 @@ export function AgentsPanel({ agents, rules, mandates }: Props) {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
-      <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-5">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Panel title="Agents" icon={<Icons.Shield />} accent="var(--entity-agent)">
           {error && (
             <p
@@ -127,6 +127,10 @@ export function AgentsPanel({ agents, rules, mandates }: Props) {
         <RegisterAgent busy={isPending} onRun={run} />
       </div>
 
+      {/* Full width, not a sidebar rail. This is the most distinctive artifact
+          in the product -- the thing that says what it takes to talk to this
+          merchant -- and it was set at ten pixels in a 420px column, which is
+          unreadable across a room. */}
       <CompatibilityContract spec={spec} />
     </div>
   );
@@ -151,6 +155,11 @@ function AgentRow({
   const paused = agent.status === "paused";
   const components = agent.trust_components as unknown as TrustComponents | null;
   const restricted = trustFloor !== null && agent.trust_score < trustFloor;
+  // Computed server-side (Date.now() during render is impure). Only meaningful
+  // for an agent that was asked to work -- a paused one being quiet is it
+  // complying, not it stuck.
+  const stale = activity?.stale === true;
+
   const liveMandates = mandates.filter((m) => m.status === "active");
   const heldMandates = mandates.filter((m) => m.status === "paused");
 
@@ -183,11 +192,16 @@ function AgentRow({
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px]" style={{ color: "var(--muted-2)" }}>
+        {/* Cooperative status is what the merchant ASKED FOR; liveness is
+            whether the agent is doing it. Showing only the first made
+            "working · last seen 13m ago" read as a contradiction, when in fact
+            it was two different facts sitting next to each other. */}
         <span style={{ color: paused ? "var(--decision-escalate)" : "var(--decision-allow)" }}>
-          {paused ? "asked to pause" : "working"}
+          {paused ? "asked to pause" : "asked to work"}
         </span>
         <span>pace {agent.pace_ms === 0 ? "unlimited" : `${Math.round(agent.pace_ms / 1000)}s`}</span>
-        <span>
+        <span style={{ color: stale ? "var(--decision-escalate)" : undefined }}>
+          {stale && !paused ? "not acting · " : ""}
           last seen {activity?.lastSeen ? relativeTime(activity.lastSeen) : "never"}
         </span>
         {restricted && <span style={{ color: "var(--decision-block)" }}>below the trust floor</span>}
@@ -488,23 +502,23 @@ function CompatibilityContract({ spec }: { spec: AgentSpec | null }) {
             <span className="w-16 shrink-0 text-[9.5px] uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
               {k.replace(/([A-Z])/g, " $1")}
             </span>
-            <code className="min-w-0 flex-1 break-all text-[10px]" style={{ color: "var(--muted)" }}>
+            <code className="min-w-0 flex-1 break-all text-[11px]" style={{ color: "var(--muted)" }}>
               {v}
             </code>
           </div>
         ))}
       </div>
 
-      <div className="mt-3 space-y-2">
+      <div className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2.5 md:grid-cols-2">
         {spec.rules.map((r, i) => (
           <div key={r.id}>
-            <p className="text-[11px] font-medium leading-snug">
+            <p className="text-[12px] font-medium leading-snug">
               <span className="tabular-nums" style={{ color: "var(--muted-2)" }}>
                 {i + 1}.{" "}
               </span>
               {r.must}
             </p>
-            <p className="mt-0.5 pl-4 text-[10px] leading-snug" style={{ color: "var(--muted-2)" }}>
+            <p className="mt-0.5 pl-4 text-[11px] leading-snug" style={{ color: "var(--muted-2)" }}>
               {r.why}
             </p>
           </div>

@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { pauseMandate, reactivateMandate, revokeMandate } from "@/lib/actions/mandates";
 import type { Agent, Customer, Mandate } from "@/types/db";
-import { DangerButton, EmptyState, GhostButton, Icons, Panel, Spinner, SuccessButton, relativeTime } from "./ui";
+import { EmptyState, GhostButton, Icons, Panel, Spinner, SuccessButton, relativeTime } from "./ui";
 
 const TYPE_LABEL: Record<Mandate["type"], string> = {
   upi_autopay: "UPI Autopay",
@@ -54,6 +54,22 @@ export function MandatesPanel({ mandates, agents, customers }: { mandates: Manda
     act(id, action, fn);
   }
 
+  /**
+   * The confirm for the one action that cannot be undone.
+   *
+   * Names the agent and the customer, because "revoke this mandate?" asks
+   * someone to confirm a thing they would have to go and look up to check --
+   * and a confirm that cannot be checked is a speed bump, not a safeguard.
+   */
+  function revokeMessage(agentName: string, customerName: string): string {
+    return (
+      `Revoke ${agentName}'s mandate for ${customerName}?\n\n` +
+      `It will be blocked from acting for this customer immediately, and this cannot be undone. ` +
+      `A new mandate would have to be established to resume.\n\n` +
+      `To stop it temporarily instead, use Pause.`
+    );
+  }
+
   return (
     <Panel title="Mandates" icon={<Icons.Shield />} accent="var(--entity-mandate)">
       {error && (
@@ -70,13 +86,17 @@ export function MandatesPanel({ mandates, agents, customers }: { mandates: Manda
             const rowBusy = isPending && busy?.id === m.id;
             const running = (action: string) => rowBusy && busy?.action === action;
             const status = STATUS_STYLE[m.status];
+            // Bound once per row: the revoke confirm names both, and inlining
+            // them twice more would let the label and the confirm drift apart.
+            const agentName = (m.agent_id ? agentNameById.get(m.agent_id) : null) ?? "Unknown agent";
+            const customerName = (m.customer_id ? customerNameById.get(m.customer_id) : null) ?? "Unknown customer";
             return (
               <div key={m.id} className="rounded-xl border p-3.5" style={{ borderColor: "var(--panel-border)", background: "var(--panel-2)" }}>
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium">
-                    {m.agent_id ? agentNameById.get(m.agent_id) ?? "Unknown agent" : "Unknown agent"}
+                    {agentName}
                     <span style={{ color: "var(--muted-2)" }}> → </span>
-                    {m.customer_id ? customerNameById.get(m.customer_id) ?? "Unknown customer" : "Unknown customer"}
+                    {customerName}
                   </span>
                   <span
                     className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold tracking-wide"
@@ -95,29 +115,31 @@ export function MandatesPanel({ mandates, agents, customers }: { mandates: Manda
                 <div className="mt-3 flex gap-2">
                   {m.status === "active" && (
                     <>
-                      <GhostButton disabled={rowBusy} onClick={() => act(m.id, "pause", pauseMandate)} className="flex-1">
+                      {/* Weight follows consequence, not severity of colour.
+                          Pause is reversible and is what a merchant wants
+                          almost every time; revoke is terminal, like a real
+                          UPI Autopay revocation. The loud control was the one
+                          you cannot take back. */}
+                      <SuccessButton disabled={rowBusy} onClick={() => act(m.id, "pause", pauseMandate)} className="flex-1">
                         <span className="flex items-center justify-center gap-1.5">
                           {running("pause") && <Spinner />}
                           {running("pause") ? "Pausing…" : "Pause"}
                         </span>
-                      </GhostButton>
-                      <DangerButton
+                      </SuccessButton>
+                      <GhostButton
                         disabled={rowBusy}
                         onClick={() =>
                           actWithConfirm(
                             m.id,
                             "revoke",
-                            "Revoke this mandate? This agent will be blocked from acting on this customer's behalf immediately, and revocation can't be undone — a new mandate would be needed to resume.",
+                            revokeMessage(agentName, customerName),
                             revokeMandate
                           )
                         }
-                        className="flex-1"
+                        className="shrink-0 px-2.5! py-1.5! text-[10px]!"
                       >
-                        <span className="flex items-center justify-center gap-1.5">
-                          {running("revoke") && <Spinner />}
-                          {running("revoke") ? "Revoking…" : "Revoke"}
-                        </span>
-                      </DangerButton>
+                        {running("revoke") ? "Revoking…" : "Revoke"}
+                      </GhostButton>
                     </>
                   )}
                   {m.status === "paused" && (
@@ -128,16 +150,15 @@ export function MandatesPanel({ mandates, agents, customers }: { mandates: Manda
                           {running("resume") ? "Resuming…" : "Resume"}
                         </span>
                       </SuccessButton>
-                      <DangerButton
+                      <GhostButton
                         disabled={rowBusy}
-                        onClick={() => actWithConfirm(m.id, "revoke", "Revoke this mandate permanently?", revokeMandate)}
-                        className="flex-1"
+                        onClick={() =>
+                          actWithConfirm(m.id, "revoke", revokeMessage(agentName, customerName), revokeMandate)
+                        }
+                        className="shrink-0 px-2.5! py-1.5! text-[10px]!"
                       >
-                        <span className="flex items-center justify-center gap-1.5">
-                          {running("revoke") && <Spinner />}
-                          {running("revoke") ? "Revoking…" : "Revoke"}
-                        </span>
-                      </DangerButton>
+                        {running("revoke") ? "Revoking…" : "Revoke"}
+                      </GhostButton>
                     </>
                   )}
                   {(m.status === "revoked" || m.status === "expired") && (

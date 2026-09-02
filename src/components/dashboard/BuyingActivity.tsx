@@ -76,7 +76,10 @@ export function BuyingActivity({ traces, escalations, products, customers }: Pro
         <>
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
             <Stat label="Sold" value={String(summary.ordersPlaced)} sub="orders completed" />
-            <Stat label="Revenue" value={formatMoney(summary.revenuePaise, "INR")} sub="money that moved" />
+            {/* "Order revenue", not "money moved". The Overview headline counts
+                every action type including campaign payment links; this counts
+                orders. Both were labelled the same and disagreed. */}
+            <Stat label="Order revenue" value={formatMoney(summary.revenuePaise, "INR")} sub="completed orders only" />
             <Stat
               label="Average order"
               value={formatMoney(summary.averageOrderPaise, "INR")}
@@ -85,7 +88,7 @@ export function BuyingActivity({ traces, escalations, products, customers }: Pro
             <Stat
               label="Handled alone"
               value={`${Math.round(summary.unaidedShare * 100)}%`}
-              sub="without asking you"
+              sub={`of orders · ${Math.round(summary.unaidedValueShare * 100)}% of value`}
               tone="var(--decision-allow)"
             />
           </div>

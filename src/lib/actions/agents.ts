@@ -175,6 +175,15 @@ export async function agentSpec(): Promise<AgentSpec> {
 export interface AgentActivity {
   agentId: string;
   lastSeen: string | null;
+  /**
+   * Silent for several of its own pace intervals.
+   *
+   * Computed here rather than in the component: `Date.now()` during render is
+   * impure, and the server already holds both halves of the comparison. There
+   * is a floor so a fast pace does not report every agent as stale in the
+   * ordinary gap between two actions.
+   */
+  stale: boolean;
   recent: {
     traceId: string;
     at: string;
@@ -199,7 +208,7 @@ export interface AgentActivity {
 export async function agentActivity(): Promise<AgentActivity[]> {
   const { merchant, db } = await merchantScope();
 
-  const { data: agents } = await db.from("agents").select("id").eq("merchant_id", merchant.id);
+  const { data: agents } = await db.from("agents").select("id, pace_ms").eq("merchant_id", merchant.id);
   if (!agents?.length) return [];
 
   const { data: traces } = await db
@@ -213,9 +222,12 @@ export async function agentActivity(): Promise<AgentActivity[]> {
 
   return agents.map((agent) => {
     const mine = (traces ?? []).filter((t) => t.agent_id === agent.id);
+    const lastSeen = mine[0]?.created_at ?? null;
+    const staleAfterMs = Math.max(5 * 60_000, (agent.pace_ms || 30_000) * 6);
     return {
       agentId: agent.id,
-      lastSeen: mine[0]?.created_at ?? null,
+      lastSeen,
+      stale: !!lastSeen && Date.now() - new Date(lastSeen).getTime() > staleAfterMs,
       recent: mine.slice(0, 5).map((t) => {
         const p = t.params as { amount?: number; notes?: { agent_reason?: string } } | null;
         return {
