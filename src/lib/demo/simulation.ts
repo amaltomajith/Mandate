@@ -1,7 +1,6 @@
 import { fetchCatalog, type CatalogItem } from "./catalog";
-import { suggestCrossSell } from "./crossSell";
-import { MandateClient } from "./mandateClient";
-import { createAdminClient, ensureAgentIdentity, moneyLabel } from "./shared";
+import { MandateClient, type InputRequestSpec } from "./mandateClient";
+import { createAdminClient, ensureAgentIdentity } from "./shared";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
@@ -95,6 +94,35 @@ const ITEM_WEIGHTS: Record<string, number> = {
 function weightedItem(catalog: CatalogItem[]): CatalogItem {
   const weighted = catalog.flatMap((item) => Array(ITEM_WEIGHTS[item.sku] ?? 2).fill(item) as CatalogItem[]);
   return weighted[Math.floor(Math.random() * weighted.length)];
+}
+
+/**
+ * How this buyer answers a counter-offer.
+ *
+ * A rule, not a dice roll. The old 30% probability was removed from the
+ * merchant's side precisely because a coin is not judgement, and putting one
+ * back on the buyer's side would be the same mistake wearing the other hat.
+ *
+ * The rule is one a real shopper would recognise: add the complement if it
+ * costs no more than what you already came for. That makes the attach rate an
+ * emergent property of the catalog mix and the policy — a buyer picking up a
+ * mouse accepts almost nothing, a buyer picking up a desk accepts almost
+ * anything — rather than a number someone chose.
+ */
+async function decideOnOffer(
+  requests: Record<string, InputRequestSpec>,
+  parentAmountPaise: number
+): Promise<Record<string, unknown> | null> {
+  const ask = requests.counter_offer;
+  if (!ask) return null;
+
+  // The offered price is read from the merchant's own message rather than
+  // trusted from anywhere else; a buyer only knows what it was told.
+  const match = /\u20b9\s?([\d,]+(?:\.\d+)?)/.exec(ask.params?.message ?? "");
+  const offeredPaise = match ? Math.round(Number(match[1].replace(/,/g, "")) * 100) : Number.POSITIVE_INFINITY;
+
+  const accept = offeredPaise <= parentAmountPaise;
+  return { counter_offer: { action: "accept", content: { accept } } };
 }
 
 async function ensureSyntheticCustomers(db: SupabaseClient, merchantId: string): Promise<{ id: string; name: string }[]> {
@@ -209,43 +237,17 @@ interface ActionResult {
   /** Needed so an upsell can be recorded as a child of the purchase that
    *  prompted it. */
   traceId: string;
+  /** Present when the merchant answered with a counter-offer and this client
+   *  responded. The child, when there is one, is a full action the engine
+   *  judged on the retry — so it can be refused while the parent executed. */
+  counterOffer?: {
+    offered: { sku: string; name: string; amountPaise: number };
+    accepted: boolean;
+    child?: { decision: "allow" | "block" | "escalate"; reasoning: string; amountPaise?: number };
+  };
 }
 
 
-/**
- * Asks the policy engine what this customer can actually be sold right now.
- *
- * This is the control plane working as a *sales* input rather than only a
- * gate. An agent that proposes blind wastes its best pitch on something that
- * bounces; an agent that can ask first always offers the most valuable thing
- * that will clear. Same rules, opposite use.
- *
- * Probing is free: velocity aggregates count only `mode=enforce` traces
- * (getAggregates in traceHelpers.ts), so simulating a dozen candidates costs
- * the agent nothing against its own rate limit. If that ever changed, this
- * would quietly start rate-limiting the agent for thinking.
- *
- * Descending by price on purpose — the question is not "what fits" but "what
- * is the most valuable thing that fits".
- */
-async function bestClearingItem(
-  client: MandateClient,
-  candidates: CatalogItem[],
-  customerId: string
-): Promise<CatalogItem | null> {
-  for (const item of [...candidates].sort((a, b) => b.priceInPaise - a.priceInPaise)) {
-    const probe = await client.callTool<ActionResult>("simulate_action", {
-      actionType: "order.create",
-      amount: item.priceInPaise,
-      currency: "INR",
-      category: item.category,
-      customerId,
-      params: { receipt: `probe-${Date.now()}-${item.sku}` },
-    });
-    if (probe.decision === "allow") return item;
-  }
-  return null;
-}
 
 /** Runs `count` simulated actions. The caller controls pacing — see
  *  SimulationPanel.tsx, where the merchant picks the interval. */
@@ -256,7 +258,7 @@ export async function runSimulation(merchant: { id: string; slug: string }, coun
   const { id: agentId, secretKeyBase64 } = await ensureAgentIdentity(db, merchant.id, SIM_AGENT);
   const [catalog, customers] = await Promise.all([fetchCatalog(db, merchant.id), ensureSyntheticCustomers(db, merchant.id)]);
 
-  const client = new MandateClient(baseUrl, merchant.slug, agentId, secretKeyBase64);
+  const client = new MandateClient(baseUrl, merchant.slug, agentId, secretKeyBase64, true);
   await client.initialize("mandate-simulation");
 
   const events: SimulationEvent[] = [];
@@ -328,7 +330,9 @@ export async function runSimulation(merchant: { id: string; slug: string }, coun
       },
     };
 
-    const enforced = await client.callTool<ActionResult>("enforce_action", args);
+    const enforced = await client.callTool<ActionResult>("enforce_action", args, (requests) =>
+      decideOnOffer(requests, amount)
+    );
     totalAmountPaise += amount;
     if (enforced.decision === "allow") allowed++;
     else if (enforced.decision === "escalate") escalated++;
@@ -336,84 +340,45 @@ export async function runSimulation(merchant: { id: string; slug: string }, coun
 
     events.push({ scenario, label, decision: enforced.decision, reasoning: enforced.reasoning, amountPaise: amount });
 
-    // The growth half of the loop: having sold something, the agent reasons
-    // over the real catalog for a genuine complement and tries to sell that
-    // too. Recorded with `forkFrom` so it is a child of the purchase that
-    // prompted it — which is what makes it attributable revenue rather than
-    // just another order, and what draws the edge in the entity graph.
+    // The growth half of the loop, and it is now the SERVER's move rather than
+    // the agent's.
     //
-    // It goes through `enforce_action` like anything else, so an upsell that
-    // breaches a cap is refused exactly as a customer-initiated purchase would
-    // be. The agent proposing something does not privilege it.
-    if (boughtItem && enforced.decision === "allow") {
-      // Taste first: the LLM picks a genuine complement over the real catalog.
-      // A failed suggestion returns null and never touches the purchase it
-      // followed.
-      const suggestion = await suggestCrossSell(catalog, boughtItem.sku);
-      if (suggestion) {
-        // Then constraint. Asking the engine BEFORE proposing is the whole
-        // point: without it the agent pitches its favourite complement and
-        // eats a refusal, losing a sale the merchant would have accepted at a
-        // different size.
-        const wanted = suggestion.item;
-        const probe = await client.callTool<ActionResult>("simulate_action", {
-          actionType: "order.create",
-          amount: wanted.priceInPaise,
-          currency: "INR",
-          category: wanted.category,
-          customerId: customer.id,
-          params: { receipt: `probe-${Date.now()}-${wanted.sku}` },
+    // This used to be a client-side upsell: the agent asked the model for a
+    // complement, probed the engine itself, and enforced a second order. That
+    // worked, but it put the merchant's growth logic inside the buyer, which is
+    // backwards — a real third-party buying agent would not carry the
+    // merchant's cross-sell reasoning around with it.
+    //
+    // Under MRTR the merchant answers a purchase with a counter-offer and the
+    // buyer decides. `enforce_action` above already returned it, this client
+    // already answered it (see `decideOnOffer`), and the child action was
+    // evaluated by the same engine on the retry. So there is nothing to do here
+    // except record what came back.
+    const counter = enforced.counterOffer;
+    if (counter) {
+      if (!counter.accepted) {
+        events.push({
+          scenario: "ordinary",
+          label: `Declined: ${counter.offered.name}`,
+          decision: "allow",
+          reasoning: "The merchant offered a complement; this buyer passed on it. Recorded as signal.",
+          amountPaise: 0,
+          isUpsell: true,
         });
+      } else if (counter.child) {
+        totalAmountPaise += counter.offered.amountPaise;
+        if (counter.child.decision === "allow") allowed++;
+        else if (counter.child.decision === "escalate") escalated++;
+        else blocked++;
 
-        let offer: CatalogItem | null = wanted;
-        let substituted = false;
-        if (probe.decision !== "allow") {
-          // What it wanted to sell won't clear. Rather than abandoning the
-          // upsell, fall back to the most valuable thing that will.
-          offer = await bestClearingItem(
-            client,
-            catalog.filter((c) => c.sku !== boughtItem.sku && c.sku !== wanted.sku),
-            customer.id
-          );
-          substituted = true;
-        }
-
-        if (offer) {
-          const upsell = await client.callTool<ActionResult>("enforce_action", {
-            actionType: "order.create",
-            amount: offer.priceInPaise,
-            currency: "INR",
-            category: offer.category,
-            customerId: customer.id,
-            forkFrom: enforced.traceId,
-            params: {
-              receipt: `sim-upsell-${Date.now()}-${i}`,
-              notes: {
-                scenario: "upsell",
-                source: "simulation",
-                upsell_of: boughtItem.sku,
-                sku: offer.sku,
-                item: offer.name,
-              },
-            },
-          });
-          totalAmountPaise += offer.priceInPaise;
-          if (upsell.decision === "allow") allowed++;
-          else if (upsell.decision === "escalate") escalated++;
-          else blocked++;
-
-          events.push({
-            scenario: "ordinary",
-            label: `Agent upsells: ${offer.name}`,
-            decision: upsell.decision,
-            reasoning: substituted
-              ? `Wanted to offer ${wanted.name} (${moneyLabel(wanted.priceInPaise)}) but policy wouldn't clear it, so it offered the most valuable alternative that would. ${upsell.reasoning}`
-              : upsell.reasoning,
-            amountPaise: offer.priceInPaise,
-            isUpsell: true,
-            pitch: substituted ? undefined : suggestion.pitch,
-          });
-        }
+        events.push({
+          scenario: "ordinary",
+          label: `Counter-offer accepted: ${counter.offered.name}`,
+          decision: counter.child.decision,
+          reasoning: counter.child.reasoning,
+          amountPaise: counter.offered.amountPaise,
+          isUpsell: true,
+        });
       }
     }
   }
