@@ -1,4 +1,5 @@
 import "server-only";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { PolicyRule as EngineRule, EvaluationAggregates } from "@/lib/policy/types";
 import type { CapParams, VelocityParams } from "@/lib/policy/types";
@@ -201,6 +202,17 @@ export async function recordMandateFromSubscription(
  *  skips trust rules on undefined, which fails open. That is the right
  *  direction here: a transient read failure should not start refusing an
  *  agent's traffic as though it had a bad reputation. */
+/** Whether the merchant has stopped this agent. Read on every action rather
+ *  than cached: a pause has to take effect on the next request, not on the next
+ *  process restart. Unreadable is treated as not paused -- failing closed here
+ *  would let a transient database blip halt every agent at once, which is a
+ *  worse outcome than a paused agent getting one more request through. */
+export async function isAgentPaused(db: SupabaseClient, agentId: string): Promise<boolean> {
+  const { data, error } = await db.from("agents").select("status").eq("id", agentId).maybeSingle();
+  if (error || !data) return false;
+  return data.status === "paused";
+}
+
 export async function getAgentTrustScore(agentId: string): Promise<number | undefined> {
   const db = createAdminClient();
   const { data, error } = await db.from("agents").select("trust_score").eq("id", agentId).maybeSingle();
@@ -278,7 +290,7 @@ export async function recomputeTrust(agentId: string) {
   const [recent, agentRow] = await Promise.all([
     db
       .from("traces")
-      .select("decision")
+      .select("decision, params")
       .eq("agent_id", agentId)
       .eq("mode", "enforce")
       .order("created_at", { ascending: false })
@@ -287,7 +299,12 @@ export async function recomputeTrust(agentId: string) {
   ]);
   assertNoSupabaseError(recent.error);
 
-  const decisions = recent.data ?? [];
+  // Refusals caused by the merchant pausing the agent are excluded. They are
+  // not evidence about the agent -- see the paused_block stamp in
+  // actionEvaluator for why counting them is a one-way trapdoor.
+  const decisions = (recent.data ?? []).filter(
+    (d) => (d.params as { paused_block?: string } | null)?.paused_block !== "true"
+  );
   const approvals = decisions.filter((d) => d.decision === "allow").length;
   const blocks = decisions.filter((d) => d.decision === "block").length;
   const escalations = decisions.filter((d) => d.decision === "escalate").length;

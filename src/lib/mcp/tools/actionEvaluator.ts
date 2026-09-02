@@ -4,6 +4,7 @@ import { executeRealAction } from "@/lib/razorpay/actions";
 import type { ActionInput } from "@/lib/mcp/schemas";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getMerchantIdForAgent } from "@/lib/merchant";
+import { isAgentPaused } from "@/lib/mcp/traceHelpers";
 import {
   checkMandateGate,
   createAlert,
@@ -73,8 +74,13 @@ export async function runActionEvaluation(
   // agent they'd previously revoked. (Caught live: reusing the same demo
   // agent+customer across runs meant every run after the first revoke
   // permanently locked out ever establishing a new one.)
+  // Above the mandate gate, deliberately. A paused agent is not
+  // unauthorized-for-this-customer, it is stopped everywhere, and "not acting
+  // at all right now" should short-circuit questions about who authorized what.
+  const paused = await isAgentPaused(db, agentId);
+
   const mandateGate =
-    input.customerId && input.actionType !== "subscription.create"
+    !paused && input.customerId && input.actionType !== "subscription.create"
       ? await checkMandateGate(agentId, input.customerId)
       : null;
 
@@ -82,7 +88,10 @@ export async function runActionEvaluation(
   let decision: "allow" | "block" | "escalate";
   let reasoning: string;
 
-  if (mandateGate?.blocked) {
+  if (paused) {
+    decision = "block";
+    reasoning = "This agent is paused by the merchant. Nothing it proposes will execute until it is resumed.";
+  } else if (mandateGate?.blocked) {
     decision = "block";
     reasoning = mandateGate.reasoning ?? "Blocked: this agent's mandate is not active.";
   } else {
@@ -144,6 +153,12 @@ export async function runActionEvaluation(
       ...(stamp?.offerId ? { offer_id: stamp.offerId } : {}),
       ...(stamp?.mrtr ? { mrtr: stamp.mrtr } : {}),
       ...(stamp?.offeredSku ? { offered_sku: stamp.offeredSku } : {}),
+      // Marks a refusal that says nothing about the agent's behaviour, so the
+      // trust score can leave it out. Without this, pausing an agent would
+      // steadily destroy its reputation for having been paused, and it would
+      // come back below the trust floor -- held by a rule, generating
+      // escalations, because a human had stopped it for an afternoon.
+      ...(paused ? { paused_block: "true" } : {}),
     } as unknown as Json,
     agentId,
     decision,

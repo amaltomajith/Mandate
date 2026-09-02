@@ -1,15 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { pauseAgent, resumeAgent } from "@/lib/actions/agents";
 import type { Agent, PolicyRule } from "@/types/db";
 import type { TrustComponents } from "@/lib/trust/score";
 import { TrustBreakdown } from "./TrustBreakdown";
-import { EmptyState, Icons, Panel } from "./ui";
+import { EmptyState, GhostButton, Icons, Panel } from "./ui";
 
 /** The bands the bar is coloured by. Named rather than numeric because a
  *  merchant reads "restricted", not "below 35" — and the labels say what the
  *  system will actually do, not just where the number sits. */
-function standing(score: number, floor: number | null) {
+function standing(score: number, floor: number | null, paused = false) {
+  // Paused outranks every band. The label says what the system will do, and
+  // for a paused agent that is "nothing" regardless of how trusted it is.
+  if (paused) {
+    return { label: "Paused", color: "var(--muted)", note: "stopped by you — nothing it proposes will execute" };
+  }
   if (floor !== null && score < floor) {
     return { label: "Restricted", color: "var(--decision-block)", note: "held for approval at any amount" };
   }
@@ -69,7 +75,8 @@ export function AgentTrustPanel({ agents, rules }: { agents: Agent[]; rules: Pol
             // An agent that has never acted has nothing to explain — its score
             // is just the untouched starting value.
             const explainable = Boolean(components && components.totalDecisions > 0);
-            const state = standing(agent.trust_score, trustFloor);
+            const isPaused = agent.status === "paused";
+            const state = standing(agent.trust_score, trustFloor, isPaused);
             const pct = Math.max(0, Math.min(100, agent.trust_score));
 
             return (
@@ -81,6 +88,7 @@ export function AgentTrustPanel({ agents, rules }: { agents: Agent[]; rules: Pol
                   background: "var(--panel-2)",
                 }}
               >
+                <AgentControls agentId={agent.id} paused={isPaused} />
                 <button
                   onClick={() => setExpandedId(expanded ? null : agent.id)}
                   disabled={!explainable}
@@ -181,5 +189,51 @@ function Stat({ value, label, color }: { value?: number; label: string; color: s
       </span>
       {label}
     </span>
+  );
+}
+
+/**
+ * Stop this agent, or start it again.
+ *
+ * Deliberately the plainest control on the page. It is the one a merchant
+ * reaches for when something is going wrong, and a control you have to think
+ * about is a control you use too late.
+ *
+ * Reversible, and it says so: pausing destroys nothing — the agent keeps its
+ * identity, its history and its trust score, and the refusals it produces while
+ * paused are excluded from that score, so resuming puts it back exactly where
+ * it was rather than below the trust floor for having been stopped.
+ */
+function AgentControls({ agentId, paused }: { agentId: string; paused: boolean }) {
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  function toggle() {
+    setError(null);
+    startTransition(async () => {
+      try {
+        await (paused ? resumeAgent(agentId) : pauseAgent(agentId));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Couldn't change that.");
+      }
+    });
+  }
+
+  return (
+    <div className="mb-2 flex items-center gap-2">
+      <GhostButton onClick={toggle} disabled={isPending} className="py-1! px-2.5! text-[10px]!">
+        {isPending ? "…" : paused ? "Resume agent" : "Pause agent"}
+      </GhostButton>
+      {paused && (
+        <span className="text-[10px]" style={{ color: "var(--muted-2)" }}>
+          everything it proposes is refused until you resume
+        </span>
+      )}
+      {error && (
+        <span className="text-[10px]" style={{ color: "var(--decision-block)" }}>
+          {error}
+        </span>
+      )}
+    </div>
   );
 }

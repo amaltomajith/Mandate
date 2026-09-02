@@ -20,6 +20,7 @@ export type EscalationStatus = "pending" | "approved" | "denied";
 export type AlertSeverity = "info" | "notable" | "high";
 export type MandateType = "upi_autopay" | "ap2_style";
 export type MandateStatus = "active" | "paused" | "revoked" | "expired";
+export type AgentStatus = "active" | "paused";
 export type CampaignStatus = "draft" | "running" | "paused" | "done";
 export type CampaignTargetStatus = "pending" | "offered" | "paid" | "expired" | "refused" | "held";
 
@@ -67,6 +68,7 @@ export interface Database {
       agents: {
         Row: {
           merchant_id: string;
+          status: AgentStatus;
           id: string;
           name: string;
           description: string | null;
@@ -79,6 +81,7 @@ export interface Database {
         };
         Insert: {
           merchant_id: string;
+          status?: AgentStatus;
           id?: string;
           name: string;
           description?: string | null;
