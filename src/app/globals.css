@@ -140,3 +140,11 @@ body::before {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
 }
+
+/* In-page anchors on the landing page. Behind the media query because a jump
+   the reader did not ask to be animated is exactly what reduced-motion means. */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}

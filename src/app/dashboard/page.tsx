@@ -1,3 +1,5 @@
+import { redirect } from "next/navigation";
+import { auth } from "@clerk/nextjs/server";
 import { getDashboardData } from "@/lib/dashboardData";
 import { auditPolicySet } from "@/lib/policy/audit";
 import { LiveRefresher } from "@/components/dashboard/LiveRefresher";
@@ -11,6 +13,15 @@ import type { Trace } from "@/types/db";
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
+  // A second gate, not the first one: proxy.ts already protects this route, so
+  // in normal operation a signed-out visitor never gets here. It earns its
+  // place as the backstop for the failure the allowlist has had before -- a
+  // route slipping out of the matcher. Without it that mistake surfaces as an
+  // error page from getCurrentMerchant, which throws for a signed-out user,
+  // rather than as a sign-in prompt.
+  const { userId } = await auth();
+  if (!userId) redirect("/login");
+
   const { agents, rules, traces, escalations, alerts, mandates, customers, products, merchant, loadError } = await getDashboardData();
   const tracesById: Record<string, Trace> = Object.fromEntries(traces.map((t) => [t.id, t]));
 

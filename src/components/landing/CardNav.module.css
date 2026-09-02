@@ -1,0 +1,241 @@
+/*
+ * Adapted from the React Bits CardNav. Scoped as a CSS Module rather than
+ * dropped into globals.css: names like `.logo` and `.hamburger-line` are
+ * generic enough to collide with something in the dashboard eventually, and a
+ * nav that silently restyles a panel is a bad trade for four saved characters.
+ *
+ * Colors come from the app tokens in globals.css, so the nav stays in step if
+ * the palette moves.
+ */
+
+.container {
+  position: absolute;
+  top: 1.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(92%, 880px);
+  z-index: 40;
+}
+
+.nav {
+  display: block;
+  height: 60px;
+  padding: 0;
+  border: 1px solid var(--panel-border-strong);
+  border-radius: 0.9rem;
+  position: relative;
+  overflow: hidden;
+  will-change: height;
+  /* The nav sits over a live shader, so it needs a real backdrop or the
+     headline behind it shows through the menu text. */
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.06) inset,
+    0 18px 40px -18px rgba(0, 0, 0, 0.8);
+}
+
+.top {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.5rem 0.5rem 1.05rem;
+  z-index: 2;
+}
+
+.hamburger {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  gap: 6px;
+  background: none;
+  border: 0;
+  padding: 0 0.35rem;
+  border-radius: 0.5rem;
+}
+
+.hamburger:hover .line {
+  opacity: 0.7;
+}
+
+.hamburger:focus-visible {
+  outline: 2px solid var(--brand-blue);
+  outline-offset: 2px;
+}
+
+.line {
+  width: 26px;
+  height: 1.5px;
+  background-color: currentColor;
+  border-radius: 2px;
+  transition:
+    transform 0.25s ease,
+    opacity 0.2s ease;
+  transform-origin: 50% 50%;
+}
+
+.hamburger[data-open="true"] .line:first-child {
+  transform: translateY(3.75px) rotate(45deg);
+}
+
+.hamburger[data-open="true"] .line:last-child {
+  transform: translateY(-3.75px) rotate(-45deg);
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  text-decoration: none;
+  color: var(--foreground);
+  white-space: nowrap;
+}
+
+.logoWord {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.cta {
+  border: none;
+  border-radius: 0.55rem;
+  padding: 0 1rem;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  color: #fff;
+  background: linear-gradient(135deg, #0d94fb, #0b7fd9);
+  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.18) inset;
+  transition: filter 0.2s ease;
+}
+
+.cta:hover {
+  filter: brightness(1.1);
+}
+
+.cta:focus-visible {
+  outline: 2px solid var(--brand-blue);
+  outline-offset: 2px;
+}
+
+.content {
+  position: absolute;
+  inset: 60px 0 0 0;
+  padding: 0.5rem;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.nav[data-open="true"] .content {
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.card {
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: 0.65rem;
+  border: 1px solid var(--panel-border);
+  display: flex;
+  flex-direction: column;
+  padding: 12px 15px;
+  gap: 8px;
+  user-select: none;
+}
+
+.cardLabel {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  opacity: 0.62;
+}
+
+.cardLinks {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cardLink {
+  font-size: 14px;
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+  transition: opacity 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cardLink:hover {
+  opacity: 0.7;
+}
+
+.cardLink:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.linkIcon {
+  flex-shrink: 0;
+  opacity: 0.55;
+}
+
+@media (max-width: 768px) {
+  .container {
+    width: 92%;
+    top: 1rem;
+  }
+
+  .top {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .hamburger {
+    order: 2;
+  }
+
+  .logo {
+    position: static;
+    transform: none;
+    order: 1;
+  }
+
+  .cta {
+    display: none;
+  }
+
+  .content {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    justify-content: flex-start;
+  }
+
+  .card {
+    flex: 0 0 auto;
+    min-height: 64px;
+  }
+}

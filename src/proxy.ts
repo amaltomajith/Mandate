@@ -9,12 +9,17 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
  * that cannot read the catalog until it holds credentials is one that can
  * never become a buyer.
  * `/architecture.html` is public documentation — gating it behind
- * a sign-in would defeat the point of linking it from the sign-in page.
+ * a sign-in would defeat the point of linking it from the sign-in page, and
+ * `/` is the landing page for the same reason: someone evaluating this should
+ * be able to read what it is without first creating an account.
  *
  * Named `proxy.ts` per Next.js 16 (the file used to be `middleware.ts` —
  * renamed upstream, not a Mandate-specific choice).
  */
 const isPublicRoute = createRouteMatcher([
+  // Exactly the root, not "/(.*)" -- that would match every path in the app and
+  // turn this allowlist into a no-op.
+  "/",
   "/login(.*)",
   "/sign-up(.*)",
   // The whole per-merchant public surface: mcp, catalog, wba-directory. Each
