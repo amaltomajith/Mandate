@@ -6,22 +6,35 @@
 
 import type { Escalation, Trace } from "@/types/db";
 
+/**
+ * Semantic colour is NOT the brand accent.
+ *
+ * These were briefly folded into the violet-and-pink brand palette, and the
+ * graph went monochrome: every node kind rendered as a shade of the same hue,
+ * so the one thing the scene exists to do -- let you tell an agent from a rule
+ * from an action at a glance -- stopped working. Worse, painting agents white
+ * turned their aura into a grey wash that bloom then blew out into pale blobs.
+ *
+ * Brand identity (violet on black) and status vocabulary (green/amber/red) are
+ * different jobs and get different palettes. These are the status one: six hues
+ * spread far enough around the wheel to survive a small ring at a distance,
+ * saturated harder than the originals so they hold up against bloom.
+ */
 export const ENTITY_COLORS = {
-  agent: "#ffffff",
-  mandate: "#7c5cff",
-  // Neutral on purpose: a transaction node is just an event. Its RING carries
-  // the verdict, and when the sphere was bright too there was nothing for the
-  // verdict to contrast against.
-  transaction: "#6e6a85",
-  rule: "#ff9ffc",
-  customer: "#b8b3d9",
+  agent: "#4d9fff",
+  mandate: "#a78bfa",
+  // Bright: this is the node body, and the decision ring around it is what
+  // carries the verdict. A dark body left the ring nothing to sit against.
+  transaction: "#e8ebf7",
+  rule: "#fbbf24",
+  customer: "#34d399",
 } as const;
 
 export const DECISION_COLORS = {
-  allow: "#ffffff",
-  block: "#ff3b5c",
-  escalate: "#ff9ffc",
-  protocol_reject: "#c4b5fd",
+  allow: "#3ddc84",
+  block: "#ff4d5e",
+  escalate: "#fbbf24",
+  protocol_reject: "#c084fc",
 } as const;
 
 /**
@@ -41,8 +54,12 @@ export const DECISION_COLORS = {
  * pending ones that still want a person.
  */
 export const ESCALATION_OUTCOME_COLORS = {
-  approved: "#6ee7c7",
-  denied: "#565270",
+  // Cyan rather than another green. It has to be legible NEXT TO `allow`,
+  // because the distinction it draws -- cleared automatically vs cleared by a
+  // person -- is the one the revenue panel is built on. Two greens would have
+  // collapsed exactly the difference this colour exists to show.
+  approved: "#22d3ee",
+  denied: "#6f6880",
 } as const;
 
 /**

@@ -28,27 +28,27 @@
   --brand-pink: #ff9ffc;
   --brand-violet-soft: rgba(124, 92, 255, 0.16);
 
-  --entity-agent: #ffffff;
-  --entity-mandate: #7c5cff;
-  /* Deliberately neutral: a transaction node is just an event, and its RING
-     carries the verdict. Painting the sphere as well left nothing for the
-     verdict to contrast against. */
-  --entity-transaction: #6e6a85;
-  --entity-rule: #ff9ffc;
-  --entity-customer: #b8b3d9;
+  /* Status vocabulary, deliberately NOT the brand hue -- see colors.ts. The
+     brand is violet on black; "this was allowed" is green everywhere it appears,
+     in the graph and in every panel chip, and those two must never disagree. */
+  --entity-agent: #4d9fff;
+  --entity-mandate: #a78bfa;
+  --entity-transaction: #e8ebf7;
+  --entity-rule: #fbbf24;
+  --entity-customer: #34d399;
 
-  --decision-allow: #ffffff;
-  --decision-block: #ff3b5c;
-  --decision-escalate: #ff9ffc;
-  --decision-reject: #c4b5fd;
+  --decision-allow: #3ddc84;
+  --decision-block: #ff4d5e;
+  --decision-escalate: #fbbf24;
+  --decision-reject: #c084fc;
 
   /* An escalation that a human has ANSWERED is not the same state as one still
      waiting, and it used to render in the same amber forever -- so a queue that
      had been cleared hours ago still looked like a wall of pending work. These
      two are the answered states. Denied is deliberately the quietest colour on
      the board: it is settled, and nothing about it wants attention. */
-  --decision-approved: #6ee7c7;
-  --decision-denied: #565270;
+  --decision-approved: #22d3ee;
+  --decision-denied: #6f6880;
 
   --shadow-card: 0 1px 0 0 rgba(255, 255, 255, 0.04) inset, 0 1px 2px 0 rgba(0, 0, 0, 0.5);
   --shadow-card-lg: 0 1px 0 0 rgba(255, 255, 255, 0.05) inset, 0 24px 48px -20px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.04);

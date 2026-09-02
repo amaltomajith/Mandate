@@ -5,7 +5,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Grid, Html, Line, OrbitControls, Stars } from "@react-three/drei";
 import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import type * as THREE from "three";
-import { Vector3 } from "three";
+import { AdditiveBlending, Vector3 } from "three";
 import type { Agent, Customer, Escalation, Mandate, PolicyRule, Trace } from "@/types/db";
 import { computeLayout, type Vec3 } from "./layout";
 
@@ -135,17 +135,44 @@ function AgentNode({
         onHover(null);
       }}
     >
+      {/* Three layers, and every one of them ADDITIVE.
+          ------------------------------------------------------------------
+          A normal-blended translucent sphere averages toward whatever is
+          behind it, so over a black scene it goes grey -- and bloom then
+          smears that grey into a pale blob with no colour left in it. Additive
+          blending adds light instead of mixing pigment, which is what a glow
+          physically is, and it keeps the hue all the way out to the edge. */}
       <mesh ref={auraRef}>
         <sphereGeometry args={[1, 16, 16]} />
-        <meshBasicMaterial color={ENTITY_COLORS.agent} transparent opacity={0.1} depthWrite={false} />
-      </mesh>
-      <mesh scale={baseScale}>
-        <sphereGeometry args={[1, 24, 24]} />
-        <meshStandardMaterial
+        <meshBasicMaterial
           color={ENTITY_COLORS.agent}
+          transparent
+          opacity={0.075}
+          depthWrite={false}
+          blending={AdditiveBlending}
+        />
+      </mesh>
+      <mesh scale={baseScale * 1.5}>
+        <sphereGeometry args={[1, 20, 20]} />
+        <meshBasicMaterial
+          color={ENTITY_COLORS.agent}
+          transparent
+          opacity={0.16}
+          depthWrite={false}
+          blending={AdditiveBlending}
+        />
+      </mesh>
+      {/* Pale core, saturated emission: the same trick a star uses. A body
+          painted the full accent colour reads flat, because nothing in it is
+          brighter than the glow around it. */}
+      <mesh scale={baseScale}>
+        <sphereGeometry args={[1, 32, 32]} />
+        <meshStandardMaterial
+          color="#d8e9ff"
           emissive={ENTITY_COLORS.agent}
-          emissiveIntensity={0.7}
-          roughness={0.4}
+          emissiveIntensity={1.1}
+          roughness={0.25}
+          metalness={0.15}
         />
       </mesh>
     </group>
@@ -154,7 +181,7 @@ function AgentNode({
 
 function RuleNode({ rule, position, onHover }: { rule: PolicyRule; position: Vec3; onHover: (h: HoverInfo) => void }) {
   return (
-    <mesh
+    <group
       position={position}
       onPointerOver={(e) => {
         e.stopPropagation();
@@ -165,9 +192,29 @@ function RuleNode({ rule, position, onHover }: { rule: PolicyRule; position: Vec
         onHover(null);
       }}
     >
-      <octahedronGeometry args={[0.4]} />
-      <meshStandardMaterial color={ENTITY_COLORS.rule} emissive={ENTITY_COLORS.rule} emissiveIntensity={0.5} />
-    </mesh>
+      <mesh>
+        <octahedronGeometry args={[0.34]} />
+        <meshStandardMaterial
+          color="#ffe6ad"
+          emissive={ENTITY_COLORS.rule}
+          emissiveIntensity={0.95}
+          roughness={0.25}
+          metalness={0.2}
+        />
+      </mesh>
+      {/* An outer facet shell at low additive opacity. Gives the solid an
+          atmosphere so it sits in the scene rather than on top of it. */}
+      <mesh>
+        <octahedronGeometry args={[0.54]} />
+        <meshBasicMaterial
+          color={ENTITY_COLORS.rule}
+          transparent
+          opacity={0.12}
+          depthWrite={false}
+          blending={AdditiveBlending}
+        />
+      </mesh>
+    </group>
   );
 }
 
@@ -197,7 +244,23 @@ function MandateNode({
     >
       <mesh scale={0.24}>
         <icosahedronGeometry args={[1, 0]} />
-        <meshStandardMaterial color={ENTITY_COLORS.mandate} emissive={ENTITY_COLORS.mandate} emissiveIntensity={0.5} />
+        <meshStandardMaterial
+          color="#ded3ff"
+          emissive={ENTITY_COLORS.mandate}
+          emissiveIntensity={0.95}
+          roughness={0.25}
+          metalness={0.2}
+        />
+      </mesh>
+      <mesh scale={0.38}>
+        <icosahedronGeometry args={[1, 0]} />
+        <meshBasicMaterial
+          color={ENTITY_COLORS.mandate}
+          transparent
+          opacity={0.12}
+          depthWrite={false}
+          blending={AdditiveBlending}
+        />
       </mesh>
       {/* A colored ring keyed to status (active/paused/revoked) — same visual
           grammar as a trace's decision ring, so "this mandate isn't active
@@ -256,11 +319,11 @@ function TraceNode({
       const mat = ringRef.current.material as THREE.MeshBasicMaterial;
       if (!isFresh) {
         ringRef.current.scale.setScalar(1);
-        mat.opacity = 0.28;
+        mat.opacity = 0.55;
       } else {
         const t = Math.min(localElapsed / 2.2, 1);
         ringRef.current.scale.setScalar(1.9 - t * 0.9);
-        mat.opacity = 0.9 - t * 0.62;
+        mat.opacity = 1 - t * 0.45;
       }
     }
 
@@ -293,13 +356,28 @@ function TraceNode({
         onHover(null);
       }}
     >
-      <mesh scale={0.16}>
-        <sphereGeometry args={[1, 12, 12]} />
-        <meshStandardMaterial color={ENTITY_COLORS.transaction} />
+      <mesh scale={0.15}>
+        <sphereGeometry args={[1, 20, 20]} />
+        <meshStandardMaterial
+          color={ENTITY_COLORS.transaction}
+          emissive={ENTITY_COLORS.transaction}
+          emissiveIntensity={0.3}
+          roughness={0.35}
+        />
       </mesh>
+      {/* The ring is the verdict, so it is the part that has to read from
+          across the scene. Additive keeps the decision hue saturated instead
+          of letting it grey out against the black. */}
       <mesh ref={ringRef} rotation={[Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.24, 0.3, 24]} />
-        <meshBasicMaterial color={decisionColor} transparent opacity={0.5} depthWrite={false} side={2} />
+        <ringGeometry args={[0.22, 0.3, 32]} />
+        <meshBasicMaterial
+          color={decisionColor}
+          transparent
+          opacity={0.55}
+          depthWrite={false}
+          side={2}
+          blending={AdditiveBlending}
+        />
       </mesh>
       {isSevere && (
         <mesh ref={shockwaveRef} rotation={[Math.PI / 2, 0, 0]} visible={false}>
@@ -536,9 +614,9 @@ function Scene({
       <EffectComposer multisampling={0}>
         <Bloom
           mipmapBlur
-          luminanceThreshold={0.15}
+          luminanceThreshold={0.22}
           luminanceSmoothing={0.3}
-          intensity={0.9}
+          intensity={0.8}
           radius={0.6}
         />
         <Vignette eskil={false} offset={0.15} darkness={0.9} />
