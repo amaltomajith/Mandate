@@ -553,8 +553,29 @@ the cause.
 Both need the dev server running.
 
 ```bash
+npx tsx scripts/verify-policy.ts  # every rule type, both directions
 npx tsx scripts/verify-e2e.ts     # end to end, including tenant isolation
 npx tsx scripts/bench-llm.ts      # the model contract suite
+```
+
+`verify-policy` installs one rule at a time on a throwaway merchant and drives
+it through MCP as an agent would, so what is tested is the whole path -- the
+signature, the aggregates fetched from real traces, the rule matched, the
+decision recorded -- not an evaluator agreeing with itself. Every case asserts
+**both** directions: the rule fires when it should and does not when it should
+not. A test that only checks the block is satisfied by an engine that blocks
+everything. 14/14:
+
+```
+category_block   refuses crypto            · leaves electronics alone
+cap              blocks above the ceiling  · allows below it
+step_up          escalates above threshold · allows below it
+trust_floor      holds a below-floor agent · ignores an above-floor one
+velocity         per_agent limit enforced  · per_customer limit enforced
+                 per_customer does NOT leak across customers
+                 per_customer ignores actions naming no customer
+action_types     a links-only cap does not bind an order
+priority         category_block beats step_up when both match
 ```
 
 `verify-e2e` is the important one. **Multi-tenancy that is not tested is not
