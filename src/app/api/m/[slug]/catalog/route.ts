@@ -43,12 +43,16 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string }
     return NextResponse.json({ error: "catalog_unavailable" }, { status: 503 });
   }
 
+  // Built from the merchant this request resolved to, not hardcoded. A catalog
+  // that names itself "Demo Storefront" and points at a global /api/mcp would
+  // send an agent to the wrong endpoint with the wrong identity -- and it would
+  // do it silently, because the JSON still looks perfectly well-formed.
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
   return NextResponse.json(
     {
       merchant: {
-        name: "Mandate Demo Storefront",
+        name: merchant.name,
         currency: "INR",
         settlement: "razorpay",
       },
@@ -56,12 +60,12 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string }
       transact: {
         protocol: "mcp",
         transport: "streamable-http",
-        endpoint: `${baseUrl}/api/mcp`,
+        endpoint: `${baseUrl}/api/m/${merchant.slug}/mcp`,
         auth: {
           scheme: "web-bot-auth",
           algorithm: "ed25519",
           signs: ["@method", "@path", "@authority", "content-digest"],
-          keyDirectory: `${baseUrl}/api/wba-directory`,
+          keyDirectory: `${baseUrl}/api/m/${merchant.slug}/wba-directory`,
           note: "Every request is signed. The keyid you sign with is your agent id; an unsigned or tampered request is rejected before any policy runs.",
         },
         actions: ["order.create", "refund.create", "subscription.create"],
