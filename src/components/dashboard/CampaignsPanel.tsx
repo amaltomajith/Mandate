@@ -215,6 +215,20 @@ export function CampaignsPanel() {
               </p>
             )}
 
+            {preview.segmentSize === 0 && (
+              <p
+                className="mt-3 rounded-lg border px-3 py-2 text-[11px] leading-snug"
+                style={{
+                  borderColor: "var(--decision-escalate)",
+                  color: "var(--decision-escalate)",
+                  background: "color-mix(in srgb, var(--decision-escalate) 12%, transparent)",
+                }}
+              >
+                Nobody matches this yet, so there is nothing to send. Try a wider goal — or let more
+                orders accumulate, since the audience is built from purchase history.
+              </p>
+            )}
+
             <div className="mt-3 flex flex-wrap items-end gap-3 border-t pt-3" style={{ borderColor: "var(--panel-border)" }}>
               <label className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
                 Budget (₹)
@@ -230,7 +244,11 @@ export function CampaignsPanel() {
                 A ceiling on what you give away, not on what customers pay. The run stops when the next
                 offer would cross it. At most {SEND_LIMIT} offers go out per run.
               </p>
-              <PrimaryButton onClick={launch} disabled={isPending || !budgetRupees} className="shrink-0 px-4">
+              <PrimaryButton
+                onClick={launch}
+                disabled={isPending || !budgetRupees || preview.segmentSize === 0}
+                className="shrink-0 px-4"
+              >
                 <span className="flex items-center justify-center gap-1.5">
                   {isPending && <Spinner />}
                   {isPending ? "Sending…" : "Approve and send"}

@@ -120,6 +120,27 @@ export async function launchCampaign(
     throw new Error("A campaign needs a budget above zero.");
   }
 
+  // Refused here and not only in the UI. A disabled button is a suggestion; a
+  // caller that skips the preview, or a stale page whose segment has since
+  // emptied, would otherwise create a running campaign that can never do
+  // anything -- and it would sit in the list looking like it had failed rather
+  // than like it had never been possible.
+  //
+  // Re-counted rather than trusted from the preview: the audience is derived
+  // from order history, which moves. What is approved has to be what is true
+  // now, not what was true when the plan was drawn.
+  const data = await dashboardData(merchant.id);
+  const segment = buildSegment(plan.segment, data.traces, data.escalations, data.products, data.customers);
+  if (segment.members.length === 0) {
+    throw new Error(
+      `Nobody matches this campaign: ${describeSegment(plan.segment, data.products).toLowerCase()}. ` +
+        (segment.unattributableOrders > 0
+          ? `${segment.unattributableOrders} order${segment.unattributableOrders === 1 ? "" : "s"} in the history could not be matched to a customer, so nobody behind them is reachable. `
+          : "") +
+        "Try a wider goal, or let more orders accumulate first."
+    );
+  }
+
   const { id: agentId, secretKeyBase64 } = await ensureAgentIdentity(db, merchant.id, SIM_AGENT);
 
   const { data: campaign, error } = await db
@@ -141,7 +162,6 @@ export async function launchCampaign(
   const client = new MandateClient(baseUrl, merchant.slug, agentId, secretKeyBase64);
   await client.initialize("mandate-campaign");
 
-  const data = await dashboardData(merchant.id);
   const result = await runCampaign(db, campaign, plan, client, data, maxSends);
 
   // Done when the segment is exhausted or the budget is spent; still running
