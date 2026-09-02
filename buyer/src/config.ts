@@ -30,8 +30,25 @@ export const config = {
   privateKey: required("BUYER_PRIVATE_KEY"),
   groqApiKey: process.env.GROQ_API_KEY ?? "",
 
-  /** The catalog lives beside the MCP endpoint on the same merchant path. */
+  /** The catalog and the control channel live beside the MCP endpoint on the
+   *  same merchant path. Derived rather than configured separately: three URLs
+   *  that can drift apart is three chances to point at the wrong merchant. */
   catalogUrl: required("MANDATE_MCP_URL").replace(/\/mcp$/, "/catalog"),
+  controlUrl: required("MANDATE_MCP_URL").replace(/\/mcp$/, "/agent-control"),
+
+  /** Fallback pace when the merchant has not stated one. Their pace_ms wins. */
+  paceMs: Number(process.env.BUYER_GAP_MS ?? 30000),
+
+  /**
+   * A hard ceiling on actions in one run, independent of everything else.
+   *
+   * Belt and braces on purpose. The merchant's pace and pause are cooperative,
+   * and this agent honours them — but they arrive over a network that can fail,
+   * and a runaway loop spending real money must not depend on a remote server
+   * being reachable to stop. This bound holds even with the control endpoint
+   * down, the catalog empty, and the model looping.
+   */
+  maxActions: Number(process.env.BUYER_MAX_ACTIONS ?? 20),
 
   /**
    * Who this buyer is. A persona and a budget, nothing else — the model is

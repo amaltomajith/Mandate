@@ -69,11 +69,11 @@ function supportsElicitation(ctx: ServerContext): boolean {
 /** The buyer's answer to a counter-offer. Shaped, not trusted: the SDK hands
  *  these over unvalidated by design, so anything other than an explicit `true`
  *  is a decline. */
-const CounterAnswer = z.object({ accept: z.boolean() });
+const CounterAnswer = z.object({ accept: z.boolean(), reason: z.string().optional() });
 
-function readAcceptance(ctx: ServerContext): boolean {
+function readAcceptance(ctx: ServerContext): { accepted: boolean; reason?: string } {
   const answer = acceptedContent(ctx.mcpReq.inputResponses, "counter_offer", CounterAnswer);
-  return answer?.accept === true;
+  return { accepted: answer?.accept === true, reason: answer?.reason };
 }
 
 /** One fresh server per request. Under 2026-07-28 that is the only model —
@@ -118,7 +118,12 @@ export function createMandateServer(): McpServer {
       const result = await runGovernedAction(agentId, input, "enforce", {
         supportsElicitation: supportsElicitation(ctx),
         offerState: offerState ?? undefined,
-        accepted: offerState ? readAcceptance(ctx) : undefined,
+        ...(offerState
+          ? (() => {
+              const a = readAcceptance(ctx);
+              return { accepted: a.accepted, buyerReason: a.reason };
+            })()
+          : {}),
       });
 
       if (result.kind === "result") {

@@ -15,18 +15,20 @@ import { SellableCatalog } from "./SellableCatalog";
 import { StorefrontCard } from "./StorefrontCard";
 import { BuyingActivity } from "./BuyingActivity";
 import { CampaignsPanel } from "./CampaignsPanel";
+import { AgentsPanel } from "./AgentsPanel";
 import { RevenueImpactPanel } from "./RevenueImpactPanel";
 import { TransactionsView } from "./TransactionsView";
 import { MandatesPanel } from "./MandatesPanel";
 import { GraphCanvas } from "@/components/graph/GraphCanvas";
 import { GraphLegend } from "@/components/graph/GraphLegend";
 
-type Tab = "overview" | "buy" | "campaigns" | "transactions" | "policies" | "mandates";
+type Tab = "overview" | "buy" | "campaigns" | "agents" | "transactions" | "policies" | "mandates";
 
 const TABS: { key: Tab; label: string; badge?: (props: Props) => number }[] = [
   { key: "overview", label: "Overview" },
   { key: "buy", label: "Buy" },
   { key: "campaigns", label: "Campaigns" },
+  { key: "agents", label: "Agents", badge: (p) => p.agents.filter((a) => a.status === "paused").length },
   { key: "transactions", label: "Transactions", badge: (p) => p.traces.length },
   { key: "policies", label: "Policies", badge: (p) => p.pendingCount + p.deterministicIssues.length },
   { key: "mandates", label: "Mandates", badge: (p) => p.mandates.filter((m) => m.status === "paused").length },
@@ -155,6 +157,8 @@ export function DashboardTabs(props: Props) {
       )}
 
       {tab === "campaigns" && <CampaignsPanel />}
+
+      {tab === "agents" && <AgentsPanel agents={agents} rules={rules} mandates={mandates} />}
 
       {tab === "transactions" && <TransactionsView traces={traces} agents={agents} rules={rules} onJumpToRule={jumpToRule} />}
 

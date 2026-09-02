@@ -74,6 +74,27 @@ export interface MrtrContext {
   offerState?: OfferState;
   /** The buyer's answer, keyed as the offer was. */
   accepted?: boolean;
+  /** The buyer's own words about that answer. Untrusted; sanitised where it is
+   *  written onto the trace, not here. */
+  buyerReason?: string;
+}
+
+/**
+ * Attaches the buyer's stated reason to a copy of the input, so the decline
+ * trace carries it.
+ *
+ * A copy rather than a mutation: `input` is the thing POST #2 re-evaluates, and
+ * quietly editing it would mean the parent decision and the decline record were
+ * judged on different objects. The reason is sanitised where it is written --
+ * see safeAgentReason in actionEvaluator -- not here.
+ */
+function withAgentReason(input: ActionInput, reason?: string): ActionInput {
+  if (!reason) return input;
+  const notes = (input.params as { notes?: Record<string, string> }).notes ?? {};
+  return {
+    ...input,
+    params: { ...input.params, notes: { ...notes, agent_reason: reason } },
+  } as ActionInput;
 }
 
 /** The SKU the parent action is for, when it names one. Written onto the trace
@@ -105,7 +126,7 @@ export async function runGovernedAction(
       // money was involved in the refusal of an offer, and recording it as
       // enforce would spend a velocity slot and move the trust score for
       // something the agent did entirely correctly.
-      await runActionEvaluation(agentId, input, "simulate", {
+      await runActionEvaluation(agentId, withAgentReason(input, mrtr.buyerReason), "simulate", {
         mrtr: "counter_declined",
         offeredSku: mrtr.offerState.sku,
       });

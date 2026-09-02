@@ -81,7 +81,7 @@ export class BuyerAgent {
     indent(choice.fallback ? `[fallback, not a decision] ${choice.reason}` : `"${choice.reason}"`);
 
     // ---- check before committing
-    const args = this.orderArgs(choice.item);
+    const args = this.orderArgs(choice.item, choice.fallback ? undefined : choice.reason);
     let preview: ActionOutcome;
     try {
       preview = await this.mcp.callTool<ActionOutcome>("simulate_action", args);
@@ -111,7 +111,7 @@ export class BuyerAgent {
     return true;
   }
 
-  private orderArgs(item: CatalogItem): Record<string, unknown> {
+  private orderArgs(item: CatalogItem, reason?: string): Record<string, unknown> {
     return {
       actionType: "order.create",
       amount: item.pricePaise,
@@ -121,7 +121,17 @@ export class BuyerAgent {
         receipt: `buyer-${Date.now()}`,
         // The SKU travels with the order so the merchant can attribute it
         // without guessing a product back out of a price.
-        notes: { sku: item.sku, item: item.name, source: "autonomous-buyer" },
+        notes: {
+          sku: item.sku,
+          item: item.name,
+          source: "autonomous-buyer",
+          // Why this agent wanted it, in its own words. Sent so the merchant
+          // can see the reasoning behind a purchase rather than only its
+          // amount -- a refusal is easier to judge when you know what the
+          // buyer thought it was doing. The merchant sanitises and bounds it
+          // before storing; this side does not assume otherwise.
+          ...(reason ? { agent_reason: reason } : {}),
+        },
       },
     };
   }
@@ -153,7 +163,15 @@ export class BuyerAgent {
     say(verdict.accept ? "I'll take it." : "I'll pass on that.");
     indent(verdict.fallback ? `[fallback, not a decision] ${verdict.reason}` : `"${verdict.reason}"`);
 
-    return { counter_offer: { action: "accept", content: { accept: verdict.accept } } };
+    return {
+      counter_offer: {
+        action: "accept",
+        // The verdict AND why. The merchant records the reason against the
+        // trace, so a declined offer becomes signal about the offer rather
+        // than a silent no.
+        content: { accept: verdict.accept, reason: verdict.fallback ? undefined : verdict.reason },
+      },
+    };
   }
 
   private reportPurchase(item: CatalogItem, outcome: ActionOutcome): void {

@@ -1,0 +1,519 @@
+"use client";
+
+import { useCallback, useEffect, useState, useTransition } from "react";
+import type { Agent, Mandate, PolicyRule } from "@/types/db";
+import type { TrustComponents } from "@/lib/trust/score";
+import {
+  agentActivity,
+  agentSpec,
+  exportAgent,
+  registerAgent,
+  setAgentPace,
+  setAgentStatus,
+  type AgentActivity,
+} from "@/lib/actions/agents";
+import type { AgentSpec } from "@/lib/agentSpec";
+import { pauseMandate, revokeMandate, reactivateMandate } from "@/lib/actions/mandates";
+import { formatMoney } from "@/lib/format";
+import { TrustBreakdown } from "./TrustBreakdown";
+import { EmptyState, GhostButton, Icons, Panel, PrimaryButton, Spinner, relativeTime } from "./ui";
+
+const PACE_OPTIONS = [
+  { label: "Calm", ms: 60_000 },
+  { label: "Steady", ms: 30_000 },
+  { label: "Brisk", ms: 10_000 },
+  { label: "No limit", ms: 0 },
+];
+
+interface Props {
+  agents: Agent[];
+  rules: PolicyRule[];
+  mandates: Mandate[];
+}
+
+/**
+ * The agent roster, and the two different ways to stop one.
+ *
+ * The distinction this page exists to make legible:
+ *
+ *   Pausing the AGENT is COOPERATIVE. It changes what the agent is told when it
+ *   polls /agent-control, and a well-behaved agent stops. It saves that agent's
+ *   tokens and keeps this trace log clean. It does not refuse anything.
+ *
+ *   Pausing or revoking a MANDATE is ENFORCED. It runs inside the request path,
+ *   before the policy engine, and it does not care whether the agent cooperates.
+ *
+ * Presenting them as one control would be the worst kind of interface bug here
+ * — a merchant reaching for "stop" during an incident has to know which of
+ * those two they just got, because one of them a hostile agent can ignore.
+ */
+export function AgentsPanel({ agents, rules, mandates }: Props) {
+  const [activity, setActivity] = useState<AgentActivity[]>([]);
+  const [spec, setSpec] = useState<AgentSpec | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const trustFloor = (() => {
+    const rule = rules.find((r) => r.type === "trust_floor" && r.status === "active");
+    const params = rule?.params as { min_score?: number } | null;
+    return typeof params?.min_score === "number" ? params.min_score : null;
+  })();
+
+  const refresh = useCallback(() => {
+    startTransition(async () => {
+      try {
+        const [act, sp] = await Promise.all([agentActivity(), agentSpec()]);
+        setActivity(act);
+        setSpec(sp);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Couldn't load agent activity.");
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    const id = setTimeout(refresh, 0);
+    return () => clearTimeout(id);
+  }, [refresh]);
+
+  function run(fn: () => Promise<unknown>) {
+    setError(null);
+    startTransition(async () => {
+      try {
+        await fn();
+        setActivity(await agentActivity());
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "That didn't work.");
+      }
+    });
+  }
+
+  return (
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
+      <div className="flex flex-col gap-5">
+        <Panel title="Agents" icon={<Icons.Shield />} accent="var(--entity-agent)">
+          {error && (
+            <p
+              className="mb-3 rounded-lg border px-3 py-2 text-xs"
+              style={{
+                borderColor: "var(--decision-block)",
+                color: "var(--decision-block)",
+                background: "color-mix(in srgb, var(--decision-block) 14%, transparent)",
+              }}
+            >
+              {error}
+            </p>
+          )}
+
+          {agents.length === 0 ? (
+            <EmptyState text="No agents registered yet. Register one below." />
+          ) : (
+            <div className="space-y-3">
+              {agents.map((agent) => (
+                <AgentRow
+                  key={agent.id}
+                  agent={agent}
+                  trustFloor={trustFloor}
+                  activity={activity.find((a) => a.agentId === agent.id)}
+                  mandates={mandates.filter((m) => m.agent_id === agent.id)}
+                  busy={isPending}
+                  onRun={run}
+                />
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        <RegisterAgent busy={isPending} onRun={run} />
+      </div>
+
+      <CompatibilityContract spec={spec} />
+    </div>
+  );
+}
+
+function AgentRow({
+  agent,
+  trustFloor,
+  activity,
+  mandates,
+  busy,
+  onRun,
+}: {
+  agent: Agent;
+  trustFloor: number | null;
+  activity?: AgentActivity;
+  mandates: Mandate[];
+  busy: boolean;
+  onRun: (fn: () => Promise<unknown>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const paused = agent.status === "paused";
+  const components = agent.trust_components as unknown as TrustComponents | null;
+  const restricted = trustFloor !== null && agent.trust_score < trustFloor;
+  const liveMandates = mandates.filter((m) => m.status === "active");
+  const heldMandates = mandates.filter((m) => m.status === "paused");
+
+  return (
+    <div
+      className="rounded-xl border p-3"
+      style={{ borderColor: "var(--panel-border)", background: "var(--panel-2)", opacity: busy ? 0.7 : 1 }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-[13px] font-semibold">{agent.name}</p>
+          <p className="mt-0.5 truncate text-[10.5px]" style={{ color: "var(--muted-2)" }}>
+            {agent.persona ?? agent.description ?? "no description"}
+          </p>
+          <p className="mt-1 font-mono text-[9.5px]" style={{ color: "var(--muted-2)" }}>
+            {agent.id}
+          </p>
+        </div>
+        <div className="shrink-0 text-right">
+          <p
+            className="text-[17px] font-semibold tabular-nums"
+            style={{ color: restricted ? "var(--decision-block)" : "var(--foreground)" }}
+          >
+            {agent.trust_score.toFixed(0)}
+          </p>
+          <p className="text-[9.5px]" style={{ color: "var(--muted-2)" }}>
+            trust
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px]" style={{ color: "var(--muted-2)" }}>
+        <span style={{ color: paused ? "var(--decision-escalate)" : "var(--decision-allow)" }}>
+          {paused ? "asked to pause" : "working"}
+        </span>
+        <span>pace {agent.pace_ms === 0 ? "unlimited" : `${Math.round(agent.pace_ms / 1000)}s`}</span>
+        <span>
+          last seen {activity?.lastSeen ? relativeTime(activity.lastSeen) : "never"}
+        </span>
+        {restricted && <span style={{ color: "var(--decision-block)" }}>below the trust floor</span>}
+      </div>
+
+      {/* --- The two controls, kept visibly apart because they guarantee
+              different things. --- */}
+      <div className="mt-3 space-y-2">
+        <div className="rounded-lg border p-2" style={{ borderColor: "color-mix(in srgb, var(--entity-agent) 30%, transparent)" }}>
+          <p className="text-[9.5px] font-semibold uppercase tracking-wider" style={{ color: "var(--entity-agent)" }}>
+            Cooperative — the agent complies
+          </p>
+          <p className="mt-0.5 text-[10px] leading-snug" style={{ color: "var(--muted-2)" }}>
+            Changes what this agent is told when it asks whether to work. It saves the agent&apos;s tokens
+            and keeps your log clean. It does <strong>not</strong> refuse anything: an agent that ignores
+            it still gets judged on the merits, exactly as before.
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <GhostButton
+              onClick={() => onRun(() => setAgentStatus(agent.id, paused ? "active" : "paused"))}
+              disabled={busy}
+              className="py-1! px-2.5! text-[10px]!"
+            >
+              {paused ? "Ask it to resume" : "Ask it to pause"}
+            </GhostButton>
+            {PACE_OPTIONS.map((p) => (
+              <button
+                key={p.label}
+                onClick={() => onRun(() => setAgentPace(agent.id, p.ms))}
+                disabled={busy}
+                className="rounded-full px-2 py-1 text-[10px] transition-colors hover:brightness-125 disabled:opacity-50"
+                style={{
+                  background: agent.pace_ms === p.ms ? "var(--entity-agent)" : "transparent",
+                  color: agent.pace_ms === p.ms ? "#fff" : "var(--muted-2)",
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-lg border p-2" style={{ borderColor: "color-mix(in srgb, var(--decision-block) 30%, transparent)" }}>
+          <p className="text-[9.5px] font-semibold uppercase tracking-wider" style={{ color: "var(--decision-block)" }}>
+            Enforced — the gate refuses
+          </p>
+          <p className="mt-0.5 text-[10px] leading-snug" style={{ color: "var(--muted-2)" }}>
+            Runs before the policy engine and does not need the agent&apos;s cooperation. This is what to
+            use when you do not trust it to stop on its own.
+          </p>
+          {mandates.length === 0 ? (
+            <p className="mt-1.5 text-[10px]" style={{ color: "var(--muted-2)" }}>
+              No mandates — this agent has no standing authorization to withdraw.
+            </p>
+          ) : (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <span className="text-[10px]" style={{ color: "var(--muted-2)" }}>
+                {liveMandates.length} active, {heldMandates.length} held
+              </span>
+              {liveMandates.length > 0 && (
+                <GhostButton
+                  onClick={() => onRun(async () => Promise.all(liveMandates.map((m) => pauseMandate(m.id))))}
+                  disabled={busy}
+                  className="py-1! px-2.5! text-[10px]!"
+                >
+                  Hold all mandates
+                </GhostButton>
+              )}
+              {heldMandates.length > 0 && (
+                <GhostButton
+                  onClick={() => onRun(async () => Promise.all(heldMandates.map((m) => reactivateMandate(m.id))))}
+                  disabled={busy}
+                  className="py-1! px-2.5! text-[10px]!"
+                >
+                  Release held
+                </GhostButton>
+              )}
+              {liveMandates.length > 0 && (
+                <GhostButton
+                  onClick={() => {
+                    if (confirm("Revoking is permanent. The agent would need a fresh mandate. Continue?")) {
+                      onRun(async () => Promise.all(liveMandates.map((m) => revokeMandate(m.id))));
+                    }
+                  }}
+                  disabled={busy}
+                  className="py-1! px-2.5! text-[10px]!"
+                >
+                  Revoke all
+                </GhostButton>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-2 flex items-center gap-2">
+        <GhostButton onClick={() => setOpen((o) => !o)} className="py-1! px-2.5! text-[10px]!">
+          {open ? "Hide detail" : "Trust & recent actions"}
+        </GhostButton>
+        <GhostButton
+          onClick={() =>
+            onRun(async () => {
+              const definition = await exportAgent(agent.id);
+              await navigator.clipboard.writeText(JSON.stringify(definition, null, 2));
+            })
+          }
+          disabled={busy}
+          className="py-1! px-2.5! text-[10px]!"
+        >
+          Copy definition
+        </GhostButton>
+      </div>
+
+      {open && (
+        <div className="mt-2 border-t pt-2" style={{ borderColor: "var(--panel-border)" }}>
+          {components && <TrustBreakdown components={components} />}
+          <p className="mt-2 text-[9.5px] font-semibold uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
+            Recent actions, and what it said about them
+          </p>
+          {!activity?.recent.length ? (
+            <p className="mt-1 text-[10.5px]" style={{ color: "var(--muted-2)" }}>
+              Nothing yet.
+            </p>
+          ) : (
+            <div className="mt-1 space-y-1">
+              {activity.recent.map((r) => (
+                <div key={r.traceId} className="rounded px-2 py-1.5" style={{ background: "var(--panel-2)" }}>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-[10.5px] font-medium">{r.decision}</span>
+                    <span className="text-[10.5px] tabular-nums" style={{ color: "var(--muted-2)" }}>
+                      {r.amountPaise !== null ? formatMoney(r.amountPaise, "INR") : ""}
+                    </span>
+                  </div>
+                  {/* The agent's own words. Sanitised at write time, not just
+                      escaped at render — see safeAgentReason. */}
+                  {r.agentReason && (
+                    <p className="mt-0.5 text-[10px] italic" style={{ color: "var(--muted)" }}>
+                      &ldquo;{r.agentReason}&rdquo;
+                    </p>
+                  )}
+                  <p className="mt-0.5 text-[9.5px]" style={{ color: "var(--muted-2)" }}>
+                    {r.reasoning}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RegisterAgent({ busy, onRun }: { busy: boolean; onRun: (fn: () => Promise<unknown>) => void }) {
+  const [name, setName] = useState("");
+  const [persona, setPersona] = useState("");
+  const [publicKey, setPublicKey] = useState("");
+  const [endpointUrl, setEndpointUrl] = useState("");
+  const [registered, setRegistered] = useState<string | null>(null);
+
+  return (
+    <Panel title="Register an agent" icon={<Icons.Sparkles />} accent="var(--decision-allow)">
+      <p className="mb-3 text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+        An agent generates its own keypair and gives you the <strong>public</strong> half. You register
+        it and hand back the id it signs with — there is no API key here, and no way for an agent to
+        register itself.
+      </p>
+
+      <div className="space-y-2">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Name — e.g. Procurement Buyer"
+          className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+          style={{ borderColor: "var(--panel-border)", background: "var(--panel-2)", color: "var(--foreground)" }}
+        />
+        <input
+          value={persona}
+          onChange={(e) => setPersona(e.target.value)}
+          placeholder="What is it for? — e.g. buys office supplies under ₹15,000"
+          className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+          style={{ borderColor: "var(--panel-border)", background: "var(--panel-2)", color: "var(--foreground)" }}
+        />
+        <input
+          value={publicKey}
+          onChange={(e) => setPublicKey(e.target.value)}
+          placeholder="Ed25519 public key (base64, 32 bytes)"
+          className="w-full rounded-lg border px-3 py-2 font-mono text-[11px] outline-none"
+          style={{ borderColor: "var(--panel-border)", background: "var(--panel-2)", color: "var(--foreground)" }}
+        />
+        <input
+          value={endpointUrl}
+          onChange={(e) => setEndpointUrl(e.target.value)}
+          placeholder="Where it runs (optional, for your reference only)"
+          className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+          style={{ borderColor: "var(--panel-border)", background: "var(--panel-2)", color: "var(--foreground)" }}
+        />
+      </div>
+
+      <PrimaryButton
+        onClick={() =>
+          onRun(async () => {
+            const agent = await registerAgent({ name, persona, publicKey, endpointUrl });
+            setRegistered(agent.id);
+            setName("");
+            setPersona("");
+            setPublicKey("");
+            setEndpointUrl("");
+          })
+        }
+        disabled={busy || !name.trim() || !publicKey.trim()}
+        className="mt-3 w-full"
+      >
+        <span className="flex items-center justify-center gap-1.5">
+          {busy && <Spinner />}
+          Register
+        </span>
+      </PrimaryButton>
+
+      {registered && (
+        <div
+          className="mt-3 rounded-lg border p-2.5"
+          style={{
+            borderColor: "var(--decision-allow)",
+            background: "color-mix(in srgb, var(--decision-allow) 10%, transparent)",
+          }}
+        >
+          <p className="text-[11px] font-semibold">Registered. Give the agent this id:</p>
+          <p className="mt-1 break-all font-mono text-[11px]">{registered}</p>
+          <p className="mt-1 text-[10px]" style={{ color: "var(--muted-2)" }}>
+            It signs with this as its <code>keyid</code>. Nothing else is issued — the keypair it already
+            holds is its credential.
+          </p>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function CompatibilityContract({ spec }: { spec: AgentSpec | null }) {
+  const [copied, setCopied] = useState(false);
+
+  if (!spec) {
+    return (
+      <Panel title="What an agent must do" icon={<Icons.Shield />} accent="var(--muted)">
+        <EmptyState text="Loading the contract…" />
+      </Panel>
+    );
+  }
+
+  const asText = [
+    `Talking to ${spec.merchant.name}`,
+    ``,
+    `MCP        ${spec.endpoints.mcp}`,
+    `Catalog    ${spec.endpoints.catalog}`,
+    `Keys       ${spec.endpoints.keyDirectory}`,
+    `Control    ${spec.endpoints.agentControl}`,
+    ``,
+    `Protocol   ${spec.protocol.revision} · ${spec.protocol.transport}`,
+    `Signing    ${spec.protocol.signing}`,
+    ``,
+    ...spec.rules.map((r, i) => `${i + 1}. ${r.must}\n   ${r.why}`),
+    ``,
+    spec.keygen,
+  ].join("\n");
+
+  return (
+    <Panel
+      title="What an agent must do"
+      icon={<Icons.Shield />}
+      accent="var(--muted)"
+      action={
+        <GhostButton
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(asText);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 2000);
+            } catch {
+              // Clipboard can fail on permissions or a non-HTTPS origin; the
+              // text is still selectable, so this is not a dead end.
+            }
+          }}
+          className="py-1! px-2.5! text-[10px]!"
+        >
+          {copied ? "Copied" : "Copy"}
+        </GhostButton>
+      }
+    >
+      <p className="mb-3 text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+        Hand this to whoever is building an agent for you. The URLs are yours, and it contains no key —
+        it tells them to generate their own.
+      </p>
+
+      <div className="space-y-1 rounded-lg p-2.5" style={{ background: "var(--panel-2)" }}>
+        {Object.entries(spec.endpoints).map(([k, v]) => (
+          <div key={k} className="flex items-baseline gap-2">
+            <span className="w-16 shrink-0 text-[9.5px] uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
+              {k.replace(/([A-Z])/g, " $1")}
+            </span>
+            <code className="min-w-0 flex-1 break-all text-[10px]" style={{ color: "var(--muted)" }}>
+              {v}
+            </code>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 space-y-2">
+        {spec.rules.map((r, i) => (
+          <div key={r.id}>
+            <p className="text-[11px] font-medium leading-snug">
+              <span className="tabular-nums" style={{ color: "var(--muted-2)" }}>
+                {i + 1}.{" "}
+              </span>
+              {r.must}
+            </p>
+            <p className="mt-0.5 pl-4 text-[10px] leading-snug" style={{ color: "var(--muted-2)" }}>
+              {r.why}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <p className="mt-3 border-t pt-2 text-[10px] leading-snug" style={{ borderColor: "var(--panel-border)", color: "var(--muted-2)" }}>
+        {spec.keygen}
+      </p>
+    </Panel>
+  );
+}

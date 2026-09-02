@@ -69,6 +69,15 @@ export interface Database {
         Row: {
           merchant_id: string;
           status: AgentStatus;
+          /** How long the merchant asks this agent to wait between actions. A
+           *  request the agent honours, not a limit the engine enforces —
+           *  velocity rules are the limit. */
+          pace_ms: number;
+          /** What the agent is for, in the merchant's words. */
+          persona: string | null;
+          /** Where the agent runs, if the merchant recorded it. Never used to
+           *  reach out — this system never calls an agent, agents call it. */
+          endpoint_url: string | null;
           id: string;
           name: string;
           description: string | null;
@@ -82,6 +91,9 @@ export interface Database {
         Insert: {
           merchant_id: string;
           status?: AgentStatus;
+          pace_ms?: number;
+          persona?: string | null;
+          endpoint_url?: string | null;
           id?: string;
           name: string;
           description?: string | null;

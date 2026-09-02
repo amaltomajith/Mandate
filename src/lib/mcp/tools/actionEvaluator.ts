@@ -4,7 +4,6 @@ import { executeRealAction } from "@/lib/razorpay/actions";
 import type { ActionInput } from "@/lib/mcp/schemas";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getMerchantIdForAgent } from "@/lib/merchant";
-import { isAgentPaused } from "@/lib/mcp/traceHelpers";
 import {
   checkMandateGate,
   createAlert,
@@ -49,6 +48,23 @@ export interface TraceStamp {
   offeredSku?: string;
 }
 
+/**
+ * The agent's own words, made safe to keep and to show.
+ *
+ * A buying agent may send a one-line reason with its purchase. That text is
+ * written by someone else's model, stored in our database, and rendered in the
+ * merchant's browser — three hops from untrusted input to a human's screen. It
+ * is stripped of structural characters and bounded here, at write time, rather
+ * than at render time: React escaping protects the DOM, not the database, and
+ * not whatever reads it next.
+ */
+function safeAgentReason(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const cleaned = raw.replace(/[<>{}`[\]\\]/g, "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return undefined;
+  return cleaned.length > 160 ? `${cleaned.slice(0, 159).trimEnd()}…` : cleaned;
+}
+
 export async function runActionEvaluation(
   agentId: string,
   input: ActionInput,
@@ -74,13 +90,8 @@ export async function runActionEvaluation(
   // agent they'd previously revoked. (Caught live: reusing the same demo
   // agent+customer across runs meant every run after the first revoke
   // permanently locked out ever establishing a new one.)
-  // Above the mandate gate, deliberately. A paused agent is not
-  // unauthorized-for-this-customer, it is stopped everywhere, and "not acting
-  // at all right now" should short-circuit questions about who authorized what.
-  const paused = await isAgentPaused(db, agentId);
-
   const mandateGate =
-    !paused && input.customerId && input.actionType !== "subscription.create"
+    input.customerId && input.actionType !== "subscription.create"
       ? await checkMandateGate(agentId, input.customerId)
       : null;
 
@@ -88,10 +99,7 @@ export async function runActionEvaluation(
   let decision: "allow" | "block" | "escalate";
   let reasoning: string;
 
-  if (paused) {
-    decision = "block";
-    reasoning = "This agent is paused by the merchant. Nothing it proposes will execute until it is resumed.";
-  } else if (mandateGate?.blocked) {
+  if (mandateGate?.blocked) {
     decision = "block";
     reasoning = mandateGate.reasoning ?? "Blocked: this agent's mandate is not active.";
   } else {
@@ -145,6 +153,16 @@ export async function runActionEvaluation(
     // agent, but not for whom, is an audit trail with a hole in it.
     params: {
       ...input.params,
+      // Re-written over the caller's own copy, sanitised. Spread order matters:
+      // this has to land after the spread or the raw value survives.
+      // `params` is a discriminated union and only some members carry notes, so
+      // it is read through a widened view rather than assumed.
+      ...(() => {
+        const notes = (input.params as { notes?: Record<string, unknown> }).notes;
+        if (!notes) return {};
+        const reason = safeAgentReason(notes.agent_reason);
+        return { notes: { ...notes, ...(reason ? { agent_reason: reason } : {}) } };
+      })(),
       amount: input.amount,
       currency: input.currency,
       category: input.category,
@@ -153,12 +171,6 @@ export async function runActionEvaluation(
       ...(stamp?.offerId ? { offer_id: stamp.offerId } : {}),
       ...(stamp?.mrtr ? { mrtr: stamp.mrtr } : {}),
       ...(stamp?.offeredSku ? { offered_sku: stamp.offeredSku } : {}),
-      // Marks a refusal that says nothing about the agent's behaviour, so the
-      // trust score can leave it out. Without this, pausing an agent would
-      // steadily destroy its reputation for having been paused, and it would
-      // come back below the trust floor -- held by a rule, generating
-      // escalations, because a human had stopped it for an afternoon.
-      ...(paused ? { paused_block: "true" } : {}),
     } as unknown as Json,
     agentId,
     decision,
