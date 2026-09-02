@@ -101,10 +101,72 @@ action.
 
 **`simulate_action` runs steps 3–5 and stops.** Same engine, same inputs, same
 answer — it just never reaches Razorpay and never counts toward a rate limit.
-That is what makes probing free, which the sellable-catalog panel and the
-upsell logic both depend on.
+That is what makes probing free, which the sellable-catalog panel, the upsell
+logic and the counter-offer pre-clearing all depend on.
 
----
+### 2a. When the merchant answers back: the counter-offer round trip
+
+Under protocol revision 2026-07-28 a tool can return an `input_required` result
+instead of a final one, and the client retries the ORIGINAL call with its
+answers. Mandate uses it to answer a purchase with a policy decision *and* a
+complementary product the buyer may accept or decline.
+
+```
+  POST #1   verify -> tenant -> mandate gate -> policy engine
+            parent evaluated in SIMULATE mode
+            complement found and pre-cleared by the engine
+            -> InputRequiredResult + sealed requestState
+            NOTHING EXECUTED. No Razorpay call, no velocity slot.
+
+            (buyer decides)
+
+  POST #2   verify AGAIN -> tenant AGAIN -> mandate gate AGAIN
+            policy engine AGAIN, on the parent and then the child
+            -> execute
+```
+
+**Nothing from POST #1 is carried forward and reused.** Trust, velocity, caps
+and mandates may all have moved between the two posts, and a cached "it was
+allowed a moment ago" is exactly the bypass this shape has to avoid. POST #2
+calls the same evaluator a first-time caller would and can legitimately reach a
+different answer — `scripts/verify-mrtr.ts` installs a cap *between* the two
+posts and asserts the outcome flips from allow to block.
+
+Three properties worth stating precisely, because each is easy to assume and
+hard to notice missing:
+
+- **POST #1 cannot execute, structurally.** The parent is evaluated in
+  `simulate` mode, so there is no code path from the offer branch to
+  `executeRealAction`. It is not a rule anyone has to remember.
+- **The offer costs nothing.** A simulate trace is already excluded from
+  velocity aggregates and from the trust score, so a counter-offer cannot burn
+  a rate slot or move an agent's standing. That property comes from choosing
+  the right mode rather than from filters added to `getAggregates` — so there
+  is no filter for a later change to forget.
+- **An accepted offer is consent, not authorization.** The child is a full
+  action evaluated by the same engine. It can be blocked or escalated while the
+  parent still executes.
+
+**`requestState` is the sealed continuation, and it is client-controlled
+input.** MRTR resumes by having the *client* echo it back verbatim, and the
+buyer signs its own retry legitimately — so Web Bot Auth's digest covers
+whatever the agent put there. A signature proves who sent the bytes, not that
+they are the bytes the server minted. It is therefore HMAC-sealed with a
+ten-minute TTL and bound to the agent it was offered to, and even then treated
+as a hint: the offered product is re-derived from the catalog by SKU, so a
+stale or chosen price cannot reach a policy decision.
+
+**Executing twice is prevented by a uniqueness constraint, not a check.** Two
+concurrent retries would both pass a check-then-execute guard. Each offer mints
+an `offerId` into its sealed state, the executing trace carries it, and a
+partial unique index (migration 0011) turns a replay into an insert conflict.
+
+**Clients that cannot do a round trip are a first-class path, not a hedge.**
+Most MCP clients today declare no elicitation capability. Capability is read
+from the per-request `_meta` envelope — it travels with every request rather
+than being negotiated once, which is what lets a stateless server answer each
+one correctly — and a client without it gets the same pre-cleared candidate
+attached to the ordinary result as `suggestions`.
 
 ## 3. Two auth layers, and why they are different
 
@@ -163,11 +225,28 @@ figure that has silently drifted is worse than no figure, because it will be
 trusted. `totalExecuted` in `revenue.ts` and `committedDiscount` in the campaign
 orchestrator are both functions over rows for exactly this reason.
 
-A trace carries `parent_trace_id`, which is what makes upsell revenue
-attributable: a child action exists only because a parent purchase happened, so
-"this order came from that one" is a fact in the data rather than a label.
+A trace carries `parent_trace_id`, which is what makes upsell and counter-offer
+revenue attributable: a child action exists only because a parent purchase
+happened, so "this order came from that one" is a fact in the data rather than
+a label.
 
----
+**`decision` means what the engine said, and nothing else.** The counter-offer
+states — an offer made, an offer declined — are not policy verdicts and are
+deliberately not values of `decision`. Adding them there would have silently
+reshaped every panel that derives from it. They live in `params` instead, as
+server-stamped fields:
+
+| Field | Meaning |
+|---|---|
+| `mrtr: "input_required"` | this trace records an offer being made; `mode` is `simulate`, so nothing moved |
+| `mrtr: "counter_declined"` | the buyer said no; also `simulate`, because declining an offer is not a money action |
+| `offered_sku` | which complement was proposed |
+| `offer_id` | the once-only token the re-entry guard is built on |
+
+Those four are stamped **after** the caller's own params, so a buyer agent
+cannot forge one by putting it in its own request. That matters most for
+`offer_id`: if a caller could set it, a caller could collide it deliberately
+and block someone else's purchase.
 
 ## 5. The policy engine
 
@@ -390,18 +469,40 @@ output rather than the error message.
 
 ## 10. Growth
 
-### Cross-sell (`src/lib/demo/crossSell.ts`)
+### Cross-sell and counter-offers (`src/lib/demo/crossSell.ts`, `src/lib/mcp/counterOffer.ts`)
 
-After an allowed purchase, ~30% of the time, the agent asks a model for the best
-complement from the *live* catalog and enforces it as a second, real,
-policy-gated `order.create` carrying `forkFrom` — so an upsell that breaches a
-cap gets refused like anything else, and the revenue is attributable.
+After an allowed purchase the agent looks for the best complement in the *live*
+catalog and enforces it as a second, real, policy-gated action carrying
+`forkFrom` — so an upsell that breaches a cap is refused like anything else, and
+the revenue is attributable.
 
 Grounded, not trusted: the model's SKU is checked against the real catalog. An
-invented SKU returns `null`, and a failed suggestion never fails the purchase it
+invented SKU yields nothing, and a failed suggestion never fails the purchase it
 was attached to.
 
-Measured attach rate after the prompt fix: **~30%**, up from 2%.
+**There is no probability any more.** A 0.3 dice roll used to decide whether the
+agent would even look. That made the attach rate a constant someone chose rather
+than a measurement of anything, and it meant the agent declined perfectly good
+complements at random — which is a coin, not judgement. With the dice gone the
+rate is an outcome of two real things: whether the model finds a complement the
+catalog supports, and whether the merchant's own policy would clear it.
+
+**The model and the engine are kept strictly apart**, and this is the boundary
+most worth protecting here. The model picks candidates from the catalog and
+stays in the `public` egress class. The engine decides which of them clear, by
+calling `evaluatePolicy` directly. Caps, thresholds and trust scores are never
+sent to any model — a model that knew the step-up threshold could be induced to
+propose just underneath it, which is precisely the structuring the rate limiter
+exists to catch.
+
+Only candidates that *currently* clear are offered. Proposing something that
+would be refused on acceptance wastes a round trip and teaches a buyer agent
+that this merchant's offers cannot be trusted.
+
+The pitch text lands in another agent's context, so it is treated as data and
+never as instructions: structural characters are stripped and the length is
+bounded. Catalog copy is merchant-editable and the pitch is model-written, which
+makes it a path from two soft sources into a third party's prompt.
 
 ### Campaign orchestrator (`src/lib/campaigns/`)
 
@@ -553,9 +654,10 @@ the cause.
 Both need the dev server running.
 
 ```bash
-npx tsx scripts/verify-policy.ts  # every rule type, both directions
-npx tsx scripts/verify-e2e.ts     # end to end, including tenant isolation
-npx tsx scripts/bench-llm.ts      # the model contract suite
+npx tsx scripts/verify-policy.ts  # every rule type, both directions      14/14
+npx tsx scripts/verify-e2e.ts     # end to end, incl. tenant isolation    15/15
+npx tsx scripts/verify-mrtr.ts    # counter-offers and the MRTR invariant 17/17
+npx tsx scripts/bench-llm.ts      # the model contract suite              56/56
 ```
 
 `verify-policy` installs one rule at a time on a throwaway merchant and drives
@@ -606,6 +708,29 @@ banned category refused                  category_block fired
 payment_link.create                      live link at rzp.io
 tenants cascade-delete cleanly           0 orphans
 ```
+
+`verify-mrtr` tests the counter-offer round trip against its invariant rather
+than its happy path. The property that makes the feature safe — POST #1 decides
+nothing durable, POST #2 re-decides everything — is invisible when it works and
+catastrophic when it does not, so the cases are written to fail if it is
+removed. A cap is installed *between* the two posts and the outcome must flip; a
+sealed state is replayed and the second use must be refused; the offer post must
+leave no Razorpay call and no velocity slot spent, asserted on the trace count
+itself rather than on a downstream decision that could be right by accident.
+
+Two of its cases passed for the wrong reason on their first run, and both are
+worth recording because both are the same failure mode this project keeps
+meeting — **a test satisfied by the path never executing.**
+
+"An accepted offer that breaches a cap is refused while the parent executes"
+passed while producing *no offer at all*: capping at the parent's price means
+every dearer complement fails pre-clearing, so nothing was offered, and "the
+child did not clear" is trivially true when there is no child. The path is only
+reachable when state moves between the posts.
+
+"The same offer id can never execute twice" asserted only that one trace carried
+an offer id — which also holds if the replay quietly took some other path and
+wrote nothing. It now inspects the replay's own outcome.
 
 `scripts/regen.ts` rebuilds demo history at a pace the engine considers
 ordinary. Ten seconds between ticks, deliberately: running flat out blows the
@@ -671,6 +796,18 @@ Stated here rather than discovered by a reviewer.
 - **`/.well-known/http-message-signatures-directory`** is per-origin and cannot
   carry a slug, so it serves the merchant named by `MANDATE_PUBLIC_MERCHANT`.
   Every merchant also has an unambiguous explicit directory URL.
+- **Counter-offers need a client that declares elicitation.** Most MCP clients
+  today do not, and those take the `suggestions` path instead. That is a real
+  product behaviour rather than a degraded one, but it does mean the round trip
+  is exercised mainly by this repo's own agent and test suite.
+- **A counter-offer depends on the parent action naming a SKU.** It is read from
+  `params.notes.sku`, written at purchase time. There is deliberately no
+  inference from the amount — the order history refuses to guess a product from
+  a price for the same reason, and a counter-offer built on a guess would be
+  worse.
+- **The MCP v2 SDK is days old at the time of writing.** It is the stable line,
+  not a beta, but this project is an early adopter of it and of protocol
+  revision 2026-07-28.
 
 ---
 
@@ -710,6 +847,25 @@ fields now win.
 to a sign-in page an AI buyer cannot complete — the merchant became
 undiscoverable while looking perfectly fine to anyone already signed in. Found
 by the e2e suite, not by reading the diff.
+
+**The MCP transport was replaced, not upgraded.** v1
+`@modelcontextprotocol/sdk` topped out at protocol 2025-11-25 and had no MRTR;
+v2 ships as split `server`/`client` packages with no compatibility layer. The
+spike that established this is in SPIKE.md, including the false positive that
+would have cost a day: `input_required` *does* appear in v1, as a `TaskStatus`
+enum member belonging to the unrelated tasks feature.
+
+**Sessions were deleted rather than left unused.** 2026-07-28 has no
+`initialize` handshake and no `Mcp-Session-Id`. That suited this project
+unusually well — Web Bot Auth already re-verified every single request, so the
+session machinery was ceremony the security model never used.
+
+**`requestState` was missing from the original design and is the
+security-critical part.** The plan described the retry as "the same params plus
+`inputResponses`". The actual mechanism is an opaque blob the *client* echoes
+back, which makes it client-controlled input on POST #2. The "re-run the engine"
+invariant protects against a stale decision, not a forged counter-offer. See
+section 2a for what closes it.
 
 **`per_customer` velocity never worked.** The scope was in the schema since the
 beginning and `draft_policy` offered it to the model as a rule it could
