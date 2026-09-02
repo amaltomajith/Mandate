@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOrCreateSession, endSession } from "@/lib/mcp/sessionStore";
+import { createMcpHandler } from "@modelcontextprotocol/server";
+import { createMandateServer } from "@/lib/mcp/server";
 import { verifySignedRequest } from "@/lib/webBotAuth/verify";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createAlert, insertTrace } from "@/lib/mcp/traceHelpers";
@@ -100,24 +101,26 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ slug: stri
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  const sessionId = req.headers.get("mcp-session-id");
-  const transport = await getOrCreateSession(sessionId);
-
-  return transport.handleRequest(req, {
-    parsedBody,
-    authInfo: {
-      token: verification.keyid,
-      clientId: verification.keyid,
-      scopes: [],
-      extra: { agentId: verification.keyid },
-    },
-  });
-}
-
-export async function DELETE(req: NextRequest) {
-  const sessionId = req.headers.get("mcp-session-id");
-  if (sessionId) endSession(sessionId);
-  return new NextResponse(null, { status: 204 });
+  // A fresh handler and a fresh server per request. Under 2026-07-28 there is
+  // no session to reuse and nothing to keep between posts, which is why the
+  // session store this route used to consult is gone rather than merely
+  // unused. authInfo is strictly pass-through -- the handler never reads
+  // headers or verifies anything itself, so the identity below is the one the
+  // Ed25519 verification above established and nothing else.
+  const handler = createMcpHandler(() => createMandateServer());
+  try {
+    return await handler.fetch(req, {
+      parsedBody,
+      authInfo: {
+        token: verification.keyid,
+        clientId: verification.keyid,
+        scopes: [],
+        extra: { agentId: verification.keyid },
+      },
+    });
+  } finally {
+    await handler.close();
+  }
 }
 
 export async function GET() {

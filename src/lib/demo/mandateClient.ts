@@ -11,20 +11,51 @@ import { signRequest } from "../webBotAuth/sign";
 // immediately outside Next's server bundling context, which would break the
 // CLI script. It's still never imported from client components in practice.
 
+/** What a counter-offer looks like on the wire, from the buyer's side. */
+export interface InputRequestSpec {
+  method?: string;
+  params?: {
+    message?: string;
+    mode?: string;
+    url?: string;
+    requestedSchema?: unknown;
+  };
+}
+
 /**
- * Minimal hand-rolled MCP Streamable HTTP client — deliberately not the
- * `@modelcontextprotocol/sdk` client transport. This IS the thing being governed
- * (a third-party-style agent calling Mandate's MCP server), so it signs its own
- * requests with Web Bot Auth exactly like an external agent would have to, and
- * speaks the wire protocol directly rather than trusting a client SDK to do it
- * "correctly" underneath — the whole point of the demo is showing that protocol
- * surface being checked.
+ * Decides how to answer a counter-offer. Returns the `inputResponses` map the
+ * retry carries, keyed the same way the server keyed its `inputRequests`.
  *
- * Shared between `scripts/checkout-agent.ts` (CLI) and the dashboard's one-click
- * "Run demo" button (`src/lib/demo/runDemo.ts`) — same client, two callers.
+ * Returning `null` declines the whole round: the client stops and surfaces the
+ * InputRequiredResult to its caller rather than retrying. That is a real buyer
+ * outcome, not an error.
+ */
+export type InputRequiredHandler = (
+  requests: Record<string, InputRequestSpec>
+) => Promise<Record<string, unknown> | null>;
+
+/**
+ * Minimal hand-rolled MCP client, protocol revision 2026-07-28 — deliberately
+ * not `@modelcontextprotocol/client`. This IS the thing being governed (a
+ * third-party-style agent calling Mandate), so it signs its own requests with
+ * Web Bot Auth exactly like an external agent would have to, and speaks the
+ * wire protocol directly rather than trusting a client SDK to do it correctly
+ * underneath. The point of the demo is that protocol surface being checked.
+ *
+ * Two things changed with 2026-07-28 and both simplify this:
+ *
+ * There is no `initialize` handshake and no `Mcp-Session-Id`, so every call is
+ * a single self-contained signed POST. The client holds no connection state.
+ *
+ * Server-to-client interaction is MRTR: instead of the server pushing an
+ * `elicitation/create` request down a held-open stream, it *returns* an
+ * `input_required` result, and the client retries the ORIGINAL call with its
+ * answers. That means the retry is its own signed POST with its own body, so
+ * it gets verified from scratch — there is no window where a half-finished
+ * exchange is trusted, and a replayed retry from another agent fails at the
+ * signature rather than somewhere deeper.
  */
 export class MandateClient {
-  private sessionId: string | null = null;
   private nextId = 1;
 
   constructor(
@@ -34,10 +65,37 @@ export class MandateClient {
      *  verification rather than acting on the wrong tenant. */
     private readonly slug: string,
     private readonly agentId: string,
-    private readonly secretKeyBase64: string
+    private readonly secretKeyBase64: string,
+    /** Advertised per request in the `_meta` envelope. A client that declares
+     *  no elicitation capability must still be able to transact — the server
+     *  answers it with plain suggestions instead of a counter-offer — so this
+     *  defaults to off and the fallback path is the one exercised unless a
+     *  caller opts in. */
+    private readonly supportsElicitation = false
   ) {}
 
+  /** The per-request `_meta` envelope 2026-07-28 carries in place of the
+   *  handshake. Capabilities travel on every call rather than being negotiated
+   *  once, which is what lets a stateless server answer each request correctly
+   *  without remembering who is asking. */
+  private envelope(): Record<string, unknown> {
+    return {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientInfo": { name: "mandate-agent", version: "0.2.0" },
+      "io.modelcontextprotocol/clientCapabilities": this.supportsElicitation ? { elicitation: {} } : {},
+    };
+  }
+
   private async post(body: unknown, expectResponse: boolean): Promise<unknown> {
+    // 2026-07-28 requires the JSON-RPC method to be mirrored in an `Mcp-Method`
+    // header, and rejects the request when the two disagree. Not signed
+    // directly, and it does not need to be: the body is covered by
+    // content-digest, so an altered header cannot change what executes -- it
+    // can only produce a mismatch the server refuses outright.
+    // `Mcp-Name` mirrors params.name the same way for tool and prompt calls.
+    const envelopeBody = body as { method?: string; params?: { name?: string } } | null;
+    const method = envelopeBody?.method;
+    const name = envelopeBody?.params?.name;
     const url = new URL(`/api/m/${this.slug}/mcp`, this.baseUrl);
     const bodyText = JSON.stringify(body);
     const authority = url.host;
@@ -54,14 +112,13 @@ export class MandateClient {
     const headers: Record<string, string> = {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
+      ...(method ? { "mcp-method": method } : {}),
+      ...(name ? { "mcp-name": name } : {}),
       ...signed,
     };
-    if (this.sessionId) headers["mcp-session-id"] = this.sessionId;
+
 
     const res = await fetch(url, { method: "POST", headers, body: bodyText });
-
-    const returnedSessionId = res.headers.get("mcp-session-id");
-    if (returnedSessionId) this.sessionId = returnedSessionId;
 
     if (!expectResponse) {
       if (!res.ok) throw new Error(`Notification failed: ${res.status} ${await res.text()}`);
@@ -75,38 +132,94 @@ export class MandateClient {
     return res.json();
   }
 
-  async initialize(clientName: string): Promise<void> {
-    await this.post(
-      {
-        jsonrpc: "2.0",
-        id: this.nextId++,
-        method: "initialize",
-        params: {
-          protocolVersion: "2025-11-25",
-          capabilities: {},
-          clientInfo: { name: clientName, version: "0.1.0" },
-        },
-      },
-      true
-    );
-
-    await this.post({ jsonrpc: "2.0", method: "notifications/initialized" }, false);
+  /**
+   * No-op. 2026-07-28 removed the `initialize` handshake — capabilities and
+   * protocol version ride in every request's `_meta` envelope instead.
+   *
+   * Kept as a method, and kept called, because the alternative is silence: a
+   * reader who knows the 2025 protocol will look for the handshake, and a
+   * method that says why there isn't one is worth more than its absence.
+   */
+  async initialize(_clientName: string): Promise<void> {
+    void _clientName;
   }
 
-  async callTool<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
-    const response = (await this.post(
-      { jsonrpc: "2.0", id: this.nextId++, method: "tools/call", params: { name, arguments: args } },
-      true
-    )) as {
-      result?: { content?: { type: string; text?: string }[]; isError?: boolean };
-      error?: { message: string };
-    };
+  /**
+   * Calls a tool, answering counter-offers along the way.
+   *
+   * When the server returns an `input_required` result, `onInputRequired`
+   * decides how to answer and the ORIGINAL call is re-posted with those answers
+   * plus the server's `requestState` echoed back verbatim. The server
+   * re-evaluates everything on that retry — it does not resume a cached
+   * decision — so the second post can legitimately reach a different outcome
+   * than the first, and that is the point rather than a flaw.
+   *
+   * Rounds are bounded. A server that kept asking would otherwise spin a buyer
+   * agent forever, and an unbounded retry loop driving real money actions is
+   * not a loop anyone should ship.
+   */
+  async callTool<T = unknown>(
+    name: string,
+    args: Record<string, unknown>,
+    onInputRequired?: InputRequiredHandler,
+    maxRounds = 3
+  ): Promise<T> {
+    let inputResponses: Record<string, unknown> | undefined;
+    let requestState: string | undefined;
 
-    if (response.error) throw new Error(`Tool ${name} failed: ${response.error.message}`);
-    const textPart = response.result?.content?.find((c) => c.type === "text");
-    if (!textPart?.text) throw new Error(`Tool ${name} returned no text content`);
-    if (response.result?.isError) throw new Error(`Tool ${name} returned an error: ${textPart.text}`);
-    return JSON.parse(textPart.text) as T;
+    for (let round = 0; round < maxRounds; round++) {
+      const params: Record<string, unknown> = {
+        name,
+        arguments: args,
+        _meta: this.envelope(),
+      };
+      // Present only on a retry. The server distinguishes the first post from a
+      // retry by their presence, so sending empty ones on round 0 would make
+      // every call look like a resumption.
+      if (inputResponses) params.inputResponses = inputResponses;
+      if (requestState !== undefined) params.requestState = requestState;
+
+      const response = (await this.post(
+        { jsonrpc: "2.0", id: this.nextId++, method: "tools/call", params },
+        true
+      )) as {
+        result?: {
+          content?: { type: string; text?: string }[];
+          isError?: boolean;
+          resultType?: string;
+          inputRequests?: Record<string, InputRequestSpec>;
+          requestState?: string;
+        };
+        error?: { message: string };
+      };
+
+      if (response.error) throw new Error(`Tool ${name} failed: ${response.error.message}`);
+      const result = response.result;
+      if (!result) throw new Error(`Tool ${name} returned no result`);
+
+      if (result.resultType === "input_required") {
+        if (!onInputRequired) {
+          throw new Error(
+            `Tool ${name} asked for input, but this client was given no handler to answer with.`
+          );
+        }
+        const answers = await onInputRequired(result.inputRequests ?? {});
+        // A declined round is a real outcome. Surfacing the input_required
+        // result lets the caller see what was offered and that it said no,
+        // rather than collapsing a decision into an exception.
+        if (answers === null) return result as T;
+        inputResponses = answers;
+        requestState = result.requestState;
+        continue;
+      }
+
+      const textPart = result.content?.find((c) => c.type === "text");
+      if (!textPart?.text) throw new Error(`Tool ${name} returned no text content`);
+      if (result.isError) throw new Error(`Tool ${name} returned an error: ${textPart.text}`);
+      return JSON.parse(textPart.text) as T;
+    }
+
+    throw new Error(`Tool ${name} still wanted input after ${maxRounds} rounds.`);
   }
 
   /** Deliberately sends a request with a corrupted signature — used to trigger and
@@ -137,7 +250,6 @@ export class MandateClient {
       headers: {
         "content-type": "application/json",
         ...signed,
-        ...(this.sessionId ? { "mcp-session-id": this.sessionId } : {}),
       },
       body: tamperedBody,
     });

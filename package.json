@@ -12,7 +12,8 @@
   "dependencies": {
     "@clerk/nextjs": "^7.8.1",
     "@clerk/themes": "^2.4.57",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
     "@noble/ed25519": "^3.1.0",
     "@noble/hashes": "^2.3.0",
     "@react-three/drei": "^10.7.8",
