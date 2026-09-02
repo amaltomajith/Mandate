@@ -82,6 +82,32 @@ export function EscalationsPanel({
                 opacity: rowBusy ? 0.6 : 1,
               }}
             >
+              {/* No trace means the card cannot say what it is asking about.
+                  Approving money you cannot see is the single worst thing this
+                  panel could offer, so the buttons below go dead rather than
+                  the card rendering as a bare pair of them -- which is exactly
+                  what it used to do, and why five of these appeared as empty
+                  approve/deny pairs once the trace window filled up. */}
+              {!trace && (
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>
+                      Details unavailable
+                    </p>
+                    <p className="mt-1 text-[11px] leading-snug" style={{ color: "var(--muted-2)" }}>
+                      The action behind this request could not be loaded, so there is nothing to show
+                      you and nothing to approve on. Reload; if it persists, find it by id in
+                      Transactions.
+                    </p>
+                    <p className="mt-1 font-mono text-[10px]" style={{ color: "var(--muted-2)" }}>
+                      {esc.trace_id}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-[10px]" style={{ color: "var(--muted-2)" }}>
+                    {relativeTime(esc.created_at)}
+                  </span>
+                </div>
+              )}
               {trace && (
                 <>
                   {/* Amount first and large: it is the thing a merchant decides
@@ -108,7 +134,7 @@ export function EscalationsPanel({
               )}
               <div className="mt-3 flex gap-2">
                 <SuccessButton
-                  disabled={rowBusy}
+                  disabled={rowBusy || !trace}
                   onClick={() => act(esc.id, "approve", approveEscalation)}
                   className="flex-1"
                 >
@@ -118,7 +144,7 @@ export function EscalationsPanel({
                   </span>
                 </SuccessButton>
                 <DangerButton
-                  disabled={rowBusy}
+                  disabled={rowBusy || !trace}
                   onClick={() => act(esc.id, "deny", denyEscalation)}
                   className="flex-1"
                 >

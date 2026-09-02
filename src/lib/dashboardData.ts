@@ -94,13 +94,19 @@ export async function getDashboardData() {
     withRetry(() => mine(supabase.from("agents").select("*").order("trust_score", { ascending: false }))),
     withRetry(() => mine(supabase.from("policy_rules").select("*").order("created_at", { ascending: false }))),
     withRetry(() => mine(supabase.from("traces").select("*").order("created_at", { ascending: false }).limit(300))),
-    // Deliberately matched to the trace limit above, not a smaller number of
-    // its own. Escalations map 1:1 onto escalated traces, and the revenue
-    // panel reads an escalated trace with no matching escalation row as "still
-    // awaiting a decision". With a tighter cap here, approvals would silently
-    // fall out of the fetched set as they accumulate and the panel would start
-    // reporting settled revenue as pending — wrong in a way nothing on screen
-    // would reveal.
+    // Matched to the trace limit above, not a smaller number of its own. The
+    // revenue panel reads an escalated trace with no matching escalation row as
+    // "still awaiting a decision", so with a tighter cap here approvals would
+    // silently fall out of the fetched set and settled revenue would start
+    // reporting as pending.
+    //
+    // Matching the numbers does NOT mean the two sets cover the same period,
+    // and assuming it did caused a real bug. Escalations are rare -- 40 against
+    // 449 traces on a live merchant -- so 300 of them reach much further back
+    // than the newest 300 traces do. Ten escalations referenced traces that had
+    // fallen out of the window, and five of those were pending, which rendered
+    // as approve/deny cards with nothing above them. The backfill below is what
+    // actually fixes that; this limit only stops the reverse problem.
     withRetry(() => mine(supabase.from("escalations").select("*").order("created_at", { ascending: false }).limit(300))),
     withRetry(() => mine(supabase.from("alerts").select("*").order("created_at", { ascending: false }).limit(50))),
     withRetry(() => mine(supabase.from("mandates").select("*").order("created_at", { ascending: false }))),
@@ -110,6 +116,27 @@ export async function getDashboardData() {
     // some orders into unnamed ones. Handful of rows either way.
     withRetry(() => mine(supabase.from("products").select("*").order("name"))),
   ]);
+
+  // Any trace an escalation points at, that the window above did not reach.
+  //
+  // Fetched by id rather than by widening the window, because the window exists
+  // to bound the page and widening it to cover the oldest escalation would mean
+  // loading every trace since. This asks for exactly the handful that are
+  // actually referenced.
+  //
+  // A failure here is not fatal: the escalation panel refuses to act on a card
+  // whose trace it cannot show, so the worst case is a card that says so rather
+  // than one that quietly offers to approve something invisible.
+  const fetchedTraceIds = new Set((traces.data ?? []).map((t) => t.id));
+  const missingTraceIds = [...new Set((escalations.data ?? []).map((e) => e.trace_id))].filter(
+    (id) => !fetchedTraceIds.has(id)
+  );
+  const backfilled = missingTraceIds.length
+    ? await withRetry(() => mine(supabase.from("traces").select("*").in("id", missingTraceIds)))
+    : { data: [], error: null };
+  if (backfilled.error) {
+    console.warn("[dashboardData] could not backfill traces for escalations:", backfilled.error.message);
+  }
 
   const errors = [agents, rules, traces, escalations, alerts, mandates, customers, products]
     .map((r) => r.error)
@@ -144,7 +171,10 @@ export async function getDashboardData() {
   return {
     agents: agents.data ?? [],
     rules: rules.data ?? [],
-    traces: traces.data ?? [],
+    // The window, plus whatever the escalation queue still needs to be
+    // explicable. Order is preserved for the window itself; the backfilled
+    // rows are older by construction and go on the end.
+    traces: [...(traces.data ?? []), ...(backfilled.data ?? [])],
     escalations: escalations.data ?? [],
     alerts: alerts.data ?? [],
     mandates: mandates.data ?? [],
