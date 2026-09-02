@@ -631,6 +631,10 @@ shifts with it.
    Without it, policy-sensitive prompts refuse rather than going off-box; set
    `LLM_PROVIDER=groq` with a `GROQ_API_KEY` if you want the hosted path.
 5. `npm install`, `npm run dev`, sign up at `/sign-up`.
+6. Optional, and the most convincing thing to show: the external buyer.
+   `npm --prefix buyer install`, then follow `buyer/README.md` to mint a keypair
+   and register it. It is a separate package with separate dependencies and no
+   access to anything in this one.
 
 Signing up creates your merchant and seeds it with the default rules and
 catalog, so the dashboard is a working shop with no activity in it. Press
@@ -740,7 +744,104 @@ rate-limited rather than one behaving normally.
 
 ---
 
-## 15. Where things live
+## 15. The buyer — a real third party
+
+`buyer/` is an autonomous AI buying agent that shops at a Mandate merchant and
+is **not part of Mandate**. Everything else in this repo is the merchant's side;
+this is the other one.
+
+The distinction is enforced rather than asserted, because an isolation you only
+claim is worth nothing:
+
+- **Its own package and `node_modules`**, outside any workspace. Nothing in the
+  parent repo builds, bundles or imports it.
+- **Zero imports from `src/`.** `buyer/src/transport.ts` is a *copy* of the
+  signing and MRTR logic, written against the protocol rather than shared — a
+  real third-party buyer would have to write its own, and one that borrowed the
+  merchant's would prove nothing.
+- **Four environment variables**, none of which is a database or payment
+  credential: the MCP URL, an agent id, an Ed25519 private key, and a model key.
+  If that process could reach the merchant's database, watching it buy something
+  would be theatre.
+- **Products and tools discovered over the wire** — the catalog from
+  `GET /api/m/<slug>/catalog`, the tool list from `tools/list`.
+
+Verify it with `grep -rE 'from "@/|\.\./\.\./' buyer/src/`, which must return
+nothing.
+
+### What it demonstrates that the simulation cannot
+
+The simulation is in-process and holds the merchant's own credentials. It is the
+right tool for producing variety — ordinary, high-value, banned-category and
+forged traffic, which is where `protocol_reject` evidence comes from — but it
+cannot show that an outsider can transact, because it is not one.
+
+The buyer can. It arrives knowing only a URL, discovers the merchant, registers
+a public key, signs every request, and gets refused when it should be. Both run
+alongside each other; neither replaces the other.
+
+### It has a model on both sides of the conversation
+
+Previously the counterparty answering counter-offers was
+`src/lib/demo/mandateClient.ts` driven by `offer.price <= parent.price`. A rule
+dressed as an agent is still a rule. The buyer's decisions — what to purchase,
+and whether to accept an offer — are made by a hosted model reasoning from a
+persona and a budget, and each produces a decision **and** a stated reason that
+is logged.
+
+The split of model to task is deliberate and follows the measurements in section
+9: the merchant runs a small local model, which measured better at structured
+extraction and must not send policy data off-box; the buyer runs a hosted one,
+which measured better at open-ended judgement and holds no policy data to leak.
+Nothing in `llm/client.ts` changed.
+
+Every SKU the model names is grounded against the fetched catalog. A
+hallucinated one is discarded rather than repaired — repairing it would mean
+guessing about someone else's money.
+
+### The buyer checks before it commits
+
+`simulate_action` first, `enforce_action` only if it would clear. That is what
+simulate exists for from the buyer's side, and it is the behaviour the free
+probing in section 5 was built to enable: a refusal found by simulating costs a
+round trip, a refusal found by enforcing costs a mark on the agent's trust score.
+
+### The fallback is announced
+
+With no model reachable, the agent still runs: cheapest thing that fits, decline
+every offer. That path prints `[fallback, not a decision]`, because a
+deterministic rule wearing the agent's voice would be the most misleading thing
+the program could output.
+
+### A live run
+
+```
+▸ Found a merchant: Demo Storefront
+  6 products, prices in INR
+  tools offered: simulate_action, enforce_action, explain, draft_policy
+  my identity: 1ce21b3d… (Ed25519, published in their key directory)
+
+▸ I want the Premium Standing Desk — ₹6,999
+  "I chose the premium standing desk because it greatly improves ergonomics
+   and keeps my workspace tidy with a single, high-quality piece."
+  checked first: this would clear
+
+▸ They came back with a counter-offer before completing it:
+  "Elevate your typing experience… Add Mechanical Keyboard for ₹4,499.00?"
+
+▸ I'll take it.
+  "I accept because the ergonomic keyboard complements my standing desk
+   and fits my budget."
+
+▸ Bought the Premium Standing Desk. ₹6,999.
+  razorpay order order_TX91B9FlV5SumB
+▸ They added the Mechanical Keyboard too. ₹4,499.
+  budget left: ₹3,502
+```
+
+See `buyer/README.md` for keypair generation and registration.
+
+## 16. Where things live
 
 ```
 supabase/migrations/     0001 schema+RLS · 0002 products · 0004-0008 rule-type
@@ -770,12 +871,20 @@ src/lib/demo/            catalog · crossSell · shopper · seedData ·
                          MandateClient · simulation
 src/components/graph/    3D graph; layout.ts is the pure, testable part
 src/components/dashboard/ DashboardTabs and every panel
-scripts/                 seed · bench-llm · verify-e2e · regen · dev.mjs
+scripts/                 seed · bench-llm · verify-e2e · verify-policy ·
+                         verify-mrtr · verify-campaign · regen · dev.mjs ·
+                         register-buyer
+buyer/                   THE OTHER SIDE. A third-party buying agent with its own
+                         package.json and node_modules, zero imports from src/:
+                           transport.ts  signing + MRTR, copied not shared
+                           brain.ts      the model that decides and explains
+                           agent.ts      discover, check, buy, answer offers
+                           catalog.ts    products over HTTP, never imported
 ```
 
 ---
 
-## 16. Known limitations
+## 17. Known limitations
 
 Stated here rather than discovered by a reviewer.
 
@@ -805,13 +914,19 @@ Stated here rather than discovered by a reviewer.
   inference from the amount — the order history refuses to guess a product from
   a price for the same reason, and a counter-offer built on a guess would be
   worse.
+- **The buyer needs a hosted model key.** Without one it still runs, but on a
+  deterministic fallback that is clearly labelled as such rather than passed off
+  as judgement.
+- **The buyer is registered by a script**, not by a self-service flow. That is
+  the correct shape — an agent cannot register itself — but a real merchant
+  would need an onboarding surface for it.
 - **The MCP v2 SDK is days old at the time of writing.** It is the stable line,
   not a beta, but this project is an early adopter of it and of protocol
   revision 2026-07-28.
 
 ---
 
-## 17. Decisions worth knowing about
+## 18. Decisions worth knowing about
 
 Things that were tried, reversed, or nearly went wrong. A handover that only
 lists what works teaches nothing about where the edges are.

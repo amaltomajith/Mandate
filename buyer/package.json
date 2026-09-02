@@ -1,0 +1,24 @@
+{
+  "name": "mandate-buyer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A third-party autonomous buying agent. Talks to a Mandate merchant over signed MCP and nothing else.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "once": "tsx src/index.ts --once",
+    "keygen": "tsx src/keygen.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@noble/ed25519": "^3.1.0",
+    "@noble/hashes": "^2.3.0",
+    "dotenv": "^17.4.2",
+    "openai": "^7.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "^4.20.7",
+    "typescript": "^5"
+  }
+}
