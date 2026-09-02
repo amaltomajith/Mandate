@@ -11,17 +11,58 @@ import type { Json } from "@/types/db";
 // every model); the broadly-supported `json_object` mode plus validating the
 // result ourselves is more portable across whichever Groq model ends up
 // configured, so validation happens here rather than being delegated to the API.
+const DRAFT_PARAMS = {
+  cap: z.object({ max_amount: z.number(), currency: z.string(), scope: z.enum(["per_transaction", "per_day"]) }),
+  velocity: z.object({ max_count: z.number(), window_seconds: z.number(), scope: z.enum(["per_agent", "per_customer"]) }),
+  category_block: z.object({ categories: z.array(z.string()) }),
+  trust_floor: z.object({ min_score: z.number(), action: z.enum(["escalate", "block"]).optional() }),
+  step_up: z.object({ threshold_amount: z.number(), currency: z.string() }),
+} as const;
+
+type DraftType = keyof typeof DRAFT_PARAMS;
+
+/** The decision, parsed strictly. Which key the params were parked under is
+ *  handled separately by `paramsFor` — see there for why. */
 const DraftShape = z.object({
   type: z.enum(["cap", "velocity", "category_block", "step_up", "trust_floor"]),
   name: z.string(),
   rationale: z.string(),
-  cap: z.object({ max_amount: z.number(), currency: z.string(), scope: z.enum(["per_transaction", "per_day"]) }).optional(),
-  velocity: z.object({ max_count: z.number(), window_seconds: z.number(), scope: z.enum(["per_agent", "per_customer"]) }).optional(),
-  category_block: z.object({ categories: z.array(z.string()) }).optional(),
-  trust_floor: z.object({ min_score: z.number(), action: z.enum(["escalate", "block"]).optional() }).optional(),
-  step_up: z.object({ threshold_amount: z.number(), currency: z.string() }).optional(),
 });
-type DraftShape = z.infer<typeof DraftShape>;
+
+/**
+ * Pulls the params object out of a draft, tolerating the model putting it under
+ * the wrong key.
+ *
+ * Measured behaviour, not a hypothetical: granite4 gets the *type* right
+ * essentially every time, and occasionally emits `{"type": "velocity", "cap":
+ * {"max_count": 10, "window_seconds": 60, ...}}` — the right decision in the
+ * wrong container. Rejecting that outright threw away a correct answer over a
+ * key name, which is how draft_policy went from 9/9 to 4/6 between two runs of
+ * the same suite.
+ *
+ * `type` is the authoritative field: it is the model's actual decision, stated
+ * once and unambiguously. So the params are located by validating candidates
+ * against the schema for that type, preferring the correctly-named key. This
+ * does NOT weaken the contract — an object that does not satisfy the type's
+ * schema is still rejected, so a genuine mismatch (velocity params under a
+ * `cap` *type*) still fails. Only the container name is forgiven.
+ */
+function paramsFor(type: DraftType, raw: Record<string, unknown>): unknown | null {
+  const schema = DRAFT_PARAMS[type];
+
+  const preferred = schema.safeParse(raw[type]);
+  if (preferred.success) return preferred.data;
+
+  const misfiled = (Object.keys(DRAFT_PARAMS) as DraftType[])
+    .filter((k) => k !== type)
+    .map((k) => schema.safeParse(raw[k]))
+    .filter((r) => r.success);
+
+  // Exactly one, or none. Two objects that both satisfy the schema means the
+  // model emitted a genuinely ambiguous draft, and picking one would be a coin
+  // flip dressed up as a decision.
+  return misfiled.length === 1 ? misfiled[0].data : null;
+}
 
 export interface DraftPolicyResult {
   ruleId: string;
@@ -96,15 +137,21 @@ export async function draftPolicy(
   });
 
   const raw = response.choices[0]?.message?.content ?? "{}";
-  let draft: DraftShape;
+  let draft: z.infer<typeof DraftShape>;
+  let rawObject: Record<string, unknown>;
   try {
-    draft = DraftShape.parse(JSON.parse(raw));
+    rawObject = JSON.parse(raw) as Record<string, unknown>;
+    draft = DraftShape.parse(rawObject);
   } catch (err) {
     throw new Error(`draft_policy: model did not return a valid rule shape: ${err instanceof Error ? err.message : err}`);
   }
 
-  const params = draft[draft.type];
-  if (!params) throw new Error(`draft_policy: model chose type "${draft.type}" but didn't include its params object.`);
+  const params = paramsFor(draft.type, rawObject);
+  if (!params) {
+    throw new Error(
+      `draft_policy: model chose type "${draft.type}" but produced no params object matching it.`
+    );
+  }
 
   const db = createAdminClient();
   const existingRules = await getActiveRules(merchantId);
