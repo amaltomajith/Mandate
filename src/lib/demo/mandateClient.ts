@@ -30,6 +30,15 @@ export interface InputRequestSpec {
  * InputRequiredResult to its caller rather than retrying. That is a real buyer
  * outcome, not an error.
  */
+/** The raw shape a tools/call returns, before it is unwrapped. */
+export interface RawToolResult {
+  content?: { type: string; text?: string }[];
+  isError?: boolean;
+  resultType?: string;
+  inputRequests?: Record<string, InputRequestSpec>;
+  requestState?: string;
+}
+
 export type InputRequiredHandler = (
   requests: Record<string, InputRequestSpec>
 ) => Promise<Record<string, unknown> | null>;
@@ -158,6 +167,43 @@ export class MandateClient {
    * agent forever, and an unbounded retry loop driving real money actions is
    * not a loop anyone should ship.
    */
+  /**
+   * One post, no retry loop. Returns the raw result so a caller can inspect an
+   * `input_required` and decide what to do with it by hand.
+   *
+   * `callTool` is the ergonomic path; this is the one tests use, because
+   * proving the invariant means driving the two posts separately — changing a
+   * cap between them, replaying the same state twice, sending someone else's
+   * answers. A helper that always completes the round trip cannot express any
+   * of that.
+   */
+  async callOnce(
+    name: string,
+    args: Record<string, unknown>,
+    extra?: { inputResponses?: Record<string, unknown>; requestState?: string }
+  ): Promise<RawToolResult> {
+    const params: Record<string, unknown> = { name, arguments: args, _meta: this.envelope() };
+    if (extra?.inputResponses) params.inputResponses = extra.inputResponses;
+    if (extra?.requestState !== undefined) params.requestState = extra.requestState;
+
+    const response = (await this.post(
+      { jsonrpc: "2.0", id: this.nextId++, method: "tools/call", params },
+      true
+    )) as { result?: RawToolResult; error?: { message: string } };
+
+    if (response.error) throw new Error(`Tool ${name} failed: ${response.error.message}`);
+    if (!response.result) throw new Error(`Tool ${name} returned no result`);
+    return response.result;
+  }
+
+  /** Unwraps a completed (non-input_required) result into its JSON payload. */
+  static unwrap<T>(result: RawToolResult, name = "tool"): T {
+    const textPart = result.content?.find((c) => c.type === "text");
+    if (!textPart?.text) throw new Error(`${name} returned no text content`);
+    if (result.isError) throw new Error(`${name} returned an error: ${textPart.text}`);
+    return JSON.parse(textPart.text) as T;
+  }
+
   async callTool<T = unknown>(
     name: string,
     args: Record<string, unknown>,
@@ -168,34 +214,7 @@ export class MandateClient {
     let requestState: string | undefined;
 
     for (let round = 0; round < maxRounds; round++) {
-      const params: Record<string, unknown> = {
-        name,
-        arguments: args,
-        _meta: this.envelope(),
-      };
-      // Present only on a retry. The server distinguishes the first post from a
-      // retry by their presence, so sending empty ones on round 0 would make
-      // every call look like a resumption.
-      if (inputResponses) params.inputResponses = inputResponses;
-      if (requestState !== undefined) params.requestState = requestState;
-
-      const response = (await this.post(
-        { jsonrpc: "2.0", id: this.nextId++, method: "tools/call", params },
-        true
-      )) as {
-        result?: {
-          content?: { type: string; text?: string }[];
-          isError?: boolean;
-          resultType?: string;
-          inputRequests?: Record<string, InputRequestSpec>;
-          requestState?: string;
-        };
-        error?: { message: string };
-      };
-
-      if (response.error) throw new Error(`Tool ${name} failed: ${response.error.message}`);
-      const result = response.result;
-      if (!result) throw new Error(`Tool ${name} returned no result`);
+      const result = await this.callOnce(name, args, { inputResponses, requestState });
 
       if (result.resultType === "input_required") {
         if (!onInputRequired) {
@@ -213,10 +232,7 @@ export class MandateClient {
         continue;
       }
 
-      const textPart = result.content?.find((c) => c.type === "text");
-      if (!textPart?.text) throw new Error(`Tool ${name} returned no text content`);
-      if (result.isError) throw new Error(`Tool ${name} returned an error: ${textPart.text}`);
-      return JSON.parse(textPart.text) as T;
+      return MandateClient.unwrap<T>(result, `Tool ${name}`);
     }
 
     throw new Error(`Tool ${name} still wanted input after ${maxRounds} rounds.`);
