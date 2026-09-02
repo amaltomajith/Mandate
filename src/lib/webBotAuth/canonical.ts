@@ -26,11 +26,24 @@ export interface SignatureParams {
   keyid: string;
   created: number; // unix seconds
   alg: "ed25519";
+  /**
+   * Single-use, per request.
+   *
+   * `created` alone bounds a replay to the skew window; it does not prevent one
+   * inside it. Five minutes is ample time to capture a valid `enforce_action`
+   * and resend it, and the replay is indistinguishable from the original --
+   * same signature, same digest, genuinely signed by the right agent.
+   *
+   * The nonce rides in `@signature-params`, so it is covered by the signature
+   * and cannot be swapped for a fresh one without re-signing. The server
+   * refuses one it has already seen.
+   */
+  nonce: string;
 }
 
 export function buildSignatureInputHeader(params: SignatureParams): string {
   const componentList = COVERED_COMPONENTS.map((c) => `"${c}"`).join(" ");
-  return `sig1=(${componentList});created=${params.created};keyid="${params.keyid}";alg="${params.alg}"`;
+  return `sig1=(${componentList});created=${params.created};keyid="${params.keyid}";alg="${params.alg}";nonce="${params.nonce}"`;
 }
 
 /** Parses a Signature-Input header produced by {@link buildSignatureInputHeader}. */
@@ -46,8 +59,15 @@ export function parseSignatureInputHeader(header: string): SignatureParams & { c
   const createdMatch = paramsPart.match(/created=(\d+)/);
   const keyidMatch = paramsPart.match(/keyid="([^"]+)"/);
   const algMatch = paramsPart.match(/alg="([^"]+)"/);
+  const nonceMatch = paramsPart.match(/nonce="([^"]+)"/);
   if (!createdMatch || !keyidMatch || !algMatch) {
     throw new Error("Signature-Input header missing created/keyid/alg");
+  }
+  if (!nonceMatch) {
+    // Rejected rather than defaulted. A request with no nonce is one that
+    // cannot be replay-checked, and quietly accepting those would leave the
+    // hole open for anyone who simply omits the parameter.
+    throw new Error("Signature-Input header missing nonce");
   }
   if (algMatch[1] !== "ed25519") throw new Error(`Unsupported alg "${algMatch[1]}"`);
 
@@ -56,6 +76,7 @@ export function parseSignatureInputHeader(header: string): SignatureParams & { c
     created: Number(createdMatch[1]),
     keyid: keyidMatch[1],
     alg: "ed25519",
+    nonce: nonceMatch[1],
   };
 }
 

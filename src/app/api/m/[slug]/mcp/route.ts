@@ -5,6 +5,7 @@ import { verifySignedRequest } from "@/lib/webBotAuth/verify";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createAlert, insertTrace } from "@/lib/mcp/traceHelpers";
 import { getMerchantBySlug } from "@/lib/merchant";
+import { recordNonce } from "@/lib/webBotAuth/nonceStore";
 
 export const runtime = "nodejs";
 
@@ -60,6 +61,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ slug: stri
       signature: req.headers.get("signature"),
     },
     lookupPublicKey: lookupPublicKeyFor(merchant.id),
+    recordNonce,
   });
 
   if (!verification.valid) {

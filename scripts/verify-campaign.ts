@@ -144,6 +144,7 @@ async function main() {
 
     const run = await runCampaign(db, campaign as Campaign, plan, client, data, 10);
     const sent = run.sent.filter((s) => s.decision === "allow");
+    for (const o of run.sent) console.log(`    [offer] ${o.decision} :: ${o.reasoning.slice(0, 160)}`);
 
     check(
       "the budget stops the run before it is exceeded",
@@ -157,7 +158,7 @@ async function main() {
     );
     check(
       "every offer is traced through the policy engine",
-      run.sent.every((s) => s.traceId !== null || s.decision === "skipped"),
+      run.sent.length > 0 && run.sent.every((s) => s.traceId !== null),
       `${run.sent.length} offer(s)`
     );
 

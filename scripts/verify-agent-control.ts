@@ -14,6 +14,7 @@
  *
  * Usage: npx tsx scripts/verify-agent-control.ts   (needs the dev server running)
  */
+import { randomUUID } from "node:crypto";
 import "./lib/loadEnv";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import * as ed from "@noble/ed25519";
@@ -43,7 +44,7 @@ async function control(slug: string, agentId: string, secret: string) {
   const url = new URL(`${BASE}/api/m/${slug}/agent-control`);
   const digest = `sha-256=:${Buffer.from(sha256(new TextEncoder().encode(""))).toString("base64")}:`;
   const created = Math.floor(Date.now() / 1000);
-  const sigInput = `sig1=("@method" "@path" "@authority" "content-digest");created=${created};keyid="${agentId}";alg="ed25519"`;
+  const sigInput = `sig1=("@method" "@path" "@authority" "content-digest");created=${created};keyid="${agentId}";alg="ed25519";nonce="${randomUUID()}"`;
   const base = [
     `"@method": GET`,
     `"@path": ${url.pathname}`,

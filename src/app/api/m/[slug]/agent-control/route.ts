@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifySignedRequest } from "@/lib/webBotAuth/verify";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getMerchantBySlug } from "@/lib/merchant";
+import { recordNonce } from "@/lib/webBotAuth/nonceStore";
 
 export const runtime = "nodejs";
 
@@ -68,6 +69,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ slug: strin
         .maybeSingle();
       return data?.public_key ?? null;
     },
+    recordNonce,
   });
 
   if (!verification.valid) {

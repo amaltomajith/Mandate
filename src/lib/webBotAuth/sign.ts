@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import * as ed from "@noble/ed25519";
 import { sha512 } from "@noble/hashes/sha2.js";
 import {
@@ -28,7 +29,14 @@ export interface SignedHeaders {
 export function signRequest(input: SignRequestInput): SignedHeaders {
   const contentDigest = computeContentDigest(input.body);
   const created = Math.floor(Date.now() / 1000);
-  const signatureInput = buildSignatureInputHeader({ keyid: input.keyid, created, alg: "ed25519" });
+  // Fresh per request. A caller that reused one would have its second
+  // request refused as a replay, which is the correct outcome.
+  const signatureInput = buildSignatureInputHeader({
+    keyid: input.keyid,
+    created,
+    alg: "ed25519",
+    nonce: randomUUID(),
+  });
 
   const base = buildSignatureBase({
     method: input.method,

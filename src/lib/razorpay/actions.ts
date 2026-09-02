@@ -39,7 +39,38 @@ function isSubscriptionsNotActivated(err: unknown): boolean {
  * implied a capability that didn't exist. The three action types here are the
  * ones that genuinely run.
  */
+/**
+ * Razorpay's SDK rejects with a plain object, not an Error.
+ *
+ * The MCP server wraps a non-Error throw as `new Error(String(error))`, and
+ * `String({})` is "[object Object]" — so a genuine Razorpay refusal reached the
+ * caller as five useless words, with the actual reason discarded. This is the
+ * same shape as the bug the handover already records for Supabase errors, in a
+ * second library.
+ */
+function asError(err: unknown): Error {
+  if (err instanceof Error) return err;
+  if (typeof err === "object" && err !== null) {
+    const e = err as { statusCode?: number; error?: { description?: string; code?: string; field?: string } };
+    const parts = [
+      e.error?.description ?? JSON.stringify(err).slice(0, 200),
+      e.error?.field ? `(field: ${e.error.field})` : "",
+      e.statusCode ? `[HTTP ${e.statusCode}]` : "",
+    ].filter(Boolean);
+    return new Error(`Razorpay refused this: ${parts.join(" ")}`);
+  }
+  return new Error(String(err));
+}
+
 export async function executeRealAction(input: ActionInput): Promise<Json> {
+  try {
+    return await dispatch(input);
+  } catch (err) {
+    throw asError(err);
+  }
+}
+
+async function dispatch(input: ActionInput): Promise<Json> {
   switch (input.actionType) {
     case "order.create": {
       const rzp = getRazorpay();

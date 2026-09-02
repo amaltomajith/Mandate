@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import * as ed from "@noble/ed25519";
 import { sha256, sha512 } from "@noble/hashes/sha2.js";
 import { config } from "./config.js";
@@ -31,7 +32,7 @@ function sign(url: URL): Record<string, string> {
   // binds the signature to this method, path and authority.
   const digest = `sha-256=:${Buffer.from(sha256(new TextEncoder().encode(""))).toString("base64")}:`;
   const created = Math.floor(Date.now() / 1000);
-  const sigInput = `sig1=(${COVERED.map((c) => `"${c}"`).join(" ")});created=${created};keyid="${config.agentId}";alg="ed25519"`;
+  const sigInput = `sig1=(${COVERED.map((c) => `"${c}"`).join(" ")});created=${created};keyid="${config.agentId}";alg="ed25519";nonce="${randomUUID()}"`;
   const base = [
     `"@method": GET`,
     `"@path": ${url.pathname + url.search}`,

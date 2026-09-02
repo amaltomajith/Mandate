@@ -293,6 +293,22 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["campaign_targets"]["Insert"]>;
         Relationships: [];
       };
+      seen_nonces: {
+        Row: {
+          nonce: string;
+          agent_id: string | null;
+          expires_at: string;
+          created_at: string;
+        };
+        Insert: {
+          nonce: string;
+          agent_id?: string | null;
+          expires_at: string;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["seen_nonces"]["Insert"]>;
+        Relationships: [];
+      };
       products: {
         Row: {
           merchant_id: string;

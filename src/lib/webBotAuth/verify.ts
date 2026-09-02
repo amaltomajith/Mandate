@@ -14,6 +14,7 @@ export type VerifyFailureReason =
   | "missing_headers"
   | "malformed_signature_input"
   | "unknown_keyid"
+  | "replayed_nonce"
   | "digest_mismatch"
   | "stale_or_future_created"
   | "bad_signature";
@@ -34,6 +35,16 @@ export interface VerifyRequestInput {
   };
   /** Looks up the registered Ed25519 public key (base64) for a keyid, or null if unknown. */
   lookupPublicKey: (keyid: string) => Promise<string | null> | string | null;
+  /**
+   * Records a nonce as used, returning false if it had already been seen.
+   *
+   * Injected rather than imported so this module stays database-free and
+   * testable, the same contract `lookupPublicKey` follows. Omitting it skips
+   * the check -- appropriate for a caller that has no store, and deliberately
+   * explicit rather than defaulted, so nobody loses replay protection by
+   * forgetting a parameter they never knew existed.
+   */
+  recordNonce?: (nonce: string, keyid: string, expiresAt: Date) => Promise<boolean>;
 }
 
 /**
@@ -90,6 +101,19 @@ export async function verifySignedRequest(input: VerifyRequestInput): Promise<Ve
 
   const ok = await ed.verifyAsync(signatureBytes, new TextEncoder().encode(base), publicKey);
   if (!ok) return { valid: false, reason: "bad_signature" };
+
+  // Last, deliberately: only a request that has already proven itself
+  // authentic gets to write a row. Recording before verification would let an
+  // unauthenticated caller fill the table with nonces of its choosing, and
+  // pre-emptively burn nonces a real agent had not used yet.
+  //
+  // Only needs to outlive the skew window -- outside it, `created` refuses the
+  // request before this is reached.
+  if (input.recordNonce) {
+    const expiresAt = new Date(Date.now() + (MAX_CLOCK_SKEW_SECONDS + 60) * 1000);
+    const fresh = await input.recordNonce(parsed.nonce, parsed.keyid, expiresAt);
+    if (!fresh) return { valid: false, reason: "replayed_nonce", detail: parsed.nonce };
+  }
 
   return { valid: true, keyid: parsed.keyid };
 }

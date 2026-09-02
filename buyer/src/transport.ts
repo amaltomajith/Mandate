@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import * as ed from "@noble/ed25519";
 import { sha256, sha512 } from "@noble/hashes/sha2.js";
 
@@ -34,7 +35,7 @@ function contentDigest(body: string): string {
 
 function signatureInputHeader(keyid: string, created: number): string {
   const components = COVERED_COMPONENTS.map((c) => `"${c}"`).join(" ");
-  return `sig1=(${components});created=${created};keyid="${keyid}";alg="ed25519"`;
+  return `sig1=(${components});created=${created};keyid="${keyid}";alg="ed25519";nonce="${randomUUID()}"`;
 }
 
 /** The exact bytes both sides sign. Byte-identical or verification fails. */
