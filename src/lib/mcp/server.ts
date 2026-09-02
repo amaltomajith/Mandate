@@ -1,12 +1,15 @@
 import "server-only";
-import { McpServer } from "@modelcontextprotocol/server";
-import type { ServerContext } from "@modelcontextprotocol/server";
+import { McpServer, inputRequired, acceptedContent } from "@modelcontextprotocol/server";
+import type { ServerContext, CallToolResult, InputRequiredResult } from "@modelcontextprotocol/server";
+import { z } from "zod";
 import { ActionInput, DraftPolicyInput, ExplainInput } from "./schemas";
 import { runActionEvaluation } from "./tools/actionEvaluator";
 import { explainTrace } from "./tools/explain";
 import { draftPolicy } from "./tools/draftPolicy";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getMerchantIdForAgent } from "@/lib/merchant";
+import { runGovernedAction } from "./tools/governedAction";
+import { offerStateCodec, counterOffersConfigured, type OfferState } from "./requestState";
 
 /**
  * MCP server, protocol revision 2026-07-28.
@@ -44,10 +47,46 @@ function toolResult(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
 
+/**
+ * Whether this caller can answer a question mid-call.
+ *
+ * Read from the per-request `_meta` envelope, not from a session — under
+ * 2026-07-28 capabilities travel with every request, which is what lets a
+ * stateless server answer each one correctly without remembering the caller.
+ *
+ * A client that declares nothing gets the fallback path, and that is the common
+ * case rather than the exception: most MCP clients today do not implement
+ * elicitation. The fallback has to be a real product behaviour, not a stub.
+ */
+function supportsElicitation(ctx: ServerContext): boolean {
+  // The envelope is typed as an opaque bag by the SDK (a deliberately neutral
+  // shape that stays assignable to `_meta`), so the key is read by name.
+  const envelope = ctx.mcpReq.envelope as Record<string, unknown> | undefined;
+  const caps = envelope?.["io.modelcontextprotocol/clientCapabilities"];
+  return typeof caps === "object" && caps !== null && "elicitation" in caps;
+}
+
+/** The buyer's answer to a counter-offer. Shaped, not trusted: the SDK hands
+ *  these over unvalidated by design, so anything other than an explicit `true`
+ *  is a decline. */
+const CounterAnswer = z.object({ accept: z.boolean() });
+
+function readAcceptance(ctx: ServerContext): boolean {
+  const answer = acceptedContent(ctx.mcpReq.inputResponses, "counter_offer", CounterAnswer);
+  return answer?.accept === true;
+}
+
 /** One fresh server per request. Under 2026-07-28 that is the only model —
  *  `createMcpHandler` calls this factory for every inbound request. */
 export function createMandateServer(): McpServer {
-  const server = new McpServer({ name: "mandate", version: "0.2.0" });
+  const server = new McpServer(
+    { name: "mandate", version: "0.2.0" },
+    // Verifies the sealed requestState a retry echoes back. Without this the
+    // SDK would hand the handler whatever the client sent; with it, a state
+    // that was tampered with, expired, or minted for a different agent never
+    // reaches the handler at all.
+    counterOffersConfigured() ? { requestState: { verify: offerStateCodec().verify } } : undefined
+  );
 
   server.registerTool(
     "simulate_action",
@@ -57,6 +96,8 @@ export function createMandateServer(): McpServer {
         "Runs a proposed money action (order.create, refund.create, subscription.create, payment_link.create) through Mandate's policy engine WITHOUT moving money. Returns the decision (allow/block/escalate), which rule fired if any, and a trace id. Use this before enforce_action to preview what will happen. Costs no rate budget.",
       inputSchema: ActionInput,
     },
+    // Simulate never starts a round trip: a preview that stops to ask a
+    // question is not a preview.
     async (input, ctx) => toolResult(await runActionEvaluation(requireAgentId(ctx), input, "simulate"))
   );
 
@@ -68,7 +109,48 @@ export function createMandateServer(): McpServer {
         "Runs a proposed money action through the same policy engine as simulate_action. If the decision is 'allow', executes the real Razorpay test-mode call. If 'block' or 'escalate', no money moves.",
       inputSchema: ActionInput,
     },
-    async (input, ctx) => toolResult(await runActionEvaluation(requireAgentId(ctx), input, "enforce"))
+    async (input, ctx): Promise<CallToolResult | InputRequiredResult> => {
+      const agentId = requireAgentId(ctx);
+      const offerState = counterOffersConfigured()
+        ? ctx.mcpReq.requestState<OfferState>()
+        : undefined;
+
+      const result = await runGovernedAction(agentId, input, "enforce", {
+        supportsElicitation: supportsElicitation(ctx),
+        offerState: offerState ?? undefined,
+        accepted: offerState ? readAcceptance(ctx) : undefined,
+      });
+
+      if (result.kind === "result") {
+        return toolResult({
+          ...result.outcome,
+          ...(result.suggestions ? { suggestions: result.suggestions } : {}),
+          ...(result.counterOffer ? { counterOffer: result.counterOffer } : {}),
+        });
+      }
+
+      // Nothing has executed at this point, and there is no path from here to
+      // Razorpay — the parent was evaluated in simulate mode. The buyer's
+      // answer arrives as a second signed POST that re-enters this handler and
+      // re-runs every check from scratch.
+      return inputRequired({
+        inputRequests: {
+          counter_offer: inputRequired.elicit({
+            message:
+              `${result.offer.reason} Add ${result.offer.name} for ` +
+              `${(result.offer.amountPaise / 100).toLocaleString("en-IN", { style: "currency", currency: "INR" })}?`,
+            requestedSchema: {
+              type: "object",
+              properties: {
+                accept: { type: "boolean", title: `Add ${result.offer.name}?` },
+              },
+              required: ["accept"],
+            },
+          }),
+        },
+        requestState: await offerStateCodec().mint(result.state, ctx),
+      });
+    }
   );
 
   server.registerTool(

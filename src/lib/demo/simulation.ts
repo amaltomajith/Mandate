@@ -168,11 +168,17 @@ export async function ensureSomeActiveMandates(merchantId: string): Promise<numb
   return created;
 }
 
-/** How often an allowed ordinary purchase is followed by the agent proposing
- *  a complement. Not every purchase: an agent that upsells on all of them
- *  reads as a script rather than a judgement, and the LLM call costs a second
- *  or two on the tick it happens to land on. */
-const UPSELL_CHANCE = 0.3;
+/**
+ * A cross-sell happens when a grounded, policy-clearing complement exists, and
+ * not otherwise. There is no probability here any more.
+ *
+ * There used to be: a 0.3 dice roll decided whether the agent would even look.
+ * That made the attach rate a constant someone chose rather than a measurement
+ * of anything, and it meant the agent declined perfectly good offers at random
+ * -- which is not judgement, it is a coin. With the dice gone the rate becomes
+ * an outcome of two real things: whether the model finds a complement the
+ * catalog supports, and whether the merchant's own policy would clear it.
+ */
 
 export interface SimulationEvent {
   scenario: Scenario;
@@ -201,7 +207,7 @@ interface ActionResult {
   decision: "allow" | "block" | "escalate";
   reasoning: string;
   /** Needed so an upsell can be recorded as a child of the purchase that
-   *  prompted it — see UPSELL_CHANCE below. */
+   *  prompted it. */
   traceId: string;
 }
 
@@ -339,7 +345,7 @@ export async function runSimulation(merchant: { id: string; slug: string }, coun
     // It goes through `enforce_action` like anything else, so an upsell that
     // breaches a cap is refused exactly as a customer-initiated purchase would
     // be. The agent proposing something does not privilege it.
-    if (boughtItem && enforced.decision === "allow" && Math.random() < UPSELL_CHANCE) {
+    if (boughtItem && enforced.decision === "allow") {
       // Taste first: the LLM picks a genuine complement over the real catalog.
       // A failed suggestion returns null and never touches the purchase it
       // followed.
