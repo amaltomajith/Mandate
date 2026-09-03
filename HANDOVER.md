@@ -459,6 +459,28 @@ merchant who revoked an agent could never re-authorize it — caught live, when
 reusing the same agent and customer across runs permanently locked out
 establishing a new one.
 
+### What each mandate has actually authorized
+
+The panel used to list permissions with no evidence any of them had ever been
+exercised, which is a strange thing for a control plane to show: the interesting
+question about a standing authorization is not that it exists but what has
+happened under it. A mandate covering forty actions and one covering none
+rendered identically, and they are not remotely the same risk.
+
+`mandateActivity()` derives actions covered, value settled and last used from
+traces — matching on agent **and** customer, never stored. `customerId` lives
+inside the jsonb params rather than a column, so traces written before it was
+persisted are invisible here, which is correct: there is no way to know who they
+were for.
+
+### A mandate whose agent is retired
+
+It still reads `active`, because it is — but that agent's key no longer verifies,
+so nothing can ever act under it. "Active" alone there is technically true and
+practically a lie, so the row says so explicitly. Three of the six mandates on
+the working tenant are in exactly that state, left over from the orphaned
+simulation identities.
+
 ---
 
 ## 8. Multi-tenancy
@@ -699,7 +721,7 @@ in its notes.
 
 ## 12. The dashboard
 
-Five tabs. Everything is derived from traces; nothing keeps its own totals.
+Eight tabs. Everything is derived from traces; nothing keeps its own totals.
 
 **Overview** — the revenue impact scoreboard, a 3D entity graph
 (react-three-fiber) where agents, rules, mandates, customers and traces are
@@ -724,7 +746,13 @@ free on every load, an on-demand LLM review (kept clearly separate, never
 blended), the threshold tuner, and Horizon (a regulatory notice → drafted rule →
 `pending_review`).
 
-**Mandates** — pause, resume, revoke. Enforced live, not cosmetic.
+**Mandates** — pause, resume, revoke, and **what each one has actually
+authorized**: actions covered, value settled, last used, derived from traces.
+Status counts, active first, terminal rows dimmed so they stop competing with
+things anyone can act on. That pausing here is *enforced* — unlike pausing the
+agent, which is a request the agent may ignore — is now stated in the interface
+rather than only in a code comment, because a merchant reaching for "stop"
+during an incident has to know which of the two they just got.
 
 **Catalog** — what the merchant sells, and two columns a shop admin could not
 show. Units sold and revenue are derived from the audit trail rather than a
@@ -753,7 +781,7 @@ shifts with it.
 1. **Supabase** — create a project. Put the URL, publishable key and
    service-role key in `.env.local` (copy `.env.example`). Run every file in
    `supabase/migrations/` in numeric order through the SQL Editor (through
-   `0015_product_active.sql`). They are
+   `0018_agent_retired.sql`). They are
    additive and safe to re-run. **`0010` is required** — nothing works without
    it. *Free-tier projects auto-pause after 7 days idle.*
 2. **Razorpay** — test-mode keys into `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET`.
@@ -785,16 +813,50 @@ the cause.
 
 ---
 
+### Turning per-agent catalog scope on
+
+Neither the column nor the rule does anything on its own, and a deployment can
+sit in the state the working tenant was in for a while: every agent unscoped and
+no `catalog_scope` rule active, so nothing enforces anything. Two steps:
+
+1. Add an active `catalog_scope` rule for the merchant. It carries no
+   parameters — it is the merchant-wide statement that agents are held to their
+   assigned catalog.
+2. Assign each agent a scope from the Agents page. `null` (the default) is the
+   full catalog; an empty selection means **nothing**, which is a different and
+   deliberate state.
+
+Leave at least one agent unscoped. It is the control that makes the others'
+narrowing legible — without it a narrow catalog is indistinguishable from a
+small one.
+
+---
+
 ## 14. Verifying it works
 
 Both need the dev server running.
 
 ```bash
-npx tsx scripts/verify-policy.ts  # every rule type, both directions      14/14
-npx tsx scripts/verify-e2e.ts     # end to end, incl. tenant isolation    15/15
-npx tsx scripts/verify-mrtr.ts    # counter-offers and the MRTR invariant 17/17
-npx tsx scripts/bench-llm.ts      # the model contract suite              56/56
+npx tsx scripts/verify-policy.ts        # every rule type, both directions      24/24
+npx tsx scripts/verify-catalog.ts       # catalog, scope, and the headroom claim 20/20
+npx tsx scripts/verify-agent-control.ts # cooperative pause vs enforced retire   21/21
+npx tsx scripts/verify-mrtr.ts          # counter-offers and the MRTR invariant  17/17
+npx tsx scripts/verify-graph-colors.ts  # what a node in the graph may be        8/8
+npx tsx scripts/verify-replay.ts        # a captured request, resent             6/6
+npx tsx scripts/verify-e2e.ts           # end to end, incl. tenant isolation     see §17
+npx tsx scripts/bench-llm.ts            # the model contract suite               56/56
 ```
+
+Six suites, 96 checks, all green. `verify-e2e` passes its twelve
+tenant-isolation checks and then dies on the Razorpay payment-link quota — an
+account limit, not a regression; see §17.
+
+**Every scope and retirement check carries a CONTROL**, because the negative
+form of each one passes vacuously. "A scoped agent cannot buy office" proves
+nothing unless an unscoped agent buys office in the same instant; "a retired
+agent cannot transact" proves nothing unless that same agent transacted a moment
+earlier. Without the pairing these would keep passing after the feature was
+deleted.
 
 `verify-policy` installs one rule at a time on a throwaway merchant and drives
 it through MCP as an agent would, so what is tested is the whole path -- the
@@ -876,7 +938,7 @@ rate-limited rather than one behaving normally.
 
 ---
 
-### `verify-catalog` — 10 checks
+### `verify-catalog` — 20 checks
 
 Retiring a product has to reach every reader, and the one most likely to keep
 silently working off a stale read is counter-offer candidacy. So that check is
@@ -1041,6 +1103,8 @@ supabase/migrations/     0001 schema+RLS · 0002 products · 0004-0008 rule-type
                          0017 catalog_scope rule type · 0018 agents.retired
 src/lib/actions/products.ts
                          catalog CRUD + derived units/revenue + health checks
+src/lib/actions/mandates.ts
+                         pause/resume/revoke + derived per-mandate usage
 src/components/dashboard/CatalogPanel.tsx
                          the Catalog tab
 scripts/mint-sim-identity.ts
@@ -1075,7 +1139,9 @@ src/lib/demo/            catalog · crossSell · shopper · seedData ·
 src/components/graph/    3D graph; layout.ts is the pure, testable part
 src/components/dashboard/ DashboardTabs and every panel
 scripts/                 seed · bench-llm · verify-e2e · verify-policy ·
-                         verify-mrtr · verify-campaign · regen · dev.mjs ·
+                         verify-catalog · verify-agent-control · verify-replay ·
+                         verify-graph-colors · verify-mrtr · verify-campaign ·
+                         mint-sim-identity · regen · dev.mjs ·
                          register-buyer
 buyer/                   THE OTHER SIDE. A third-party buying agent with its own
                          package.json and node_modules, zero imports from src/:
@@ -1138,6 +1204,34 @@ Stated here rather than discovered by a reviewer.
   into a 500 from an endpoint whose whole job is refusing them cleanly. Now
   wrapped in `verify.ts`, so every reachable failure returns a reason. Found by
   adding a third caller; it had been latent on `/mcp` and `/agent-control`.
+- **A feature can be finished, tested, and switched off.** Per-agent catalog
+  scope was built across five phases and verified by 24 policy checks and 20
+  catalog checks — and on the working tenant it was doing nothing at all.
+  Replaying the headroom derivation against live data gave *one* distinct view
+  across four agents, because every agent was unscoped **and** no
+  `catalog_scope` rule was active. Nothing was enforcing anything. The tests
+  create their own rules and their own scoped agents, which is what makes them
+  reliable and is exactly why they could not notice. A green suite says the
+  mechanism works; it says nothing about whether the deployment uses it. The
+  live tenant now runs three distinct views across four agents, with the bulk
+  buyer left deliberately unscoped as the control that makes the others'
+  narrowing visible.
+- **Two panel bugs that types could not catch, found by replaying the
+  derivations against live data.** Editing a product's *category* changes which
+  agents may buy it, but the Catalog tab refreshed products and health without
+  refreshing scopes — the row kept describing the category the product used to
+  be in until a full reload. And the verdict column read `agents: allow`, plural
+  and unattributed, while probing as exactly **one** agent: harmless before
+  per-agent scope existed, actively wrong afterwards, since a product scoped
+  away from every third-party buyer would still have shown "allow". It names
+  whose verdict it is now. Both compiled, linted and passed every suite.
+- **The dashboard has never been verified visually from here.** It is Clerk-
+  gated and this environment holds no session, so every claim about it rests on
+  replaying what each panel derives against live data — 799 traces all resolving
+  to a name, every category one the engine can match, per-product sales
+  reconciling — plus types, lint, build and the suites. That is a real gap, not
+  a formality: both bugs above were *invisible* to all of those and only showed
+  up in the replay. Look at it before recording.
 - **The two `Checkout Agent (HH:MM:SS)` rows are the visible residue of that
   bug, and they are retired rather than deleted.** 119 traces between them, all
   real signed history from when the simulation was minting a new identity per
