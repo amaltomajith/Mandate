@@ -8,10 +8,10 @@ import {
   reconcile,
   type CampaignPreview,
   type CampaignRow,
-  type CampaignRunSummary,
-} from "@/lib/actions/campaigns";
+  type CampaignRunSummary } from "@/lib/actions/campaigns";
 import { formatMoney } from "@/lib/format";
-import { EmptyState, GhostButton, Icons, Panel, PrimaryButton, Spinner, relativeTime } from "./ui";
+import { EmptyState, GhostButton, Icons, Panel, PrimaryButton, Spinner } from "./ui";
+import { TimeAgo } from "./TimeAgo";
 
 const EXAMPLES = [
   "Win back customers who haven't ordered in 30 days",
@@ -317,7 +317,7 @@ export function CampaignsPanel() {
                   </span>
                 </div>
                 <p className="mt-0.5 truncate text-[10.5px]" style={{ color: "var(--muted-2)" }}>
-                  {campaign.goal} · {relativeTime(campaign.created_at)}
+                  {campaign.goal} · <TimeAgo iso={campaign.created_at} />
                 </p>
 
                 <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">

@@ -13,14 +13,14 @@ import {
   setAgentRetired,
   setAgentPace,
   setAgentStatus,
-  type AgentActivity,
-} from "@/lib/actions/agents";
+  type AgentActivity } from "@/lib/actions/agents";
 import type { AgentSpec } from "@/lib/agentSpec";
 import { pauseMandate, revokeMandate, reactivateMandate } from "@/lib/actions/mandates";
 import { formatMoney } from "@/lib/format";
 import { PRODUCT_CATEGORIES } from "@/lib/demo/catalog";
 import { TrustBreakdown } from "./TrustBreakdown";
-import { EmptyState, GhostButton, Icons, Panel, PrimaryButton, Spinner, relativeTime } from "./ui";
+import { EmptyState, GhostButton, Icons, Panel, PrimaryButton, Spinner } from "./ui";
+import { TimeAgo } from "./TimeAgo";
 
 const PACE_OPTIONS = [
   { label: "Calm", ms: 60_000 },
@@ -265,7 +265,7 @@ function AgentRow({
           {activity?.lastSeen ? (
             <>
               {stale && !paused ? "not acting · " : ""}
-              last seen {relativeTime(activity.lastSeen)}
+              last seen <TimeAgo iso={activity.lastSeen} />
             </>
           ) : (
             "never deployed"

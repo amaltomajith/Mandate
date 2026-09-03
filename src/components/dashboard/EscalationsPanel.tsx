@@ -3,7 +3,8 @@
 import { useState, useTransition } from "react";
 import { approveEscalation, denyEscalation } from "@/lib/actions/escalations";
 import type { Escalation, Trace } from "@/types/db";
-import { actionTypeLabel, DangerButton, EmptyState, formatMoney, Icons, Panel, Spinner, SuccessButton, relativeTime } from "./ui";
+import { actionTypeLabel, DangerButton, EmptyState, formatMoney, Icons, Panel, Spinner, SuccessButton } from "./ui";
+import { TimeAgo } from "./TimeAgo";
 
 export function EscalationsPanel({
   escalations,
@@ -104,7 +105,7 @@ export function EscalationsPanel({
                     </p>
                   </div>
                   <span className="shrink-0 text-[10px]" style={{ color: "var(--muted-2)" }}>
-                    {relativeTime(esc.created_at)}
+                    <TimeAgo iso={esc.created_at} />
                   </span>
                 </div>
               )}
@@ -124,7 +125,7 @@ export function EscalationsPanel({
                       <p className="mt-1.5 truncate text-[12px] font-medium">{actionTypeLabel(trace.action_type)}</p>
                     </div>
                     <span className="shrink-0 text-[10px]" style={{ color: "var(--muted-2)" }}>
-                      {relativeTime(esc.created_at)}
+                      <TimeAgo iso={esc.created_at} />
                     </span>
                   </div>
                   <p className="mt-2 text-[11px] leading-relaxed" style={{ color: "var(--muted)" }}>

@@ -3,7 +3,8 @@
 import { useState, useTransition } from "react";
 import { approvePolicyRule, deactivatePolicyRule, deletePolicyRule, reactivatePolicyRule, rejectPolicyRule } from "@/lib/actions/policy";
 import type { PolicyRule } from "@/types/db";
-import { DangerButton, EmptyState, GhostButton, Icons, Panel, Spinner, SuccessButton, relativeTime } from "./ui";
+import { DangerButton, EmptyState, GhostButton, Icons, Panel, Spinner, SuccessButton } from "./ui";
+import { TimeAgo } from "./TimeAgo";
 
 function ParamsLine({ rule }: { rule: PolicyRule }) {
   const p = rule.params as Record<string, unknown>;
@@ -206,7 +207,7 @@ export function PolicyRulesPanel({
                     {busy ? "…" : "Delete"}
                   </GhostButton>
                 </span>
-                <span style={{ color: "var(--muted-2)" }}>{relativeTime(rule.created_at)}</span>
+                <span style={{ color: "var(--muted-2)" }}><TimeAgo iso={rule.created_at} /></span>
               </span>
             </div>
           );

@@ -75,6 +75,16 @@ export function EmptyState({ text }: { text: string }) {
   );
 }
 
+/**
+ * "38s ago". Correct, and NOT safe to render during SSR — see {@link TimeAgo}.
+ *
+ * Two things in here differ between the server and the browser. `Date.now()`
+ * advances between the two renders, so a row served at 38 seconds hydrates at
+ * 39. And `toLocaleDateString()` formats in the *runtime's* locale and time
+ * zone, which for a server in UTC and a reader in IST is a different string for
+ * the same instant. Either one is a hydration mismatch; the first is just the
+ * one that fires every time.
+ */
 export function relativeTime(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
   const s = Math.floor(diffMs / 1000);

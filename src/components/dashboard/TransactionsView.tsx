@@ -17,7 +17,8 @@ function explain(reasoning: string | null): string {
     ? "Checked against every active rule — none applied, so it cleared."
     : reasoning;
 }
-import { decisionColor, relativeTime } from "./ui";
+import { decisionColor } from "./ui";
+import { TimeAgo } from "./TimeAgo";
 
 const DECISION_LABEL: Record<Decision, string> = {
   allow: "Allowed",
@@ -180,7 +181,7 @@ export function TransactionsView({
                         {explain(t.reasoning)}
                       </td>
                       <td className="py-2 whitespace-nowrap" style={{ color: "var(--muted-2)" }}>
-                        {relativeTime(t.created_at)}
+                        <TimeAgo iso={t.created_at} />
                       </td>
                     </tr>
                     {expanded && (

@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 import type { Customer, Escalation, Product, Trace } from "@/types/db";
 import { deriveOrders, summarizeOrders, type Order, type OrderOutcome } from "@/lib/orders";
 import { formatMoney } from "@/lib/format";
-import { EmptyState, Icons, Panel, relativeTime } from "./ui";
+import { EmptyState, Icons, Panel } from "./ui";
+import { TimeAgo } from "./TimeAgo";
 
 const OUTCOME_META: Record<OrderOutcome, { label: string; color: string; hint: string }> = {
   bought: { label: "Bought", color: "var(--decision-allow)", hint: "cleared with no rule stopping it" },
@@ -221,7 +222,7 @@ function OrderRow({ order }: { order: Order }) {
         </div>
         <p className="mt-0.5 truncate text-[10px]" style={{ color: "var(--muted-2)" }}>
           {order.customerName ? `${order.customerName} · ` : ""}
-          {relativeTime(order.at)}
+          <TimeAgo iso={order.at} />
           {order.outcome !== "bought" && order.reasoning ? ` · ${order.reasoning}` : ""}
         </p>
       </div>

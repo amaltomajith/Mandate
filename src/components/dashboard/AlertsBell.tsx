@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import type { Alert } from "@/types/db";
-import { EmptyState, Icons, relativeTime } from "./ui";
+import { EmptyState, Icons } from "./ui";
+import { TimeAgo } from "./TimeAgo";
 
 const SEVERITY_META: Record<Alert["severity"], { label: string; color: string; Icon: typeof Icons.Bell }> = {
   high: { label: "Blocked", color: "var(--decision-block)", Icon: Icons.XCircle },
@@ -64,7 +65,7 @@ export function AlertsBell({ alerts }: { alerts: Alert[] }) {
                         {alert.message}
                       </p>
                       <p className="mt-0.5 text-[11px]" style={{ color: "var(--muted-2)" }}>
-                        {relativeTime(alert.created_at)}
+                        <TimeAgo iso={alert.created_at} />
                       </p>
                     </div>
                   </div>

@@ -6,10 +6,10 @@ import {
   pauseMandate,
   reactivateMandate,
   revokeMandate,
-  type MandateActivity,
-} from "@/lib/actions/mandates";
+  type MandateActivity } from "@/lib/actions/mandates";
 import type { Agent, Customer, Mandate } from "@/types/db";
-import { EmptyState, GhostButton, Icons, Panel, Spinner, SuccessButton, formatMoney, relativeTime } from "./ui";
+import { EmptyState, GhostButton, Icons, Panel, Spinner, SuccessButton, formatMoney } from "./ui";
+import { TimeAgo } from "./TimeAgo";
 
 const TYPE_LABEL: Record<Mandate["type"], string> = {
   upi_autopay: "UPI Autopay",
@@ -191,7 +191,11 @@ export function MandatesPanel({ mandates, agents, customers }: { mandates: Manda
                   {(() => {
                     const use = activity.find((a) => a.mandateId === m.id);
                     if (!use || use.actions === 0) {
-                      return `created ${relativeTime(m.created_at)} · never used`;
+                      return (
+                        <>
+                          created <TimeAgo iso={m.created_at} /> · never used
+                        </>
+                      );
                     }
                     return (
                       <>
@@ -208,7 +212,12 @@ export function MandatesPanel({ mandates, agents, customers }: { mandates: Manda
                             settled
                           </>
                         )}
-                        {use.lastUsed && ` · last used ${relativeTime(use.lastUsed)}`}
+                        {use.lastUsed && (
+                          <>
+                            {" · last used "}
+                            <TimeAgo iso={use.lastUsed} />
+                          </>
+                        )}
                       </>
                     );
                   })()}

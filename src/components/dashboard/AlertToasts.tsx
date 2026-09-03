@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Alert } from "@/types/db";
 import { Icons } from "./ui";
-import { relativeTime } from "./ui";
+import { TimeAgo } from "./TimeAgo";
 
 const AUTO_DISMISS_MS = 8000;
 const MAX_VISIBLE = 3;
@@ -132,7 +132,7 @@ export function AlertToasts({ alerts }: { alerts: Alert[] }) {
                   </span>
                 )}
                 <span className="ml-auto text-[10px]" style={{ color: "var(--muted-2)" }}>
-                  {relativeTime(toast.latestCreatedAt)}
+                  <TimeAgo iso={toast.latestCreatedAt} />
                 </span>
               </div>
               <p className="mt-0.5 line-clamp-2 text-[12px] leading-snug" style={{ color: "var(--foreground)" }}>

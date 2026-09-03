@@ -6,10 +6,10 @@ import {
   listHeadroomAgents,
   type HeadroomAgent,
   type SellableItem,
-  type SellableSnapshot,
-} from "@/lib/actions/sellable";
+  type SellableSnapshot } from "@/lib/actions/sellable";
 import { formatMoney } from "@/lib/format";
-import { GhostButton, Icons, Panel, Spinner, relativeTime } from "./ui";
+import { GhostButton, Icons, Panel, Spinner } from "./ui";
+import { TimeAgo } from "./TimeAgo";
 
 const DECISION_META: Record<SellableItem["decision"], { label: string; color: string }> = {
   allow: { label: "Sells", color: "var(--decision-allow)" },
@@ -203,7 +203,7 @@ export function SellableCatalog() {
           </div>
 
           <p className="mt-1.5 text-[10px]" style={{ color: "var(--muted-2)" }}>
-            checked {relativeTime(snapshot.checkedAt)}
+            checked <TimeAgo iso={snapshot.checkedAt} />
           </p>
 
           <div className="mt-3 space-y-1.5">
