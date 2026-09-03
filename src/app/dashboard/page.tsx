@@ -23,10 +23,14 @@ export default async function DashboardPage() {
   const { userId } = await auth();
   if (!userId) redirect("/login");
 
-  const { agents, rules, traces, escalations, alerts, mandates, customers, products, merchant, loadError } = await getDashboardData();
+  const { agents, allAgents, rules, traces, escalations, alerts, mandates, customers, products, merchant, loadError } = await getDashboardData();
   const tracesById: Record<string, Trace> = Object.fromEntries(traces.map((t) => [t.id, t]));
 
   const pendingEscalations = escalations.filter((e) => e.status === "pending").length;
+  // `agents` is live-only now, so this counts what it says it counts. It used
+  // to read the unfiltered list and reported six while the roster below it
+  // showed four -- the same page disagreeing with itself about how many agents
+  // exist.
   const activeAgents = agents.length;
   const activeRules = rules.filter((r) => r.status === "active").length;
   const deterministicIssues = auditPolicySet(rules);
@@ -137,6 +141,7 @@ export default async function DashboardPage() {
         )}
 
         <DashboardTabs
+        allAgents={allAgents}
           agents={agents}
           rules={rules}
           traces={traces}

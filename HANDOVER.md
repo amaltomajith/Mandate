@@ -1204,6 +1204,23 @@ Stated here rather than discovered by a reviewer.
   into a 500 from an endpoint whose whole job is refusing them cleanly. Now
   wrapped in `verify.ts`, so every reachable failure returns a reason. Found by
   adding a third caller; it had been latent on `/mcp` and `/agent-control`.
+- **Retirement was opt-in, so one surface forgot.** `getDashboardData` returned
+  a single `agents` array containing retired rows, and every consumer had to
+  remember to filter. The graph, the roster and the trust panel did; the header
+  count did not, so the same page reported six agents above a roster of four.
+  Section 8 records four cross-tenant holes of exactly this shape: an unscoped
+  read compiles fine and returns rows it should not. Fixed by inverting the
+  default rather than by adding a fifth filter — `agents` is now live-only, and
+  a surface that genuinely needs retired rows asks for `allAgents` by name.
+  Forgetting now gives you the safe answer. Exactly two callers ask for the full
+  list, and both read history rather than list actors: Transactions resolves
+  trace names from it, Mandates resolves the agent behind an old authorization.
+- **A stale dev server will show you the old bug for as long as you let it.**
+  The graph's own read had already been corrected, but the running server
+  predated that edit by forty-four minutes. This is the second time in this
+  project that a confusing symptom turned out to be a server older than the fix
+  — the first was API routes returning 404 for routes that existed. Restart
+  before concluding anything about the dashboard.
 - **A feature can be finished, tested, and switched off.** Per-agent catalog
   scope was built across five phases and verified by 24 policy checks and 20
   catalog checks — and on the working tenant it was doing nothing at all.

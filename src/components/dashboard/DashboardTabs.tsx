@@ -37,7 +37,13 @@ const TABS: { key: Tab; label: string; badge?: (props: Props) => number }[] = [
 ];
 
 interface Props {
+  /** LIVE agents. Everything that lists things which CAN ACT uses this: the
+   *  roster, the entity graph, the trust panel, the header count. */
   agents: Agent[];
+  /** Every agent including retired ones. Two callers, both reading history
+   *  rather than listing actors -- Transactions resolves trace names from it,
+   *  Mandates resolves the agent behind an old authorization. */
+  allAgents: Agent[];
   rules: PolicyRule[];
   traces: Trace[];
   escalations: Escalation[];
@@ -57,12 +63,9 @@ interface Props {
  * instead of stacking everything into one increasingly long scroll.
  */
 export function DashboardTabs(props: Props) {
-  const { agents, rules, traces, escalations, tracesById, deterministicIssues, mandates, customers, products, merchant } = props;
+  const { agents, allAgents, rules, traces, escalations, tracesById, deterministicIssues, mandates, customers, products, merchant } = props;
   const [tab, setTab] = useState<Tab>("overview");
 
-  // Hidden from the scene and the trust panel, kept everywhere history is read.
-  // TransactionsView builds its agent-name map from the FULL list on purpose.
-  const liveAgents = agents.filter((a) => !a.retired);
   const [highlightRuleId, setHighlightRuleId] = useState<string | null>(null);
 
   function jumpToRule(ruleId: string) {
@@ -132,13 +135,13 @@ export function DashboardTabs(props: Props) {
                   traces it draws. Their past actions keep their edges and their
                   hover names -- what disappears is the agent node itself, which
                   is a thing that can still act, and a retired one cannot. */}
-              <GraphCanvas agents={liveAgents} rules={rules} traces={traces} mandates={mandates} customers={customers} escalations={escalations} />
+              <GraphCanvas agents={agents} rules={rules} traces={traces} mandates={mandates} customers={customers} escalations={escalations} />
               <GraphLegend />
             </div>
 
             <div className="flex min-h-0 flex-col gap-5">
               <EscalationsPanel escalations={escalations} tracesById={tracesById} />
-              <AgentTrustPanel agents={liveAgents} rules={rules} />
+              <AgentTrustPanel agents={agents} rules={rules} />
             </div>
           </div>
 
@@ -170,9 +173,9 @@ export function DashboardTabs(props: Props) {
 
       {tab === "campaigns" && <CampaignsPanel />}
 
-      {tab === "agents" && <AgentsPanel agents={agents} rules={rules} mandates={mandates} />}
+      {tab === "agents" && <AgentsPanel agents={allAgents} rules={rules} mandates={mandates} />}
 
-      {tab === "transactions" && <TransactionsView traces={traces} agents={agents} customers={customers} rules={rules} onJumpToRule={jumpToRule} />}
+      {tab === "transactions" && <TransactionsView traces={traces} agents={allAgents} customers={customers} rules={rules} onJumpToRule={jumpToRule} />}
 
       {tab === "policies" && (
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
@@ -185,7 +188,7 @@ export function DashboardTabs(props: Props) {
         </div>
       )}
 
-      {tab === "mandates" && <MandatesPanel mandates={mandates} agents={agents} customers={customers} />}
+      {tab === "mandates" && <MandatesPanel mandates={mandates} agents={allAgents} customers={customers} />}
     </div>
   );
 }

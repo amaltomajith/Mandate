@@ -168,8 +168,32 @@ export async function getDashboardData() {
     }
   }
 
+  const allAgents = agents.data ?? [];
+
   return {
-    agents: agents.data ?? [],
+    /**
+     * LIVE agents only — the default, deliberately.
+     *
+     * Retirement failed once already by being opt-in: every consumer had to
+     * remember to filter, and the header count did not, so it read six while
+     * the roster read four. Section 8 records four cross-tenant holes of
+     * exactly this shape — an unscoped read compiles fine and returns rows it
+     * should not.
+     *
+     * So the safe answer is now the one you get by default. A surface that
+     * genuinely needs retired agents has to ask for `allAgents` by name, which
+     * is a decision someone makes rather than one they forget.
+     */
+    agents: allAgents.filter((a) => !a.retired),
+    /**
+     * EVERY agent, including retired ones. Exactly two callers should want
+     * this, and both read history rather than list things that can act:
+     * Transactions builds its agent-name map from it, and Mandates resolves the
+     * agent behind an old authorization. Filter retired agents out of those and
+     * every trace they ever wrote starts rendering "Unknown agent" — losing the
+     * history by a slower route than deleting it.
+     */
+    allAgents,
     rules: rules.data ?? [],
     // The window, plus whatever the escalation queue still needs to be
     // explicable. Order is preserved for the window itself; the backfilled
