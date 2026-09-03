@@ -189,33 +189,54 @@ export function StackedAreaChart<T extends object>({
         ))}
 
         {/* Where a bucket's true height was compressed to fit the cap, say so
-            right there — a short tick plus its real, uncapped total. Sits at
-            y≈24, below the axis-max label's row (which ends ~y16), so the two
-            never collide even when the clipped bucket is the very first one —
-            exactly the case in the data that surfaced this bug. */}
+            right there — a short tick plus its real, uncapped total, EACH
+            WITH ITS OWN BACKING RECT so it reads as a solid label rather than
+            bare glyphs over a moving fill. A first pass at y=24 with no
+            backing looked fine in isolation but collided directly with the
+            axis-max label below when the clipped bucket sat at the chart's
+            left edge — the two texts visually fused into one unreadable run.
+            Fixed at the source below (the axis max label is not drawn AT ALL
+            once any bucket is clipped — see why there), so this no longer has
+            anything at that position to collide with; the backing rect and
+            wider gap stay anyway as insurance against a future new label. */}
         {clipped.map(({ i, trueTotal }) => {
           const anchor = i < 2 ? "start" : i > data.length - 3 ? "end" : "middle";
           const labelX = anchor === "start" ? x(i) - 2 : anchor === "end" ? x(i) + 2 : x(i);
+          const label = `actual ${valueFormatter(trueTotal)}`;
+          // Rough width estimate for the backing rect — monospace-ish enough
+          // at this font size that a per-character multiplier reads fine
+          // without measuring the real glyph run.
+          const boxW = label.length * 5.6 + 8;
+          const boxX = anchor === "start" ? labelX - 4 : anchor === "end" ? labelX - boxW + 4 : labelX - boxW / 2;
           return (
             <g key={`clip-${i}`}>
-              <line x1={x(i)} x2={x(i)} y1={2} y2={10} stroke="var(--muted)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
-              <text x={labelX} y={24} fontSize={10} textAnchor={anchor} fill="var(--muted)">
-                actual {valueFormatter(trueTotal)}
+              <line x1={x(i)} x2={x(i)} y1={2} y2={14} stroke="var(--muted)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+              <rect x={boxX} y={20} width={boxW} height={14} fill="var(--panel)" opacity={0.9} rx={2} />
+              <text x={labelX} y={30} fontSize={10} textAnchor={anchor} fill="var(--muted)">
+                {label}
               </text>
             </g>
           );
         })}
 
-        {/* Two y-axis readings — the top of the stack and zero — rather than a
-            dense tick ladder. Drawn AFTER the fills, not before: this text sat
-            behind the topmost layer's gradient in an earlier pass, since SVG
-            paints later siblings on top of earlier ones and the leftmost
-            column can reach nearly to the top of the plot. A small dark
-            backing rect keeps it legible over whichever fill sits under it. */}
-        <rect x={0} y={2} width={70} height={14} fill="var(--panel)" opacity={0.85} rx={2} />
-        <text x={4} y={12} fontSize={10.5} fill="var(--muted-2)">
-          {valueFormatter(maxTotal)}
-        </text>
+        {/* The y-axis "max" reading — the top of the stack — is only ever
+            drawn when NOTHING was clipped. Once a bucket's rendered height has
+            been compressed, `maxTotal` is a percentile cutoff, not a true
+            maximum, and printing it plainly as "the max" right beside a
+            bucket explicitly labelled with a bigger "actual" number reads as
+            contradictory — a viewer sees two numbers, one implicitly claiming
+            to be the ceiling, and has to work out that they mean different
+            things. The per-bucket "actual" labels already carry the real
+            large numbers; a bare, unqualified figure that could be mistaken
+            for the true max is worse than showing no ceiling number at all. */}
+        {clipped.length === 0 && (
+          <>
+            <rect x={0} y={2} width={70} height={14} fill="var(--panel)" opacity={0.85} rx={2} />
+            <text x={4} y={12} fontSize={10.5} fill="var(--muted-2)">
+              {valueFormatter(maxTotal)}
+            </text>
+          </>
+        )}
         <text x={4} y={plotH - 4} fontSize={10.5} fill="var(--muted-2)">
           0
         </text>
