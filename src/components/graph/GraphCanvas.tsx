@@ -8,6 +8,7 @@ import type * as THREE from "three";
 import { AdditiveBlending, Vector3 } from "three";
 import type { Agent, Customer, Escalation, Mandate, PolicyRule, Trace } from "@/types/db";
 import { computeLayout, type Vec3 } from "./layout";
+import { AgentBlobCore } from "./AgentBlobMaterial";
 
 /**
  * Frames the whole cluster on first load.
@@ -163,19 +164,11 @@ function AgentNode({
           blending={AdditiveBlending}
         />
       </mesh>
-      {/* Pale core, saturated emission: the same trick a star uses. A body
-          painted the full accent colour reads flat, because nothing in it is
-          brighter than the glow around it. */}
-      <mesh scale={baseScale}>
-        <sphereGeometry args={[1, 32, 32]} />
-        <meshStandardMaterial
-          color="#d8e9ff"
-          emissive={ENTITY_COLORS.agent}
-          emissiveIntensity={1.1}
-          roughness={0.25}
-          metalness={0.15}
-        />
-      </mesh>
+      {/* The core: an organic, noise-displaced, fresnel-glowing blob rather
+          than a solid sphere — see AgentBlobMaterial.tsx. Its wobble amplitude
+          is tied to this agent's own trust score, so a calmer or more
+          agitated surface is a real reading of the data, not decoration. */}
+      <AgentBlobCore color={ENTITY_COLORS.agent} scale={baseScale} trustScore={agent.trust_score} />
     </group>
   );
 }
