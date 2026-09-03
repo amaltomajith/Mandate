@@ -2,9 +2,16 @@
 
 import { useMemo } from "react";
 import type { Escalation, Trace } from "@/types/db";
-import { computeRevenueImpact, computeRevenueTimeline, totalExecuted, type RevenueTimelinePoint } from "@/lib/revenue";
+import {
+  computeRevenueGrowthCurve,
+  computeRevenueImpact,
+  computeRevenueTimeline,
+  totalExecuted,
+  type RevenueTimelinePoint,
+} from "@/lib/revenue";
 import { formatMoney } from "@/lib/format";
 import { StackedAreaChart, type StackedAreaSeries } from "./charts/StackedAreaChart";
+import { AnimatedLineChart } from "./charts/AnimatedLineChart";
 
 /** The same four categories the figure grid below shows — kept identical on
  *  purpose, so the chart and the numbers next to it are never describing a
@@ -44,6 +51,9 @@ export function RevenueImpactPanel({
 }) {
   const impact = useMemo(() => computeRevenueImpact(traces, escalations), [traces, escalations]);
   const timeline = useMemo(() => computeRevenueTimeline(traces, escalations), [traces, escalations]);
+  // Arithmetic on the timeline's already-verified numbers, not a third pass
+  // over the trace list — see computeRevenueGrowthCurve's own comment.
+  const growth = useMemo(() => computeRevenueGrowthCurve(timeline), [timeline]);
   const executed = totalExecuted(impact);
 
   // Largest first, and named as a merchant would name them rather than by
@@ -88,6 +98,27 @@ export function RevenueImpactPanel({
           </p>
         </div>
       </div>
+
+      {/* The hero: money made, growing. A cumulative curve reads at a glance
+          in a way the stacked breakdown below it doesn't — "it's going up" is
+          the one-second story a first-time viewer takes away, and the detail
+          underneath is for whoever stays to look. Same underlying numbers as
+          the headline figure above (the curve's last point equals it exactly)
+          and the breakdown below — three views of one dataset, not three
+          datasets. */}
+      {growth.length >= 2 && (
+        <div className="mb-5 rounded-xl border p-4" style={{ borderColor: "var(--panel-border)", background: "var(--panel-2)" }}>
+          <p className="mb-1 text-[10.5px] font-semibold uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
+            Money made, over time
+          </p>
+          <AnimatedLineChart
+            data={growth.map((g) => ({ label: g.label, value: g.cumulative }))}
+            color="var(--decision-allow)"
+            height={140}
+            valueFormatter={(v) => formatMoney(Math.round(v), "INR")}
+          />
+        </div>
+      )}
 
       {/* Replaces a single proportioned bar: same four categories, but over
           time rather than collapsed into one instant. The bar could say "this

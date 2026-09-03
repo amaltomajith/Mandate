@@ -239,3 +239,32 @@ export function computeRevenueTimeline(traces: Trace[], escalations: Escalation[
 export function totalExecuted(impact: RevenueImpact): number {
   return impact.clearedAutomatically + impact.approvedThroughGate;
 }
+
+export interface RevenueGrowthPoint {
+  label: string;
+  /** Running total of settled revenue up to and including this bucket. */
+  cumulative: number;
+}
+
+/**
+ * "Money made", as a running total — the classic up-and-to-the-right line.
+ *
+ * Deliberately built by summing {@link RevenueTimelinePoint}s rather than
+ * re-walking the trace list a third way: `computeRevenueTimeline` already
+ * classifies and buckets every trace once, verified against the totals, and
+ * turning that into a cumulative curve is arithmetic on numbers already
+ * proven correct — not a second opportunity for the classification to drift.
+ *
+ * Only `clearedAutomatically` and `approvedThroughGate` count, matching
+ * `totalExecuted` exactly: this is money that reached Razorpay, not money
+ * still waiting or refused. The LAST point therefore always equals
+ * `totalExecuted(computeRevenueImpact(...))` on the same traces — asserted in
+ * `scripts/verify-catalog.ts`-style live checks, not just by construction.
+ */
+export function computeRevenueGrowthCurve(timeline: RevenueTimelinePoint[]): RevenueGrowthPoint[] {
+  let running = 0;
+  return timeline.map((p) => {
+    running += p.clearedAutomatically + p.approvedThroughGate;
+    return { label: p.label, cumulative: running };
+  });
+}
