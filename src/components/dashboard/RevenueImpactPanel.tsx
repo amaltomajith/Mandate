@@ -18,12 +18,22 @@ import { AnimatedLineChart } from "./charts/AnimatedLineChart";
  *  different slice of the same data. `deniedAtGate` exists in the underlying
  *  model but was never one of the four headline figures either; the chart
  *  follows that precedent rather than introducing a fifth category the rest
- *  of the panel doesn't have. */
+ *  of the panel doesn't have.
+ *
+ *  ORDER MATTERS in a stacked area chart, and getting it wrong here produced a
+ *  real, confusing bug: `refused` was drawn LAST, so its stroke traced the top
+ *  of the WHOLE stack (every layer's cumulative height, not its own) — a
+ *  single large approved order made the "refused" line spike to the sum of
+ *  everything underneath it, reading as a huge refusal that never happened.
+ *  `refused` now sits FIRST (bottom, baseline zero), so its own boundary shows
+ *  its own true amount and nothing else's. `clearedAutomatically` sits LAST
+ *  (top), so the outer boundary — the one shape every viewer's eye follows —
+ *  traces the grand total, which is the one number that outline SHOULD mean. */
 const SERIES: StackedAreaSeries[] = [
-  { key: "clearedAutomatically", label: "Cleared automatically", color: "var(--decision-allow)" },
-  { key: "approvedThroughGate", label: "Approved at the gate", color: "var(--entity-agent)" },
-  { key: "awaitingApproval", label: "Awaiting approval", color: "var(--decision-escalate)" },
   { key: "refused", label: "Refused", color: "var(--decision-block)" },
+  { key: "awaitingApproval", label: "Awaiting approval", color: "var(--decision-escalate)" },
+  { key: "approvedThroughGate", label: "Approved at the gate", color: "var(--entity-agent)" },
+  { key: "clearedAutomatically", label: "Cleared automatically", color: "var(--decision-allow)" },
 ];
 
 /**
@@ -116,6 +126,12 @@ export function RevenueImpactPanel({
             color="var(--decision-allow)"
             height={140}
             valueFormatter={(v) => formatMoney(Math.round(v), "INR")}
+            // Money made is a running total: it starts at whatever the first
+            // bucket settled and only ever climbs. A generic 12% axis pad
+            // pushed the floor NEGATIVE for a curve that can't go there --
+            // this clamps it at zero, the one value the axis floor is allowed
+            // to reach but never cross.
+            clampMin={0}
           />
         </div>
       )}

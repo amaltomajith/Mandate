@@ -1,4 +1,5 @@
 import type { Escalation, Trace } from "@/types/db";
+import { buildTimeBuckets, bucketKeyFor } from "./timeBuckets";
 
 /**
  * Revenue impact, derived from decisions that actually happened.
@@ -198,37 +199,21 @@ export function computeRevenueTimeline(traces: Trace[], escalations: Escalation[
   const classified = traces.map((t) => classifyTrace(t, escalationStatus)).filter((c) => c.bucket !== null);
   if (classified.length === 0) return [];
 
-  const times = classified.map((c) => new Date(c.createdAt).getTime());
-  const min = Math.min(...times);
-  const max = Math.max(...times);
-  const spanMs = Math.max(max - min, 1);
-  const byHour = spanMs < 36 * 60 * 60 * 1000;
-  const bucketMs = byHour ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
-
-  const firstBucket = Math.floor(min / bucketMs) * bucketMs;
-  const lastBucket = Math.floor(max / bucketMs) * bucketMs;
-  const buckets = new Map<number, RevenueTimelinePoint>();
-  for (let t = firstBucket; t <= lastBucket; t += bucketMs) {
-    buckets.set(t, {
-      at: t,
-      label: byHour
-        ? new Date(t).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })
-        : new Date(t).toLocaleDateString("en-IN", { month: "short", day: "numeric" }),
-      clearedAutomatically: 0,
-      approvedThroughGate: 0,
-      awaitingApproval: 0,
-      deniedAtGate: 0,
-      refused: 0,
-    });
-  }
+  const buckets = buildTimeBuckets(classified.map((c) => c.createdAt));
+  const points = new Map<number, RevenueTimelinePoint>(
+    buckets.map((b) => [
+      b.at,
+      { at: b.at, label: b.label, clearedAutomatically: 0, approvedThroughGate: 0, awaitingApproval: 0, deniedAtGate: 0, refused: 0 },
+    ])
+  );
 
   for (const c of classified) {
-    const bucketAt = Math.floor(new Date(c.createdAt).getTime() / bucketMs) * bucketMs;
-    const point = buckets.get(bucketAt);
+    const key = bucketKeyFor(c.createdAt, buckets);
+    const point = key !== null ? points.get(key) : undefined;
     if (point && c.bucket) point[c.bucket] += c.amount;
   }
 
-  return [...buckets.values()].sort((a, b) => a.at - b.at);
+  return [...points.values()].sort((a, b) => a.at - b.at);
 }
 
 /** Money that actually reached Razorpay: cleared outright plus approved at the

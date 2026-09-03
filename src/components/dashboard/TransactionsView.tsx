@@ -19,6 +19,23 @@ function explain(reasoning: string | null): string {
 }
 import { decisionColor } from "./ui";
 import { TimeAgo } from "./TimeAgo";
+import { StackedAreaChart, type StackedAreaSeries } from "./charts/StackedAreaChart";
+import { computeDecisionVolumeTimeline, type DecisionVolumePoint } from "@/lib/decisionVolume";
+
+/** Same lesson the revenue chart's stacking-order bug taught: the category
+ *  drawn LAST traces the boundary every viewer's eye follows, so it has to be
+ *  the one where "this is the total" is the correct reading. `allow` is by far
+ *  the largest slice here (typically 80%+ of traffic), so it sits on top,
+ *  where its own stroke doubles as the grand-total line. The three refusal
+ *  types sit below it in ascending severity, each with its own true height
+ *  directly readable off the bucket below it rather than inherited from
+ *  whatever is stacked on top. */
+const VOLUME_SERIES: StackedAreaSeries[] = [
+  { key: "protocol_reject", label: "Rejected (signature)", color: "var(--decision-reject)" },
+  { key: "block", label: "Blocked", color: "var(--decision-block)" },
+  { key: "escalate", label: "Escalated", color: "var(--decision-escalate)" },
+  { key: "allow", label: "Allowed", color: "var(--decision-allow)" },
+];
 
 const DECISION_LABEL: Record<Decision, string> = {
   allow: "Allowed",
@@ -78,6 +95,12 @@ export function TransactionsView({
     });
   }, [traces, filter, search, agentNameById]);
 
+  // Every trace in `traces` (not `filtered`) — the volume chart is the shape
+  // of the whole audit trail this grid is drawn from, not of whatever the
+  // current search happens to match. Same reason a revenue timeline reads the
+  // full trace set rather than a filtered view of it.
+  const volume = useMemo(() => computeDecisionVolumeTimeline(traces), [traces]);
+
   return (
     <div className="panel-card rounded-2xl p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -112,6 +135,22 @@ export function TransactionsView({
           </div>
         </div>
       </div>
+
+      {volume.length >= 2 && (
+        <div className="mb-4 rounded-xl border p-4" style={{ borderColor: "var(--panel-border)", background: "var(--panel-2)" }}>
+          <p className="mb-1 text-[10.5px] font-semibold uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
+            Decision volume, over time
+          </p>
+          <StackedAreaChart
+            data={volume}
+            indexKey="label"
+            series={VOLUME_SERIES}
+            valueFormatter={(n) => n.toLocaleString("en-IN")}
+            height={160}
+            renderTooltip={(point) => <VolumeTooltip point={point} />}
+          />
+        </div>
+      )}
 
       {filtered.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed py-10 text-center" style={{ borderColor: "var(--panel-border-strong)" }}>
@@ -224,6 +263,37 @@ export function TransactionsView({
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Same shape as the revenue chart's tooltip, in this app's own tokens rather
+ *  than the reference's blue/cyan/violet — one visual language, not two
+ *  charting widgets that happen to sit on different tabs. */
+function VolumeTooltip({ point }: { point: DecisionVolumePoint }) {
+  const total = point.allow + point.escalate + point.block + point.protocol_reject;
+  return (
+    <div className="w-52 overflow-hidden rounded-lg border shadow-xl" style={{ borderColor: "var(--panel-border-strong)" }}>
+      <div className="px-3 py-1.5 text-[11px] font-semibold text-white" style={{ background: "var(--brand-violet)" }}>
+        {point.label}
+      </div>
+      <div className="space-y-1.5 px-3 py-2.5" style={{ background: "var(--panel)" }}>
+        {VOLUME_SERIES.map((s) => {
+          const value = point[s.key as keyof DecisionVolumePoint] as number;
+          const pct = total > 0 ? (value / total) * 100 : 0;
+          return (
+            <div key={s.key} className="flex items-center gap-2">
+              <span className="h-2 w-2 shrink-0 rounded-[2px]" style={{ background: s.color }} />
+              <div className="flex w-full items-baseline justify-between gap-2 text-[11px]">
+                <span style={{ color: "var(--muted)" }}>{s.label}</span>
+                <span className="tabular-nums" style={{ color: "var(--foreground)" }}>
+                  {value} <span style={{ color: "var(--muted-2)" }}>({pct.toFixed(0)}%)</span>
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireDashboardUser } from "./authGuard";
 import { getCurrentMerchant } from "@/lib/merchant";
 import { PRODUCT_CATEGORIES, type ProductCategory } from "@/lib/demo/catalog";
+import { buildTimeBuckets, bucketKeyFor } from "@/lib/timeBuckets";
 
 /**
  * The merchant's side of managing what it sells.
@@ -102,6 +103,55 @@ export async function listProducts(): Promise<ProductRow[]> {
       revenuePaise: s.revenue,
       deletable: !everSeen.has(p.sku),
     };
+  });
+}
+
+export interface CatalogSalesPoint {
+  label: string;
+  /** Running total of units sold, across the whole catalog, up to and
+   *  including this bucket. */
+  cumulativeUnits: number;
+}
+
+/**
+ * "Units sold, growing" — the catalog's own version of the revenue panel's
+ * cumulative growth curve, so a merchant sees the same up-and-to-the-right
+ * story for volume that Overview shows for money.
+ *
+ * The sold/not-sold predicate (`decision === "allow"` and a real
+ * `params.notes.sku`) is the same one `listProducts` uses just above, kept as
+ * a second inline copy rather than factored into a shared helper — it is two
+ * conditions, and `deleteProduct` below already carries its own inline copy of
+ * the sibling "does this trace reference a SKU at all" check for the same
+ * reason: the classification here is trivial enough that a shared function
+ * would be more indirection than the two lines it replaces. If it ever grows
+ * a third branch, that is the signal to extract it, the way `classifyTrace` in
+ * revenue.ts was extracted once its classification actually had drift risk.
+ */
+export async function catalogSalesTimeline(): Promise<CatalogSalesPoint[]> {
+  const { merchant, db } = await merchantScope();
+
+  const { data: traces } = await db
+    .from("traces")
+    .select("params, decision, created_at")
+    .eq("merchant_id", merchant.id)
+    .eq("mode", "enforce")
+    .eq("decision", "allow");
+
+  const sold = (traces ?? []).filter((t) => !!(t.params as { notes?: { sku?: string } } | null)?.notes?.sku);
+  if (sold.length === 0) return [];
+
+  const buckets = buildTimeBuckets(sold.map((t) => t.created_at));
+  const perBucketUnits = new Map<number, number>(buckets.map((b) => [b.at, 0]));
+  for (const t of sold) {
+    const key = bucketKeyFor(t.created_at, buckets);
+    if (key !== null) perBucketUnits.set(key, (perBucketUnits.get(key) ?? 0) + 1);
+  }
+
+  let running = 0;
+  return buckets.map((b) => {
+    running += perBucketUnits.get(b.at) ?? 0;
+    return { label: b.label, cumulativeUnits: running };
   });
 }
 

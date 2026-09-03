@@ -4,12 +4,14 @@ import { useCallback, useEffect, useState, useTransition } from "react";
 import {
   agentScopesByCategory,
   catalogHealth,
+  catalogSalesTimeline,
   createProduct,
   deleteProduct,
   listProducts,
   setProductActive,
   updateProduct,
   type CatalogHealthIssue,
+  type CatalogSalesPoint,
   type ProductInput,
   type ProductRow,
 } from "@/lib/actions/products";
@@ -17,6 +19,7 @@ import { getSellableCatalog, type SellableSnapshot } from "@/lib/actions/sellabl
 import { PRODUCT_CATEGORIES } from "@/lib/demo/catalog";
 import { formatMoney } from "@/lib/format";
 import { EmptyState, GhostButton, Icons, Panel, PrimaryButton, Spinner, decisionColor } from "./ui";
+import { AnimatedLineChart } from "./charts/AnimatedLineChart";
 
 /**
  * What the merchant sells, and what the control plane already knows about it.
@@ -41,6 +44,7 @@ export function CatalogPanel() {
   const [health, setHealth] = useState<CatalogHealthIssue[]>([]);
   const [sellable, setSellable] = useState<SellableSnapshot | null>(null);
   const [scopes, setScopes] = useState<{ category: string; agents: { id: string; name: string }[] }[]>([]);
+  const [sales, setSales] = useState<CatalogSalesPoint[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState<ProductInput>(EMPTY);
@@ -50,10 +54,16 @@ export function CatalogPanel() {
   const refresh = useCallback(() => {
     startTransition(async () => {
       try {
-        const [p, h, sc] = await Promise.all([listProducts(), catalogHealth(), agentScopesByCategory()]);
+        const [p, h, sc, sl] = await Promise.all([
+          listProducts(),
+          catalogHealth(),
+          agentScopesByCategory(),
+          catalogSalesTimeline(),
+        ]);
         setProducts(p);
         setHealth(h);
         setScopes(sc);
+        setSales(sl);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Couldn't load the catalog.");
       }
@@ -136,6 +146,26 @@ export function CatalogPanel() {
           >
             {error}
           </p>
+        )}
+
+        {/* Units sold, growing — the catalog's own version of Overview's money
+            curve, so the same "it's going up" story exists for volume, not
+            just revenue. Only rendered once real sales exist and enough
+            buckets exist to draw a line; a fresh catalog with nothing sold yet
+            has nothing honest to chart. */}
+        {sales && sales.length >= 2 && (
+          <div className="mb-4 rounded-xl border p-4" style={{ borderColor: "var(--panel-border)", background: "var(--panel-2)" }}>
+            <p className="mb-1 text-[10.5px] font-semibold uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
+              Units sold, over time
+            </p>
+            <AnimatedLineChart
+              data={sales.map((s) => ({ label: s.label, value: s.cumulativeUnits }))}
+              color="var(--entity-customer)"
+              height={110}
+              valueFormatter={(v) => Math.round(v).toLocaleString("en-IN")}
+              clampMin={0}
+            />
+          </div>
         )}
 
         {adding && (

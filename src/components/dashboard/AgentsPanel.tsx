@@ -435,6 +435,9 @@ function AgentRow({
                 height={120}
                 valueFormatter={(v) => v.toFixed(0)}
                 thresholdLine={trustFloor !== null ? { value: trustFloor, label: `floor ${trustFloor}` } : undefined}
+                // Trust is a 0-100 score; the axis floor should never read
+                // negative for the same reason the revenue curve shouldn't.
+                clampMin={0}
               />
             )}
           </div>

@@ -27,6 +27,14 @@ export interface AnimatedLineChartProps {
    *  trust_floor threshold — not generic chart chrome. Omit when there is
    *  nothing to compare against. */
   thresholdLine?: { value: number; label: string; color?: string };
+  /** The y-axis floor may never go below this, even after padding. Real bug
+   *  this closes: a monotonically increasing "money made" curve got a NEGATIVE
+   *  axis minimum, because the 12% headroom pad was applied unconditionally —
+   *  correct for a series that can dip either way, wrong for one that
+   *  structurally can't go below its first value (a cumulative sum) or below
+   *  zero (money, a trust score). Pass 0 for either of those; omit it for a
+   *  series where the true minimum genuinely needs breathing room below it. */
+  clampMin?: number;
   className?: string;
 }
 
@@ -38,6 +46,7 @@ export function AnimatedLineChart({
   height = 160,
   valueFormatter = (n) => n.toFixed(1),
   thresholdLine,
+  clampMin,
   className,
 }: AnimatedLineChartProps) {
   const gradientId = useId();
@@ -58,8 +67,16 @@ export function AnimatedLineChart({
     // A little headroom so the line and its hover dot never clip the edge.
     const pad = Math.max(1, (hi - lo) * 0.12);
     const h = 20;
-    return { min: lo - pad, max: hi + pad, plotH: height - h };
-  }, [data, thresholdLine, height]);
+    // clampMin is applied AFTER padding, not instead of it — the point is to
+    // stop the pad from pushing the floor past a value the series can never
+    // actually reach, not to remove the pad entirely.
+    const paddedMin = lo - pad;
+    return {
+      min: clampMin !== undefined ? Math.max(paddedMin, clampMin) : paddedMin,
+      max: hi + pad,
+      plotH: height - h,
+    };
+  }, [data, thresholdLine, height, clampMin]);
 
   if (data.length === 0) {
     return (
