@@ -1,4 +1,5 @@
 import { config } from "./config.js";
+import { signGet } from "./signGet.js";
 
 /**
  * What the merchant sells, fetched over HTTP.
@@ -7,6 +8,16 @@ import { config } from "./config.js";
  * the catalog endpoint is public precisely so a buyer can discover a merchant
  * before it holds any credentials — discovery has to come before the signature,
  * or an agent could never become a customer in the first place.
+ *
+ * SIGNED anyway, once this agent has an identity. The merchant answers a signed
+ * request with this agent's SCOPED view — what it may actually transact — and
+ * the unsigned answer is the whole public catalog. Asking unsigned would work
+ * and would be worse: the agent would spend round trips proposing purchases the
+ * merchant has already decided it may not make, and would learn that one
+ * refusal at a time.
+ *
+ * The signature is dropped if it cannot be produced, because discovery still
+ * has to work for an agent that has not been registered yet.
  */
 
 export interface CatalogItem {
@@ -18,6 +29,9 @@ export interface CatalogItem {
 }
 
 export interface Storefront {
+  /** What the merchant says this agent may transact, when it says anything.
+   *  Null or absent means the full catalog. */
+  scopeNote?: string;
   merchantName: string;
   currency: string;
   mcpEndpoint: string;
@@ -27,6 +41,7 @@ export interface Storefront {
 
 interface CatalogResponse {
   merchant?: { name?: string; currency?: string };
+  scope?: { categories?: string[] | null; note?: string };
   transact?: { endpoint?: string; auth?: { keyDirectory?: string } };
   catalog?: {
     sku: string;
@@ -39,7 +54,18 @@ interface CatalogResponse {
 }
 
 export async function fetchStorefront(): Promise<Storefront> {
-  const res = await fetch(config.catalogUrl, { headers: { accept: "application/json" } });
+  const url = new URL(config.catalogUrl);
+  let headers: Record<string, string> = { accept: "application/json" };
+  try {
+    headers = { ...headers, ...signGet(url) };
+  } catch {
+    // No usable key yet. Fall back to the public catalog rather than failing --
+    // an agent has to be able to look at a merchant before it is registered.
+  }
+  // No cache hint needed on this side: Node's fetch does not cache, and the
+  // merchant marks a scoped answer `private, no-store` so nothing between us
+  // holds one agent's view and serves it to another.
+  const res = await fetch(url, { headers });
   if (!res.ok) {
     throw new Error(`The merchant's catalog is unavailable (HTTP ${res.status} from ${config.catalogUrl}).`);
   }
@@ -68,6 +94,7 @@ export async function fetchStorefront(): Promise<Storefront> {
   }
 
   return {
+    scopeNote: body.scope?.note,
     merchantName: body.merchant?.name ?? "unknown merchant",
     currency: body.merchant?.currency ?? "INR",
     mcpEndpoint: body.transact?.endpoint ?? config.mcpUrl,

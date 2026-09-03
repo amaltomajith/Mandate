@@ -1,9 +1,5 @@
-import { randomUUID } from "node:crypto";
-import * as ed from "@noble/ed25519";
-import { sha256, sha512 } from "@noble/hashes/sha2.js";
 import { config } from "./config.js";
-
-ed.hashes.sha512 = sha512;
+import { signGet } from "./signGet.js";
 
 /**
  * Asking the merchant whether to work.
@@ -25,33 +21,10 @@ export interface ControlAnswer {
   unreachable: boolean;
 }
 
-const COVERED = ["@method", "@path", "@authority", "content-digest"] as const;
-
-function sign(url: URL): Record<string, string> {
-  // A GET carries no body. The digest covers the empty string, which still
-  // binds the signature to this method, path and authority.
-  const digest = `sha-256=:${Buffer.from(sha256(new TextEncoder().encode(""))).toString("base64")}:`;
-  const created = Math.floor(Date.now() / 1000);
-  const sigInput = `sig1=(${COVERED.map((c) => `"${c}"`).join(" ")});created=${created};keyid="${config.agentId}";alg="ed25519";nonce="${randomUUID()}"`;
-  const base = [
-    `"@method": GET`,
-    `"@path": ${url.pathname + url.search}`,
-    `"@authority": ${url.host}`,
-    `"content-digest": ${digest}`,
-    `"@signature-params": ${sigInput.replace(/^sig1=/, "")}`,
-  ].join("\n");
-  const signature = ed.sign(new TextEncoder().encode(base), Buffer.from(config.privateKey, "base64"));
-  return {
-    "content-digest": digest,
-    "signature-input": sigInput,
-    signature: `sig1=:${Buffer.from(signature).toString("base64")}:`,
-  };
-}
-
 export async function askIfIShouldWork(): Promise<ControlAnswer> {
   const url = new URL(config.controlUrl);
   try {
-    const res = await fetch(url, { method: "GET", headers: sign(url) });
+    const res = await fetch(url, { method: "GET", headers: signGet(url) });
     if (!res.ok) {
       return {
         status: "paused",

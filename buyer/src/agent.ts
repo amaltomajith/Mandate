@@ -60,6 +60,9 @@ export class BuyerAgent {
     indent(`tools offered: ${tools.map((t) => t.name).join(", ") || "(none listed)"}`);
     indent(`my identity: ${config.agentId.slice(0, 8)}… (Ed25519, published in their key directory)`);
     indent(`my budget: ${money(config.budgetPaise)}`);
+    // Printed when the merchant scopes this agent, so a short catalog reads as
+    // a boundary rather than as a small shop.
+    if (this.storefront.scopeNote) indent(this.storefront.scopeNote);
     rule();
   }
 

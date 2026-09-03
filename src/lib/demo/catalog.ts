@@ -112,20 +112,45 @@ export async function applySeedProducts(
 /**
  * The LIVE catalog: what an agent can actually buy right now.
  *
- * Active-only, and this is the single place that decides it. Three of the four
- * readers -- the headroom probe, counter-offer candidates and campaign planning
- * -- go through here, so a retired product leaves all three at once. The fourth,
- * the public /catalog route, runs its own query and filters the same way; that
- * duplication is called out in both files because two places deciding what "for
- * sale" means is exactly how a deactivated SKU stays offerable.
+ * Active-only, and this is the single place that decides it. ALL FOUR readers
+ * now go through here -- the headroom probe, counter-offer candidates, campaign
+ * planning and the public /catalog route. The route used to run its own query,
+ * and pass one flagged that duplication as the real risk; adding per-agent
+ * scope on top of it would have meant two copies of the scope filter as well,
+ * so the duplication was removed rather than doubled. The route only ever
+ * differed in sort order and response shape, both of which it can do itself.
  */
-export async function fetchCatalog(db: SupabaseClient, merchantId: string): Promise<CatalogItem[]> {
-  const { data, error } = await db
+export async function fetchCatalog(
+  db: SupabaseClient,
+  merchantId: string,
+  /**
+   * The acting agent's catalog scope, when there is one.
+   *
+   * `undefined` and `null` both mean the full active catalog — no agent, or an
+   * agent that is explicitly unscoped. An array restricts to those categories,
+   * and an EMPTY array correctly yields nothing, because that is what an empty
+   * scope means.
+   *
+   * Filtering here is a convenience for the READER, never the enforcement. An
+   * agent that names an out-of-scope SKU directly still has to be refused by
+   * the engine, and is — see the catalog_scope rule. A listing that hides
+   * something is not a rule that forbids it, and building on the assumption
+   * that it is would leave the boundary enforced only for agents polite enough
+   * to look at the menu first.
+   */
+  agentCatalogScope?: string[] | null
+): Promise<CatalogItem[]> {
+  let query = db
     .from("products")
     .select("sku, name, description, price_paise, category")
     .eq("merchant_id", merchantId)
-    .eq("active", true)
-    .order("name");
+    .eq("active", true);
+  if (Array.isArray(agentCatalogScope)) {
+    // `.in` with an empty list matches nothing, which is exactly right for an
+    // empty scope and worth stating so nobody "fixes" it later.
+    query = query.in("category", agentCatalogScope);
+  }
+  const { data, error } = await query.order("name");
   if (error) throw error;
   return (data ?? []).map((p) => ({
     sku: p.sku,

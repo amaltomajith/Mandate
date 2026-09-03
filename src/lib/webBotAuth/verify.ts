@@ -99,7 +99,18 @@ export async function verifySignedRequest(input: VerifyRequestInput): Promise<Ve
   const publicKey = Buffer.from(publicKeyBase64, "base64");
   const signatureBytes = Buffer.from(sigMatch[1], "base64");
 
-  const ok = await ed.verifyAsync(signatureBytes, new TextEncoder().encode(base), publicKey);
+  // Wrapped, because `verifyAsync` THROWS on malformed input rather than
+  // returning false -- a signature that is not 64 bytes, or a public key that
+  // is not 32, raises instead of failing. Unwrapped, a caller sending three
+  // bytes of base64 got a 500 from an endpoint whose entire job is to refuse
+  // bad signatures cleanly. Every reachable failure has to come back as a
+  // reason, or the refusal path is only correct for well-formed attackers.
+  let ok = false;
+  try {
+    ok = await ed.verifyAsync(signatureBytes, new TextEncoder().encode(base), publicKey);
+  } catch (err) {
+    return { valid: false, reason: "bad_signature", detail: String(err).slice(0, 120) };
+  }
   if (!ok) return { valid: false, reason: "bad_signature" };
 
   // Last, deliberately: only a request that has already proven itself

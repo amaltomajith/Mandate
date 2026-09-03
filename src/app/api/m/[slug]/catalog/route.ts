@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getMerchantBySlug } from "@/lib/merchant";
+import { fetchCatalog } from "@/lib/demo/catalog";
+import { verifySignedRequest } from "@/lib/webBotAuth/verify";
+import { recordNonce } from "@/lib/webBotAuth/nonceStore";
 
 export const runtime = "nodejs";
 
@@ -24,8 +27,25 @@ export const runtime = "nodejs";
  * Agents are pointed at `simulate_action` instead, which answers "would this
  * specific action clear?" without revealing the shape of the rule that decides
  * it. Useful to an honest buyer, useless as a map for a dishonest one.
+ *
+ * SIGNING IS OPTIONAL, and the two answers differ. Unsigned, this serves the
+ * merchant's full active catalog — discovery has to work before an agent holds
+ * an identity, or nobody could ever become a customer. Signed by a known agent,
+ * it serves that agent's SCOPED view: what this particular buyer may actually
+ * transact. An agent that knows its own boundary does not waste round trips
+ * proposing things that will be refused.
+ *
+ * A signature that is PRESENT but invalid is refused rather than quietly
+ * downgraded to the public view. An agent that signed expects its own answer;
+ * handing it the unscoped catalog instead would be actively misleading — it
+ * would go on to propose purchases the engine then blocks, and the cause would
+ * be invisible from its side.
+ *
+ * And filtering this listing is NOT the enforcement. An agent that names an
+ * out-of-scope SKU directly is still blocked by the catalog_scope rule in the
+ * engine. A menu that omits a dish is not a lock on the kitchen.
  */
-export async function GET(_req: Request, ctx: { params: Promise<{ slug: string }> }) {
+export async function GET(req: Request, ctx: { params: Promise<{ slug: string }> }) {
   const { slug } = await ctx.params;
   const db = createAdminClient();
   const merchant = await getMerchantBySlug(db, slug);
@@ -33,20 +53,65 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string }
     return NextResponse.json({ error: "unknown_merchant", slug }, { status: 404 });
   }
 
-  // Active only. This mirrors fetchCatalog() rather than calling it, because
-  // this route serves a different shape -- but the FILTER has to stay identical
-  // or a product the merchant retired keeps being advertised to buyers. If one
-  // of these two changes, change the other.
-  const { data: products, error } = await db
-    .from("products")
-    .select("sku, name, description, price_paise, category")
-    .eq("merchant_id", merchant.id)
-    .eq("active", true)
-    .order("price_paise", { ascending: true });
+  const url = new URL(req.url);
+  const signatureInput = req.headers.get("signature-input");
+  let agentScope: string[] | null = null;
+  let scopedFor: string | null = null;
 
-  if (error) {
+  if (signatureInput) {
+    const verification = await verifySignedRequest({
+      method: req.method,
+      path: url.pathname + url.search,
+      authority: req.headers.get("host") ?? url.host,
+      // A GET carries no body; the digest covers the empty string, which still
+      // binds the signature to this method, path and authority.
+      body: "",
+      headers: {
+        "content-digest": req.headers.get("content-digest"),
+        "signature-input": signatureInput,
+        signature: req.headers.get("signature"),
+      },
+      lookupPublicKey: async (keyid) => {
+        const { data } = await db
+          .from("agents")
+          .select("public_key")
+          .eq("id", keyid)
+          .eq("merchant_id", merchant.id)
+          .maybeSingle();
+        return data?.public_key ?? null;
+      },
+      recordNonce,
+    });
+
+    if (!verification.valid) {
+      return NextResponse.json(
+        { error: "signature_verification_failed", reason: verification.reason },
+        { status: 401 }
+      );
+    }
+
+    const { data: agent } = await db
+      .from("agents")
+      .select("id, catalog_scope")
+      .eq("id", verification.keyid)
+      .eq("merchant_id", merchant.id)
+      .maybeSingle();
+    agentScope = agent?.catalog_scope ?? null;
+    scopedFor = agent?.id ?? null;
+  }
+
+  // ONE source of truth for what is for sale. This route used to run its own
+  // query, and pass one flagged that as the real risk in the design -- adding
+  // per-agent scope on top would have meant a second copy of the scope filter
+  // too. The route only ever differed in sort order and response shape, and it
+  // can do both itself.
+  let products;
+  try {
+    products = await fetchCatalog(db, merchant.id, agentScope);
+  } catch {
     return NextResponse.json({ error: "catalog_unavailable" }, { status: 503 });
   }
+  products.sort((a, b) => a.priceInPaise - b.priceInPaise);
 
   // Built from the merchant this request resolved to, not hardcoded. A catalog
   // that names itself "Demo Storefront" and points at a global /api/mcp would
@@ -102,18 +167,38 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string }
         advice: "Call simulate_action first to find what clears rather than guessing at limits.",
       },
 
-      catalog: (products ?? []).map((p) => ({
+      // Stated when it applies, so an agent knows it is looking at a subset
+      // rather than at everything the merchant sells. Silence here would make a
+      // narrow catalog indistinguishable from a small one.
+      ...(scopedFor
+        ? {
+            scope: {
+              agent: scopedFor,
+              categories: agentScope,
+              note:
+                agentScope === null
+                  ? "You may transact the merchant's full catalog."
+                  : agentScope.length === 0
+                    ? "You are currently scoped to no categories, so nothing here is transactable by you."
+                    : `This is your scoped view. You may transact: ${agentScope.join(", ")}.`,
+            },
+          }
+        : {}),
+
+      catalog: products.map((p) => ({
         sku: p.sku,
         name: p.name,
         description: p.description,
-        price: { amount: p.price_paise, currency: "INR", unit: "paise" },
+        price: { amount: p.priceInPaise, currency: "INR", unit: "paise" },
         category: p.category,
       })),
     },
     {
-      // Cheap for an agent to poll, without going stale for long after a
-      // catalog change.
-      headers: { "cache-control": "public, max-age=60" },
+      // A signed response is per-agent, so it must never land in a shared
+      // cache. The unsigned public catalog stays cheap to poll.
+      headers: {
+        "cache-control": scopedFor ? "private, no-store" : "public, max-age=60",
+      },
     }
   );
 }

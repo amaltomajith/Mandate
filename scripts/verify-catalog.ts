@@ -16,6 +16,9 @@
 import "./lib/loadEnv";
 import { createClient } from "@supabase/supabase-js";
 import { fetchCatalog, applySeedProducts, PRODUCT_CATEGORIES } from "../src/lib/demo/catalog";
+import { generateKeyPair } from "../src/lib/webBotAuth/keys";
+import { signRequest } from "../src/lib/webBotAuth/sign";
+import { computeContentDigest } from "../src/lib/webBotAuth/canonical";
 
 const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
   auth: { autoRefreshToken: false, persistSession: false },
@@ -100,6 +103,94 @@ async function main() {
     await db.from("products").update({ active: true }).eq("merchant_id", m!.id).eq("sku", victim.sku);
     const restored = await fetchCatalog(db, m!.id);
     check("restoring brings it back", restored.some((c) => c.sku === victim.sku), `${restored.length} product(s)`);
+
+    // ------------------------------------------------------- per-agent scope
+    //
+    // The listing is not the enforcement -- that is verify-policy's job -- but
+    // the two answers this route gives have to differ, and each check needs a
+    // control or it proves nothing.
+    const { secretKey, publicKey } = generateKeyPair();
+    const { data: scopedAgent } = await db
+      .from("agents")
+      .insert({
+        merchant_id: m!.id,
+        name: "Scoped Reader",
+        public_key: publicKey,
+        catalog_scope: ["office"],
+      })
+      .select()
+      .single();
+
+    const signedGet = async () => {
+      // Fresh nonce per call: the route verifies, and a replayed one is refused.
+      const u = new URL(`${BASE}/api/m/${slug}/catalog?t=${Date.now()}${Math.random()}`);
+      const signed = signRequest({
+        secretKeyBase64: secretKey,
+        keyid: scopedAgent!.id,
+        method: "GET",
+        path: u.pathname + u.search,
+        authority: u.host,
+        body: "",
+      });
+      const r = await fetch(u, { headers: { accept: "application/json", ...signed } });
+      return { status: r.status, body: (await r.json()) as { catalog: { sku: string; category: string }[]; scope?: { categories: string[] | null } } };
+    };
+
+    const scopedView = await signedGet();
+    const officeOnly = scopedView.body.catalog.every((c) => c.category === "office");
+    check(
+      "a signed request gets the agent's scoped catalog",
+      scopedView.status === 200 && officeOnly && scopedView.body.catalog.length > 0,
+      `${scopedView.body.catalog.length} item(s), all office`
+    );
+
+    // THE CONTROL. Same route, same instant, no signature.
+    const publicView = await (await fetch(`${BASE}/api/m/${slug}/catalog?t=${Date.now()}`, { cache: "no-store" })).json() as { catalog: { sku: string }[] };
+    check(
+      "CONTROL: an unsigned request still gets the full active catalog",
+      publicView.catalog.length > scopedView.body.catalog.length,
+      `${publicView.catalog.length} unsigned vs ${scopedView.body.catalog.length} scoped`
+    );
+
+    check(
+      "the scoped answer says what the scope is",
+      JSON.stringify(scopedView.body.scope?.categories) === JSON.stringify(["office"]),
+      JSON.stringify(scopedView.body.scope?.categories)
+    );
+
+    // A signature that is present but wrong is refused, not silently downgraded
+    // to the public view -- an agent that signed and got the unscoped catalog
+    // would propose purchases the engine then blocks, with no visible cause.
+    const badUrl = new URL(`${BASE}/api/m/${slug}/catalog?t=${Date.now()}`);
+    const badRes = await fetch(badUrl, {
+      headers: {
+        accept: "application/json",
+        "content-digest": computeContentDigest(""),
+        "signature-input": `sig1=("@method" "@path" "@authority" "content-digest");created=${Math.floor(Date.now() / 1000)};keyid="${scopedAgent!.id}";alg="ed25519";nonce="${crypto.randomUUID()}"`,
+        signature: "sig1=:AAAA:",
+      },
+    });
+    check("a present-but-invalid signature is refused", badRes.status === 401, `HTTP ${badRes.status}`);
+
+    // counter-offer candidacy follows the scope. Asserted BEFORE scoping so
+    // "not a candidate" is a change rather than a fact about an empty list.
+    const wideCandidates = await fetchCatalog(db, m!.id, null);
+    const scopedCandidates = await fetchCatalog(db, m!.id, ["office"]);
+    check(
+      "an electronics product is a candidate for an unscoped agent",
+      wideCandidates.some((c) => c.category === "electronics"),
+      `${wideCandidates.length} candidate(s)`
+    );
+    check(
+      "and is NOT a candidate for an office-scoped agent",
+      !scopedCandidates.some((c) => c.category === "electronics") && scopedCandidates.length > 0,
+      `${scopedCandidates.length} candidate(s), all office`
+    );
+    check(
+      "an empty scope yields no candidates at all",
+      (await fetchCatalog(db, m!.id, [])).length === 0,
+      "0 candidates"
+    );
 
     // Seeded products must all carry a category the engine can match on, or a
     // category_block rule silently misses them.

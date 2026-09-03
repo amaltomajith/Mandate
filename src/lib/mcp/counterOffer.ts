@@ -94,7 +94,10 @@ export async function findCounterOffer(ctx: CounterOfferContext): Promise<Counte
   if (!ctx.parentSku) return null;
 
   try {
-    const catalog = await fetchCatalog(ctx.db, ctx.merchantId);
+    // Scoped, so the model never sees a product this agent could not buy. The
+    // engine pre-clears every candidate below as well -- this is not the
+    // enforcement, it is not offering something we would then have to refuse.
+    const catalog = await fetchCatalog(ctx.db, ctx.merchantId, ctx.agentCatalogScope);
     if (catalog.length < 2) return null;
 
     // Public egress: the catalog and a SKU, nothing about policy.
