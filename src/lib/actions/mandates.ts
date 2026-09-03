@@ -49,3 +49,65 @@ export async function revokeMandate(mandateId: string) {
   if (error) throw error;
   revalidatePath("/dashboard");
 }
+
+
+export interface MandateActivity {
+  mandateId: string;
+  /** Enforce-mode actions this mandate stood behind: this agent, acting for
+   *  this customer. Derived from traces, never stored — same rule every other
+   *  panel follows, and a stored counter is a second source of truth that
+   *  drifts the moment a write fails after the action happened. */
+  actions: number;
+  /** Value of the ones that were allowed. Escalated and blocked actions are
+   *  counted above but not here: a mandate that authorized ten attempts and
+   *  cleared two did both of those things, and collapsing them would hide
+   *  which. */
+  settledPaise: number;
+  lastUsed: string | null;
+}
+
+/**
+ * What each mandate has actually authorized.
+ *
+ * The panel was a list of permissions with no evidence any of them were ever
+ * exercised — which is a strange thing for a control plane to show, because the
+ * interesting question about a standing authorization is not that it exists but
+ * what has happened under it. A mandate covering forty actions and one covering
+ * none look identical without this, and they are not remotely the same risk.
+ *
+ * A trace belongs to a mandate when the agent and the customer both match.
+ * `customerId` lives inside the jsonb params rather than a column, so traces
+ * written before it was persisted are invisible here — correct, since there is
+ * no way to know who they were for.
+ */
+export async function mandateActivity(): Promise<MandateActivity[]> {
+  await requireDashboardUser();
+  const merchant = await getCurrentMerchant();
+  const db = createAdminClient();
+
+  const [{ data: mandates }, { data: traces }] = await Promise.all([
+    db.from("mandates").select("id, agent_id, customer_id").eq("merchant_id", merchant.id),
+    db
+      .from("traces")
+      .select("agent_id, params, decision, created_at")
+      .eq("merchant_id", merchant.id)
+      .eq("mode", "enforce"),
+  ]);
+
+  return (mandates ?? []).map((m) => {
+    let actions = 0;
+    let settledPaise = 0;
+    let lastUsed: string | null = null;
+
+    for (const t of traces ?? []) {
+      if (t.agent_id !== m.agent_id) continue;
+      const p = t.params as { amount?: number; customerId?: string } | null;
+      if (!p?.customerId || p.customerId !== m.customer_id) continue;
+      actions += 1;
+      if (t.decision === "allow" && typeof p.amount === "number") settledPaise += p.amount;
+      if (!lastUsed || t.created_at > lastUsed) lastUsed = t.created_at;
+    }
+
+    return { mandateId: m.id, actions, settledPaise, lastUsed };
+  });
+}

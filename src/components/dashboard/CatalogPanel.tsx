@@ -85,9 +85,13 @@ export function CatalogPanel() {
     startTransition(async () => {
       try {
         await fn();
-        const [p, h] = await Promise.all([listProducts(), catalogHealth()]);
+        // Scopes refresh too. Editing a product's CATEGORY changes which
+        // agents may buy it, so leaving this out left the row describing the
+        // category it used to be in.
+        const [p, h, sc] = await Promise.all([listProducts(), catalogHealth(), agentScopesByCategory()]);
         setProducts(p);
         setHealth(h);
+        setScopes(sc);
         setEditing(null);
         setAdding(false);
         setDraft(EMPTY);
@@ -174,6 +178,7 @@ export function CatalogPanel() {
                   product={p}
                   buyers={scopes.find((x) => x.category === p.category)?.agents ?? []}
                   verdict={verdictFor(p.sku)}
+                  verdictAgent={sellable?.agent?.name ?? null}
                   verdictPending={!sellable}
                   busy={isPending}
                   onEdit={() => {
@@ -210,6 +215,7 @@ function ProductRowView({
   product,
   buyers,
   verdict,
+  verdictAgent,
   verdictPending,
   busy,
   onEdit,
@@ -220,6 +226,9 @@ function ProductRowView({
   /** Agents whose scope currently admits this product's category. */
   buyers: { id: string; name: string }[];
   verdict?: { decision: string; reasoning: string };
+  /** Whose verdict this is. The probe answers for ONE agent, and since catalog
+   *  scope is per-agent an unattributed "allow" is a claim about nobody. */
+  verdictAgent: string | null;
   verdictPending: boolean;
   busy: boolean;
   onEdit: () => void;
@@ -302,7 +311,11 @@ function ProductRowView({
 
         {product.active && (
           <span style={{ color: verdict ? decisionColor(verdict.decision) : "var(--muted-2)" }} title={verdict?.reasoning}>
-            {verdictPending ? "checking with the engine…" : verdict ? `agents: ${verdict.decision}` : "not checked"}
+            {verdictPending
+              ? "checking with the engine…"
+              : verdict
+                ? `${verdictAgent ?? "engine"}: ${verdict.decision}`
+                : "not checked"}
           </span>
         )}
 

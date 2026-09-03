@@ -1,9 +1,15 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { pauseMandate, reactivateMandate, revokeMandate } from "@/lib/actions/mandates";
+import { useEffect, useState, useTransition } from "react";
+import {
+  mandateActivity,
+  pauseMandate,
+  reactivateMandate,
+  revokeMandate,
+  type MandateActivity,
+} from "@/lib/actions/mandates";
 import type { Agent, Customer, Mandate } from "@/types/db";
-import { EmptyState, GhostButton, Icons, Panel, Spinner, SuccessButton, relativeTime } from "./ui";
+import { EmptyState, GhostButton, Icons, Panel, Spinner, SuccessButton, formatMoney, relativeTime } from "./ui";
 
 const TYPE_LABEL: Record<Mandate["type"], string> = {
   upi_autopay: "UPI Autopay",
@@ -25,7 +31,27 @@ const STATUS_STYLE: Record<Mandate["status"], { label: string; color: string }> 
  * before the policy engine even runs. Revoking here is not cosmetic: the
  * agent's very next attempted action under it gets blocked, live.
  */
+/** Active first, then paused, then the terminal ones. A revoked mandate from
+ *  last week competing for attention with a live one is the list sorted by
+ *  nothing in particular. */
+const STATUS_ORDER: Record<Mandate["status"], number> = {
+  active: 0,
+  paused: 1,
+  revoked: 2,
+  expired: 3,
+};
+
 export function MandatesPanel({ mandates, agents, customers }: { mandates: Mandate[]; agents: Agent[]; customers: Customer[] }) {
+  const [activity, setActivity] = useState<MandateActivity[]>([]);
+
+  useEffect(() => {
+    mandateActivity()
+      .then(setActivity)
+      .catch(() => {
+        /* the usage line just stays absent; the controls still work */
+      });
+  }, [mandates.length]);
+
   const agentNameById = new Map(agents.map((a) => [a.id, a.name]));
   const customerNameById = new Map(customers.map((c) => [c.id, c.name]));
 
@@ -78,20 +104,62 @@ export function MandatesPanel({ mandates, agents, customers }: { mandates: Manda
         </p>
       )}
 
+      {/* Said in the interface, not only in a comment. This is the ENFORCED
+          control -- it runs inside the request path, before the policy engine,
+          and does not care whether the agent cooperates. Pausing an AGENT is
+          the other thing entirely: a request the agent may ignore. A merchant
+          reaching for "stop" during an incident has to know which one they
+          just got. */}
+      <p className="mb-3 text-[11.5px] leading-relaxed" style={{ color: "var(--muted)" }}>
+        A standing authorization for one agent to act for one customer. Pausing or revoking here is
+        <strong className="font-semibold text-[var(--foreground)]"> enforced</strong> — it runs before
+        the policy engine and does not depend on the agent cooperating, unlike pausing the agent
+        itself.
+      </p>
+
+      {mandates.length > 0 && (
+        <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
+          {(["active", "paused", "revoked", "expired"] as const).map((st) => {
+            const n = mandates.filter((m) => m.status === st).length;
+            if (n === 0) return null;
+            return (
+              <span key={st} style={{ color: STATUS_STYLE[st].color }}>
+                <span className="font-semibold tabular-nums">{n}</span> {STATUS_STYLE[st].label.toLowerCase()}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
       {mandates.length === 0 ? (
         <EmptyState text="No mandates yet — one is created automatically the first time an agent's subscription.create succeeds with a customer attached." />
       ) : (
         <div className="space-y-2.5">
-          {mandates.map((m) => {
+          {[...mandates].sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]).map((m) => {
             const rowBusy = isPending && busy?.id === m.id;
             const running = (action: string) => rowBusy && busy?.action === action;
             const status = STATUS_STYLE[m.status];
             // Bound once per row: the revoke confirm names both, and inlining
             // them twice more would let the label and the confirm drift apart.
             const agentName = (m.agent_id ? agentNameById.get(m.agent_id) : null) ?? "Unknown agent";
+            // A mandate whose agent has been retired still says "active",
+            // because it is -- but the agent's key no longer verifies, so
+            // nothing can ever be done under it. Saying only "active" there is
+            // technically true and practically a lie.
+            const agentRetired = !!m.agent_id && agents.find((a) => a.id === m.agent_id)?.retired === true;
             const customerName = (m.customer_id ? customerNameById.get(m.customer_id) : null) ?? "Unknown customer";
             return (
-              <div key={m.id} className="rounded-xl border p-3.5" style={{ borderColor: "var(--panel-border)", background: "var(--panel-2)" }}>
+              <div
+                key={m.id}
+                className="rounded-xl border p-3.5"
+                style={{
+                  borderColor: "var(--panel-border)",
+                  background: "var(--panel-2)",
+                  // Terminal mandates stay readable but stop competing. They
+                  // are history, not something anyone can act on.
+                  opacity: m.status === "revoked" || m.status === "expired" ? 0.6 : 1,
+                }}
+              >
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium">
                     {agentName}
@@ -108,8 +176,42 @@ export function MandatesPanel({ mandates, agents, customers }: { mandates: Manda
                 <p className="mt-1.5 font-mono text-[11px]" style={{ color: "var(--muted)" }}>
                   {TYPE_LABEL[m.type]} {m.razorpay_ref ? `· ${m.razorpay_ref}` : ""}
                 </p>
-                <p className="mt-1 text-[11px]" style={{ color: "var(--muted-2)" }}>
-                  created {relativeTime(m.created_at)}
+                {agentRetired && (m.status === "active" || m.status === "paused") && (
+                  <p className="mt-1 text-[11px]" style={{ color: "var(--decision-escalate)" }}>
+                    This agent is retired — its key no longer verifies, so nothing can act under this
+                    mandate whatever it says here.
+                  </p>
+                )}
+                {/* What this authorization has actually stood behind. The panel
+                    used to show permissions with no evidence any of them were
+                    ever exercised -- a mandate covering forty actions and one
+                    covering none looked identical, and they are not remotely
+                    the same risk. Derived from traces, never stored. */}
+                <p className="mt-1.5 text-[11px]" style={{ color: "var(--muted-2)" }}>
+                  {(() => {
+                    const use = activity.find((a) => a.mandateId === m.id);
+                    if (!use || use.actions === 0) {
+                      return `created ${relativeTime(m.created_at)} · never used`;
+                    }
+                    return (
+                      <>
+                        <span className="tabular-nums" style={{ color: "var(--foreground)" }}>
+                          {use.actions}
+                        </span>{" "}
+                        action{use.actions === 1 ? "" : "s"}
+                        {use.settledPaise > 0 && (
+                          <>
+                            {" · "}
+                            <span className="tabular-nums" style={{ color: "var(--foreground)" }}>
+                              {formatMoney(use.settledPaise, "INR")}
+                            </span>{" "}
+                            settled
+                          </>
+                        )}
+                        {use.lastUsed && ` · last used ${relativeTime(use.lastUsed)}`}
+                      </>
+                    );
+                  })()}
                 </p>
 
                 <div className="mt-3 flex gap-2">
