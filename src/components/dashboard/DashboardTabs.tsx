@@ -59,6 +59,10 @@ interface Props {
 export function DashboardTabs(props: Props) {
   const { agents, rules, traces, escalations, tracesById, deterministicIssues, mandates, customers, products, merchant } = props;
   const [tab, setTab] = useState<Tab>("overview");
+
+  // Hidden from the scene and the trust panel, kept everywhere history is read.
+  // TransactionsView builds its agent-name map from the FULL list on purpose.
+  const liveAgents = agents.filter((a) => !a.retired);
   const [highlightRuleId, setHighlightRuleId] = useState<string | null>(null);
 
   function jumpToRule(ruleId: string) {
@@ -124,13 +128,17 @@ export function DashboardTabs(props: Props) {
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-white/70">Entity graph</p>
                 <p className="mt-0.5 text-xs text-white/50">a live map of every agent, rule, and action</p>
               </div>
-              <GraphCanvas agents={agents} rules={rules} traces={traces} mandates={mandates} customers={customers} escalations={escalations} />
+              {/* Retired agents are dropped from the SCENE but not from the
+                  traces it draws. Their past actions keep their edges and their
+                  hover names -- what disappears is the agent node itself, which
+                  is a thing that can still act, and a retired one cannot. */}
+              <GraphCanvas agents={liveAgents} rules={rules} traces={traces} mandates={mandates} customers={customers} escalations={escalations} />
               <GraphLegend />
             </div>
 
             <div className="flex min-h-0 flex-col gap-5">
               <EscalationsPanel escalations={escalations} tracesById={tracesById} />
-              <AgentTrustPanel agents={agents} rules={rules} />
+              <AgentTrustPanel agents={liveAgents} rules={rules} />
             </div>
           </div>
 

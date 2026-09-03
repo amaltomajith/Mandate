@@ -6,9 +6,11 @@ import type { TrustComponents } from "@/lib/trust/score";
 import {
   agentActivity,
   agentSpec,
+  deleteAgent,
   exportAgent,
   registerAgent,
   setAgentCatalogScope,
+  setAgentRetired,
   setAgentPace,
   setAgentStatus,
   type AgentActivity,
@@ -57,8 +59,16 @@ export function AgentsPanel({ agents, rules, mandates }: Props) {
 
   // `managed` is the merchant's own traffic generator; everything else was
   // registered by a third party who holds their own key.
-  const managed = agents.filter((a) => a.managed);
-  const thirdParty = agents.filter((a) => !a.managed);
+  //
+  // Retired agents are hidden HERE and in the graph, and nowhere else. The
+  // agents array itself still carries them, because TransactionsView builds its
+  // agent-name map from that same array -- filter them out upstream and every
+  // trace a retired agent ever produced starts rendering "Unknown agent",
+  // which is losing the history by a slower route than deleting it.
+  const live = agents.filter((a) => !a.retired);
+  const managed = live.filter((a) => a.managed);
+  const thirdParty = live.filter((a) => !a.managed);
+  const retiredCount = agents.length - live.length;
 
   const trustFloor = (() => {
     const rule = rules.find((r) => r.type === "trust_floor" && r.status === "active");
@@ -132,6 +142,13 @@ export function AgentsPanel({ agents, rules, mandates }: Props) {
                 />
               ))}
             </div>
+          )}
+
+          {retiredCount > 0 && (
+            <p className="mt-4 text-[10.5px]" style={{ color: "var(--muted-2)" }}>
+              {retiredCount} retired agent{retiredCount === 1 ? "" : "s"} hidden. Their keys no longer
+              verify, and their past actions still appear in Transactions under their own names.
+            </p>
           )}
 
           {managed.length > 0 && (
@@ -377,6 +394,51 @@ function AgentRow({
           {components && <TrustBreakdown components={components} />}
 
           <CatalogScope agent={agent} busy={busy} onRun={onRun} />
+
+          <div className="mt-3 flex items-center gap-1.5 border-t pt-2.5" style={{ borderColor: "var(--panel-border)" }}>
+            <GhostButton
+              disabled={busy}
+              className="px-2! py-1! text-[10px]!"
+              onClick={() => {
+                const ok = window.confirm(
+                  `Retire ${agent.name}?
+
+` +
+                    `Its key stops verifying immediately — requests are refused before any policy runs, ` +
+                    `whether it cooperates or not. It disappears from this roster and from the graph.
+
+` +
+                    `Nothing is lost: everything it has already done stays in Transactions under its name. ` +
+                    `You can bring it back.`
+                );
+                if (ok) onRun(() => setAgentRetired(agent.id, true));
+              }}
+            >
+              Retire
+            </GhostButton>
+
+            {/* Offered only when it is genuinely safe. A delete button that
+                usually errors is worse than no delete button -- same rule the
+                product row follows. */}
+            {activity && activity.totalRequests === 0 && !agent.managed && (
+              <GhostButton
+                disabled={busy}
+                className="px-2! py-1! text-[10px]!"
+                onClick={() => {
+                  const ok = window.confirm(
+                    `Delete ${agent.name} permanently?
+
+` +
+                      `It has never made a request, so there is no history to lose. ` +
+                      `An agent that has acted cannot be deleted — retire it instead.`
+                  );
+                  if (ok) onRun(() => deleteAgent(agent.id));
+                }}
+              >
+                Delete
+              </GhostButton>
+            )}
+          </div>
           <p className="mt-2 text-[9.5px] font-semibold uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
             Recent actions, and what it said about them
           </p>

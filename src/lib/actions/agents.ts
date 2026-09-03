@@ -105,6 +105,75 @@ export async function setAgentCatalogScope(agentId: string, scope: string[] | nu
   revalidatePath("/dashboard");
 }
 
+/**
+ * Retire an agent, or bring it back.
+ *
+ * Retiring is ENFORCED, unlike pausing. The key stops verifying, so requests
+ * are refused at the protocol layer before any policy runs — a retired agent
+ * cannot transact whether it cooperates or not. Pausing only changes what
+ * /agent-control tells it.
+ *
+ * What retiring does NOT do is hide history. Every trace the agent produced
+ * still carries its id and still resolves to its name in Transactions and the
+ * order history. That is the whole reason this is a flag and not a delete.
+ */
+export async function setAgentRetired(agentId: string, retired: boolean) {
+  const { merchant, db } = await merchantScope();
+  const { error } = await db
+    .from("agents")
+    .update({ retired })
+    .eq("id", agentId)
+    .eq("merchant_id", merchant.id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/dashboard");
+}
+
+/**
+ * Hard delete, allowed only when the agent has no traces at all.
+ *
+ * `traces.agent_id` references this row. Deleting an agent that has acted would
+ * either fail on the foreign key or, with a cascade, destroy the record of money
+ * that genuinely moved — so the only safe case is an agent that never did
+ * anything. Exactly the guard `deleteProduct` uses, for exactly the same reason:
+ * the audit trail is the product.
+ *
+ * The refusal names the alternative, because "cannot delete" without "retire
+ * instead" is a dead end rather than an answer.
+ */
+export async function deleteAgent(agentId: string): Promise<void> {
+  const { merchant, db } = await merchantScope();
+
+  const { data: agent } = await db
+    .from("agents")
+    .select("name, managed")
+    .eq("id", agentId)
+    .eq("merchant_id", merchant.id)
+    .maybeSingle();
+  if (!agent) throw new Error("Agent not found.");
+  if (agent.managed) {
+    throw new Error(
+      "This is Mandate's own traffic generator, not a third-party agent. Retire it if you want it to stop, but deleting it would leave the simulation with no identity to sign as."
+    );
+  }
+
+  const { count, error: countError } = await db
+    .from("traces")
+    .select("*", { count: "exact", head: true })
+    .eq("merchant_id", merchant.id)
+    .eq("agent_id", agentId);
+  if (countError) throw new Error(countError.message);
+
+  if ((count ?? 0) > 0) {
+    throw new Error(
+      `"${agent.name}" has ${count} trace${count === 1 ? "" : "s"} in the audit trail, so deleting it would destroy the record of what it did. Retire it instead — it stops transacting immediately, and its history still reads correctly.`
+    );
+  }
+
+  const { error } = await db.from("agents").delete().eq("id", agentId).eq("merchant_id", merchant.id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/dashboard");
+}
+
 export interface RegisterAgentInput {
   name: string;
   description?: string;
@@ -226,7 +295,10 @@ export interface AgentActivity {
   stale: boolean;
   /** Every request this agent has ever made, in any mode. `recent` below only
    *  lists money actions, so without this an agent that has done nothing but
-   *  headroom probes is indistinguishable from one that has never called. */
+   *  headroom probes is indistinguishable from one that has never called.
+   *
+   *  Also what makes deletion safe or not: zero here means nothing in the audit
+   *  trail points at this agent, so the row can go without losing anything. */
   totalRequests: number;
   recent: {
     traceId: string;

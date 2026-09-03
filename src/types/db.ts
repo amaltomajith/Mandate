@@ -82,6 +82,11 @@ export interface Database {
            *  categories and are opposites, so anything displaying this has to
            *  say which it is showing. */
           catalog_scope: string[] | null;
+          /** True hides the agent from the roster and the graph and stops its
+           *  key verifying. Its past traces still resolve to its name --
+           *  retirement hides the agent, never its history. Distinct from
+           *  `status`, which is the cooperative pause an agent may ignore. */
+          retired: boolean;
           /** How long the merchant asks this agent to wait between actions. A
            *  request the agent honours, not a limit the engine enforces —
            *  velocity rules are the limit. */
@@ -105,6 +110,7 @@ export interface Database {
           merchant_id: string;
           managed?: boolean;
           catalog_scope?: string[] | null;
+          retired?: boolean;
           status?: AgentStatus;
           pace_ms?: number;
           persona?: string | null;

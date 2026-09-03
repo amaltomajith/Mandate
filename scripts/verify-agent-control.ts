@@ -204,6 +204,169 @@ async function main() {
       Object.values(spec.endpoints ?? {}).every((u) => u.includes(A.slug)),
       spec.endpoints?.agentControl ?? ""
     );
+    // ================================================================
+    // RETIREMENT — enforced, unlike pause, and must not cost history.
+    //
+    // Every check below carries a control. "A retired agent cannot transact"
+    // passes vacuously if the agent could not transact anyway, so each one is
+    // paired with the same agent succeeding first, or with a live agent doing
+    // the identical thing in the same instant.
+    // ================================================================
+
+    // Money figures BEFORE, so "unchanged" is a measurement and not a hope.
+    const moneyBefore = async () => {
+      const { data } = await db
+        .from("traces")
+        .select("params, decision")
+        .eq("merchant_id", A.merchantId)
+        .eq("mode", "enforce")
+        .eq("decision", "allow");
+      const rows = data ?? [];
+      const revenue = rows.reduce(
+        (sum, t) => sum + (typeof (t.params as { amount?: number })?.amount === "number" ? (t.params as { amount: number }).amount : 0),
+        0
+      );
+      return { orders: rows.length, revenue };
+    };
+
+    // The agent transacts FIRST, so it has history worth preserving and so the
+    // refusal below is a change rather than a standing condition.
+    const beforeRetire = await client.callTool<{ decision: string; traceId: string }>("enforce_action", {
+      actionType: "order.create",
+      amount: mouse.priceInPaise,
+      currency: "INR",
+      category: mouse.category,
+      params: { receipt: `pre-retire-${Date.now()}` },
+    });
+    check(
+      "CONTROL: the agent transacts normally before retirement",
+      beforeRetire.decision === "allow",
+      beforeRetire.decision
+    );
+
+    const moneyPre = await moneyBefore();
+    const { count: agentsBefore } = await db
+      .from("agents")
+      .select("*", { count: "exact", head: true })
+      .eq("merchant_id", A.merchantId)
+      .eq("retired", false);
+
+    await db.from("agents").update({ retired: true }).eq("id", A.agentId);
+
+    // Enforced at the protocol layer: refused before any policy runs.
+    // MandateClient throws on a non-2xx, so the refusal is caught rather than
+    // returned. Checking the message for 401 keeps this asserting the PROTOCOL
+    // layer specifically -- a policy block would come back as a decision, not
+    // as a transport failure.
+    let refusal = "";
+    try {
+      await client.callTool("enforce_action", {
+        actionType: "order.create",
+        amount: mouse.priceInPaise,
+        currency: "INR",
+        category: mouse.category,
+        params: { receipt: `post-retire-${Date.now()}` },
+      });
+    } catch (err) {
+      refusal = err instanceof Error ? err.message : String(err);
+    }
+    check(
+      "a retired agent's signed request is refused at the protocol layer",
+      /401/.test(refusal),
+      refusal.slice(0, 60) || "no refusal — it went through"
+    );
+
+    const { data: rejects } = await db
+      .from("traces")
+      .select("decision")
+      .eq("merchant_id", A.merchantId)
+      .eq("decision", "protocol_reject")
+      .order("created_at", { ascending: false })
+      .limit(1);
+    check(
+      "and recorded as protocol_reject, not as a policy decision",
+      rejects?.[0]?.decision === "protocol_reject",
+      rejects?.[0]?.decision ?? "none"
+    );
+
+    // HISTORY. The specific trace it wrote a moment ago must still resolve to a
+    // name -- not null, not an id.
+    const { data: oldTrace } = await db
+      .from("traces")
+      .select("id, agent_id")
+      .eq("id", beforeRetire.traceId)
+      .single();
+    const { data: retiredRow } = await db
+      .from("agents")
+      .select("id, name, retired")
+      .eq("id", oldTrace!.agent_id!)
+      .maybeSingle();
+    check(
+      "its past trace still resolves to the agent's NAME",
+      !!retiredRow && retiredRow.retired === true && retiredRow.name.length > 0,
+      `"${retiredRow?.name}" (retired=${retiredRow?.retired})`
+    );
+
+    // Money is untouched. Asserted on the numbers, not on a page rendering.
+    const moneyPost = await moneyBefore();
+    check(
+      "revenue and order count are byte-identical after retiring",
+      moneyPost.orders === moneyPre.orders && moneyPost.revenue === moneyPre.revenue,
+      `${moneyPre.orders} orders / ${moneyPre.revenue}p -> ${moneyPost.orders} / ${moneyPost.revenue}p`
+    );
+
+    // The roster and the scene lose exactly one.
+    const { count: agentsAfter } = await db
+      .from("agents")
+      .select("*", { count: "exact", head: true })
+      .eq("merchant_id", A.merchantId)
+      .eq("retired", false);
+    check(
+      "the roster loses exactly one agent",
+      (agentsBefore ?? 0) - (agentsAfter ?? 0) === 1,
+      `${agentsBefore} -> ${agentsAfter} live`
+    );
+
+    // CONTROL: a live agent on the same tenant is unaffected in the same instant.
+    const liveKeys = await ed.keygenAsync();
+    const { data: liveAgent } = await db
+      .from("agents")
+      .insert({
+        merchant_id: A.merchantId,
+        name: "Still Working",
+        public_key: Buffer.from(liveKeys.publicKey).toString("base64"),
+      })
+      .select()
+      .single();
+    const liveClient = new MandateClient(
+      BASE,
+      A.slug,
+      liveAgent!.id,
+      Buffer.from(liveKeys.secretKey).toString("base64")
+    );
+    const liveResult = await liveClient.callTool<{ decision: string }>("enforce_action", {
+      actionType: "order.create",
+      amount: mouse.priceInPaise,
+      currency: "INR",
+      category: mouse.category,
+      params: { receipt: `live-${Date.now()}` },
+    });
+    check(
+      "CONTROL: a live agent still transacts in the same instant",
+      liveResult.decision === "allow",
+      `${liveResult.decision} — so the refusal above is retirement, not the tenant`
+    );
+
+    // Reversible: bringing it back restores the key.
+    await db.from("agents").update({ retired: false }).eq("id", A.agentId);
+    const restored = await client.callTool<{ decision: string }>("enforce_action", {
+      actionType: "order.create",
+      amount: mouse.priceInPaise,
+      currency: "INR",
+      category: mouse.category,
+      params: { receipt: `restored-${Date.now()}` },
+    });
+    check("un-retiring restores the key", restored.decision === "allow", restored.decision);
   } finally {
     await db.from("merchants").delete().in("id", [A.merchantId, B.merchantId]);
   }

@@ -203,7 +203,7 @@ Ten tables, all scoped by `merchant_id`, all with RLS enabled.
 | Table | What it holds |
 |---|---|
 | `merchants` | the tenant. `slug` is its public identity, `clerk_user_id` its owner |
-| `agents` | name, description, Ed25519 public key, trust score and components, `managed`, and `catalog_scope` |
+| `agents` | name, description, Ed25519 public key, trust score and components, `managed`, `catalog_scope`, and `retired` |
 | `customers` | who an action is on behalf of |
 | `products` | the catalog an agent reads and reasons over. Merchant-managed, `active` retires without deleting |
 | `policy_rules` | type, params, status (`active` / `pending_review` / `rejected` / `superseded`), source, rationale |
@@ -245,6 +245,34 @@ nothing would report an error, because both are valid strings. `gambling` and
 `crypto` are in the list on purpose — the seeded policy blocks them, and a
 merchant needs to be able to create a product in a blocked category to watch
 the block fire.
+
+### `agents.retired` — hide the agent, never its history
+
+The same call `products.active` makes, for the same reason. Traces carry
+`agent_id`, and deleting an agent row to tidy a roster leaves every trace it
+produced pointing at nobody — or, with a cascade, destroys the record of money
+that genuinely moved. Retiring hides the agent; the history stays readable.
+
+**Not `agents.status`.** That column exists and is `active | paused`, and it is
+the COOPERATIVE channel: an agent polls `/agent-control`, reads it, and a
+well-behaved one complies. Nothing is enforced by it. Retirement is enforced —
+the key stops verifying, so requests are refused at the protocol layer before
+any policy runs, whether the agent cooperates or not. Folding an enforced state
+into the cooperative field would leave a merchant reaching for "stop" unable to
+tell which of the two they just got, which is the exact conflation the Agents
+panel is built to keep apart.
+
+The filtering is **per surface**, and getting that wrong loses the history by a
+slower route than deleting it. `getDashboardData` still returns every agent,
+because `TransactionsView` builds its agent-name map from that same array —
+filter retired agents out upstream and every trace they ever produced starts
+rendering "Unknown agent". So: hidden from the roster, the entity graph and the
+trust panel (all of which list things that *can act*); kept in Transactions,
+orders, revenue and mandates (all of which read *what happened*).
+
+Hard delete stays available only for an agent with zero traces, and the button
+only renders in that case. The managed identity is refused outright — deleting
+it would leave the simulation with no identity to sign as.
 
 ### `agents.managed` — merchant scaffolding vs. a real third party
 
@@ -1010,7 +1038,7 @@ supabase/migrations/     0001 schema+RLS · 0002 products · 0004-0008 rule-type
                          0011 offer-id index · 0012 agent control ·
                          0013 replay nonces · 0014 managed agents ·
                          0015 products.active · 0016 agents.catalog_scope ·
-                         0017 catalog_scope rule type
+                         0017 catalog_scope rule type · 0018 agents.retired
 src/lib/actions/products.ts
                          catalog CRUD + derived units/revenue + health checks
 src/components/dashboard/CatalogPanel.tsx
@@ -1110,6 +1138,15 @@ Stated here rather than discovered by a reviewer.
   into a 500 from an endpoint whose whole job is refusing them cleanly. Now
   wrapped in `verify.ts`, so every reachable failure returns a reason. Found by
   adding a third caller; it had been latent on `/mcp` and `/agent-control`.
+- **The two `Checkout Agent (HH:MM:SS)` rows are the visible residue of that
+  bug, and they are retired rather than deleted.** 119 traces between them, all
+  real signed history from when the simulation was minting a new identity per
+  restart. Deleting the rows to tidy the roster would have rewritten the audit
+  trail — the same call the product delete guard makes, for the same reason.
+  They are hidden from the roster and the graph, their keys no longer verify,
+  and their past actions still resolve to their own names in Transactions.
+  Verified on the live tenant: 185 orders and ₹3,39,320.15 identical before and
+  after, and the graph drawing four agent nodes instead of six.
 - **A stale `SIM_AGENT_ID` used to be invisible.** The env pin names one agent
   id, which belongs to one merchant, and the lookup filters on `merchant_id`. On
   any other tenant it missed — and the old fallback registered a brand new agent

@@ -64,6 +64,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ slug: strin
       const { data } = await db
         .from("agents")
         .select("public_key")
+        // A retired agent has no key here, so verification fails with the same
+        // `unknown_keyid` a stranger gets -- refused at the protocol layer before
+        // any policy runs, whether or not the agent cooperates.
+        .eq("retired", false)
         .eq("id", keyid)
         .eq("merchant_id", merchant.id)
         .maybeSingle();
