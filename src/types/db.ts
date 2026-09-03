@@ -75,6 +75,13 @@ export interface Database {
            *  false for an agent registered through the dashboard: that key
            *  belongs to a third party and rotating it would lock them out. */
           managed: boolean;
+          /** Categories this agent may transact. NULL is the full catalog --
+           *  the default, and what every agent had before the column existed.
+           *  An EMPTY array means nothing at all, which is a deliberate state
+           *  rather than an unset one; the two read identically in a list of
+           *  categories and are opposites, so anything displaying this has to
+           *  say which it is showing. */
+          catalog_scope: string[] | null;
           /** How long the merchant asks this agent to wait between actions. A
            *  request the agent honours, not a limit the engine enforces —
            *  velocity rules are the limit. */
@@ -97,6 +104,7 @@ export interface Database {
         Insert: {
           merchant_id: string;
           managed?: boolean;
+          catalog_scope?: string[] | null;
           status?: AgentStatus;
           pace_ms?: number;
           persona?: string | null;
