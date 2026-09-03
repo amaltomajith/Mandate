@@ -58,25 +58,57 @@ export function StackedAreaChart<T extends object>({
   // narrow type back instead of `unknown` on every field.
   const rows = data as unknown as Record<string, unknown>[];
 
-  const { layers, maxTotal, plotH } = useMemo(() => {
+  const { layers, maxTotal, plotH, clipped } = useMemo(() => {
     const axisH = 22; // reserved for x-axis labels
     const plotHeight = height - axisH;
     const totals = rows.map((d) => series.reduce((sum, s) => sum + (Number(d[s.key]) || 0), 0));
-    const max = Math.max(1, ...totals);
+    const trueMax = Math.max(1, ...totals);
 
-    // Cumulative stack: each series' baseline is the sum of every series
-    // before it, so the fills sit on top of one another rather than
-    // overlapping. Built with reduce rather than a reassigned outer `let` —
-    // the previous version mutated a variable captured by the map callback
-    // across iterations, which reads correctly but is exactly the shape
-    // React's hooks lint now flags as unsafe mutation inside a memo.
+    /**
+     * A single extreme bucket on a LINEAR, shared axis crushes every other
+     * bucket flat — the real bug a screenshot caught: one bucket at ~3.66L
+     * against neighbours in the hundreds made 29 of 30 buckets unreadable.
+     * The fix is a cap on RENDERED height only, computed from a percentile of
+     * the bucket totals (robust to exactly the single-outlier case this
+     * exists for) rather than the true max. Only engages with enough buckets
+     * to make a percentile meaningful (below that, this behaves exactly as
+     * before — cap equals the true max, nothing is ever compressed).
+     *
+     * The values themselves are NEVER altered where they're reported: the
+     * hover tooltip reads straight from `data`, untouched, and every clipped
+     * bucket gets its true total stated in a marker label right on the chart.
+     * Only the SHAPE — where the fill and stroke are drawn — is compressed.
+     */
+    let cap = trueMax;
+    if (totals.length >= 8) {
+      const sorted = [...totals].sort((a, b) => a - b);
+      const p90 = sorted[Math.floor(0.9 * (sorted.length - 1))];
+      // Never cap below something a normal-sized bucket would still clear —
+      // a flat or near-uniform dataset should never get compressed just
+      // because the 90th percentile happens to sit under the true max.
+      if (p90 > 0 && p90 < trueMax * 0.85) cap = p90;
+    }
+
+    // Per-bucket scale: 1 everywhere except where the true total exceeds the
+    // cap, where every category at that bucket is scaled down by the same
+    // factor — proportions BETWEEN categories in that one bucket are
+    // preserved exactly; only the bucket's overall height is compressed.
+    const scale = totals.map((t) => (t > cap ? cap / t : 1));
+    const clippedPoints = totals
+      .map((t, i) => ({ i, trueTotal: t, isClipped: scale[i] < 1 }))
+      .filter((c) => c.isClipped);
+
+    // Cumulative stack over the SCALED per-category values, not the raw ones
+    // — restacking scaled inputs keeps every layer's own proportion correct
+    // at a clipped bucket, rather than scaling already-cumulative tops after
+    // the fact and compounding rounding across layers.
     const built = series.reduce<{ s: StackedAreaSeries; top: number[]; bottom: number[] }[]>((acc, s) => {
       const baseline = acc.length > 0 ? acc[acc.length - 1].top : rows.map(() => 0);
-      const top = rows.map((d, i) => baseline[i] + (Number(d[s.key]) || 0));
+      const top = rows.map((d, i) => baseline[i] + (Number(d[s.key]) || 0) * scale[i]);
       acc.push({ s, top, bottom: baseline });
       return acc;
     }, []);
-    return { layers: built, maxTotal: max, plotH: plotHeight };
+    return { layers: built, maxTotal: cap, plotH: plotHeight, clipped: clippedPoints };
   }, [rows, series, height]);
 
   if (data.length === 0) {
@@ -155,6 +187,24 @@ export function StackedAreaChart<T extends object>({
             />
           </g>
         ))}
+
+        {/* Where a bucket's true height was compressed to fit the cap, say so
+            right there — a short tick plus its real, uncapped total. Sits at
+            y≈24, below the axis-max label's row (which ends ~y16), so the two
+            never collide even when the clipped bucket is the very first one —
+            exactly the case in the data that surfaced this bug. */}
+        {clipped.map(({ i, trueTotal }) => {
+          const anchor = i < 2 ? "start" : i > data.length - 3 ? "end" : "middle";
+          const labelX = anchor === "start" ? x(i) - 2 : anchor === "end" ? x(i) + 2 : x(i);
+          return (
+            <g key={`clip-${i}`}>
+              <line x1={x(i)} x2={x(i)} y1={2} y2={10} stroke="var(--muted)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+              <text x={labelX} y={24} fontSize={10} textAnchor={anchor} fill="var(--muted)">
+                actual {valueFormatter(trueTotal)}
+              </text>
+            </g>
+          );
+        })}
 
         {/* Two y-axis readings — the top of the stack and zero — rather than a
             dense tick ladder. Drawn AFTER the fills, not before: this text sat

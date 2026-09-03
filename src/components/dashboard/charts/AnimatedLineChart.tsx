@@ -173,9 +173,18 @@ export function AnimatedLineChart({
           </>
         )}
 
+        {/* Backing rects behind both axis labels — the same fix
+            StackedAreaChart already needed. Without one, a data line whose
+            early trajectory sits near the axis floor draws its stroke
+            straight through the label's glyphs, and "the min value" comes out
+            as an unreadable smear rather than a number — exactly what
+            happened here, since a cumulative curve's first points are, by
+            construction, near whatever the floor is. */}
+        <rect x={0} y={2} width={88} height={14} fill="var(--panel)" opacity={0.88} rx={2} />
         <text x={4} y={12} fontSize={10.5} fill="var(--muted-2)">
           {valueFormatter(max)}
         </text>
+        <rect x={0} y={plotH - 15} width={88} height={14} fill="var(--panel)" opacity={0.88} rx={2} />
         <text x={4} y={plotH - 4} fontSize={10.5} fill="var(--muted-2)">
           {valueFormatter(min)}
         </text>
