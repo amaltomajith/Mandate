@@ -44,11 +44,19 @@ function appliesTo(rule: PolicyRule, actionType: string): boolean {
  * only `enforce_action` goes on to make the real Razorpay call when the result is "allow".
  *
  * Priority order is fixed and documented:
- *   category_block > cap > velocity > trust_floor > step_up.
+ *   category_block > catalog_scope > cap > velocity > trust_floor > step_up.
  * First match wins. This ordering is a deliberate policy choice (hard blocks and
  * spend caps are absolute; step-up is the last resort that asks a human instead of
  * refusing outright) — change it here, in one place, if that priority is wrong for
  * a given merchant.
+ *
+ * catalog_scope sits SECOND, and the reason is about which sentence the merchant
+ * should read. A merchant-wide prohibition is a stronger and more general fact
+ * than one agent's permission boundary: if gambling is blocked for everyone,
+ * "gambling is blocked" is the true and useful explanation, not "this particular
+ * agent happens to be out of scope" — which would imply that widening the scope
+ * would help, when it would not. Scope then precedes the money rules because
+ * "may not transact this at all" outranks "how much of it".
  *
  * trust_floor sits above step_up because "this agent has not earned the benefit
  * of the doubt" is a stronger reason to involve a human than "this amount is
@@ -72,6 +80,43 @@ export function evaluatePolicy(
         decision: "block",
         reasoning: `"${context.category}" is on the blocked category list for rule "${rule.name}".`,
       };
+    }
+  }
+
+  /**
+   * Per-agent catalog scope.
+   *
+   * `undefined` means the caller had no scope to give (the draft_policy
+   * backtest replays historical actions where it is unrecoverable), so the rule
+   * is skipped entirely — the same treatment trust_floor gets without a score.
+   * `null` means explicitly unscoped, which is the full catalog and never
+   * fires. Those two are kept apart deliberately: collapsing them would make a
+   * backtest quietly assert every historical action was in scope.
+   *
+   * An action carrying no category cannot be judged against a scope, so it
+   * passes. Scope restricts what an agent may buy from THIS catalog; a refund
+   * or a subscription with no category attached is not a catalog purchase, and
+   * blocking it here would be this rule reaching past what it knows about.
+   */
+  if (Array.isArray(context.agentCatalogScope)) {
+    const scope = context.agentCatalogScope;
+    for (const rule of byType("catalog_scope")) {
+      if (!context.category) continue;
+      if (!scope.includes(context.category)) {
+        // Names both halves. "Out of scope" alone tells the merchant nothing
+        // actionable -- they need to see what this agent IS allowed in order to
+        // decide whether the boundary or the purchase is the thing that is
+        // wrong.
+        const allowed =
+          scope.length === 0
+            ? "nothing — this agent is scoped to an empty catalog"
+            : scope.join(", ");
+        return {
+          rule,
+          decision: "block",
+          reasoning: `This agent may transact ${allowed}, and this action is in "${context.category}" — outside its catalog scope, set by rule "${rule.name}".`,
+        };
+      }
     }
   }
 

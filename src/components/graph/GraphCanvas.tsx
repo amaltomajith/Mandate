@@ -49,6 +49,7 @@ const RULE_TYPE_LABELS: Record<PolicyRule["type"], string> = {
   cap: "Spend cap",
   velocity: "Rate limit",
   category_block: "Category block",
+  catalog_scope: "Catalog scope",
   trust_floor: "Trust floor",
   step_up: "Step-up (needs approval)",
 };

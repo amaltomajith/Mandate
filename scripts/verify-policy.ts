@@ -50,6 +50,8 @@ interface ActionResult {
 
 let merchantId = "";
 let client: MandateClient;
+/** The scoped agent's row id, so the scope can be changed mid-run. */
+let scopedAgentId = "";
 const customerIds: string[] = [];
 
 /**
@@ -122,6 +124,7 @@ async function main() {
     customerIds.push(data!.id);
   }
 
+  scopedAgentId = agent!.id;
   client = new MandateClient(BASE, slug, agent!.id, secretKey);
   await client.initialize("verify-policy");
   console.log(`merchant ${slug}\n`);
@@ -280,6 +283,140 @@ async function main() {
       "priority: category_block beats step_up when both match",
       both.decision === "block" && both.ruleFired?.type === "category_block",
       `${both.decision} via ${both.ruleFired?.type}`
+    );
+
+    // ---------------------------------------------------------- catalog_scope
+    //
+    // Every check here carries a CONTROL. "The scoped agent cannot buy office"
+    // passes vacuously if nothing could buy office at that moment -- a rule
+    // change, a cap, a rate limit -- so each one is paired with an unscoped
+    // agent doing the identical thing in the same instant. Without that pairing
+    // these tests would keep passing after the feature was deleted.
+    await onlyRule("catalog_scope", "Agents keep to their assigned catalog", {});
+
+    const controlKeys = generateKeyPair();
+    const { data: controlAgent } = await db
+      .from("agents")
+      .insert({ merchant_id: merchantId, name: "Unscoped Control", public_key: controlKeys.publicKey })
+      .select()
+      .single();
+    const unscopedClient = new MandateClient(BASE, slug, controlAgent!.id, controlKeys.secretKey);
+    const controlOrder = (amount: number, category: string) =>
+      unscopedClient.callTool<ActionResult>("enforce_action", {
+        actionType: "order.create",
+        amount,
+        currency: "INR",
+        category,
+        params: { receipt: `ctl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` },
+      });
+
+    // Unscoped (NULL) must behave exactly as before the column existed.
+    const beforeScope = await order(100000, "office");
+    check(
+      "an agent with no scope is unaffected",
+      beforeScope.decision === "allow",
+      `${beforeScope.decision}`
+    );
+
+    await db.from("agents").update({ catalog_scope: ["electronics"] }).eq("id", scopedAgentId);
+
+    const outOfScope = await order(100000, "office");
+    check(
+      "a scoped agent is blocked outside its scope",
+      outOfScope.decision === "block" && outOfScope.ruleFired?.type === "catalog_scope",
+      `${outOfScope.decision} via ${outOfScope.ruleFired?.type}`
+    );
+    check(
+      "the reason names the scope AND the category",
+      /electronics/.test(outOfScope.reasoning) && /office/.test(outOfScope.reasoning),
+      outOfScope.reasoning.slice(0, 68)
+    );
+
+    // THE CONTROL. Same category, same amount, same instant, different agent.
+    const control = await controlOrder(100000, "office");
+    check(
+      "CONTROL: the same purchase is allowed for an unscoped agent",
+      control.decision === "allow",
+      `${control.decision} — so the block above is the scope, not the catalog`
+    );
+
+    const inScope = await order(100000, "electronics");
+    check(
+      "the scoped agent can still buy inside its scope",
+      inScope.decision === "allow",
+      `${inScope.decision}`
+    );
+
+    // Scope changes take effect on the next request, with no restart. The
+    // engine is handed the scope per call rather than caching it.
+    await db.from("agents").update({ catalog_scope: ["electronics", "office"] }).eq("id", scopedAgentId);
+    const widened = await order(100000, "office");
+    check(
+      "widening the scope takes effect on the next request",
+      widened.decision === "allow",
+      `${widened.decision}, no restart`
+    );
+
+    // An EMPTY array is not "unset". It means nothing is permitted, and the
+    // reason has to say so rather than listing an empty set of categories.
+    await db.from("agents").update({ catalog_scope: [] }).eq("id", scopedAgentId);
+    const nothing = await order(100000, "electronics");
+    check(
+      "an empty scope permits nothing, and says so",
+      nothing.decision === "block" && /nothing/.test(nothing.reasoning),
+      nothing.reasoning.slice(0, 60)
+    );
+
+    // ---- ordering: a merchant-wide prohibition outranks one agent's boundary
+    await db.from("agents").update({ catalog_scope: ["electronics"] }).eq("id", scopedAgentId);
+    await db
+      .from("policy_rules")
+      .insert({
+        merchant_id: merchantId,
+        type: "category_block" as never,
+        name: "Blocked categories",
+        params: { categories: ["gambling"] },
+        status: "active",
+        source: "human",
+        rationale: "verify-policy",
+      });
+    const bothApply = await order(100000, "gambling");
+    check(
+      "priority: category_block beats catalog_scope when both apply",
+      bothApply.decision === "block" && bothApply.ruleFired?.type === "category_block",
+      `${bothApply.decision} via ${bothApply.ruleFired?.type}`
+    );
+
+    // ---- the two decisions from phase 2, asserted on the counts themselves
+    //
+    // A scope block CONSUMES velocity budget and COSTS trust, both for the same
+    // reason: category_block is the exact analogue and does both. Refusing to
+    // count would hand an agent a free enumeration oracle -- name SKUs until
+    // one sticks, unmetered -- and a block type that cost nothing would be the
+    // only one in the system. Asserted here rather than left to inference,
+    // because "decided by omission" is the shape of three separate bugs in
+    // section 17.
+    const { count: enforceTraces } = await db
+      .from("traces")
+      .select("*", { count: "exact", head: true })
+      .eq("agent_id", scopedAgentId)
+      .eq("mode", "enforce")
+      .eq("decision", "block");
+    check(
+      "a scope block is written as an enforce-mode block trace",
+      (enforceTraces ?? 0) > 0,
+      `${enforceTraces} block trace(s) — so velocity counts it and trust sees it`
+    );
+
+    const { data: scopedRow } = await db
+      .from("agents")
+      .select("trust_score")
+      .eq("id", scopedAgentId)
+      .single();
+    check(
+      "and it therefore moves the trust score below a clean 80",
+      (scopedRow?.trust_score ?? 100) < 80,
+      `trust ${Math.round(scopedRow?.trust_score ?? -1)} after blocks`
     );
   } finally {
     await db.from("merchants").delete().eq("id", merchantId);

@@ -208,6 +208,33 @@ export async function getAgentTrustScore(agentId: string): Promise<number | unde
   return data.trust_score;
 }
 
+/**
+ * The two per-agent facts the engine reads, in one round trip.
+ *
+ * Kept together because they are fetched at the same moment for the same
+ * decision, and two queries where one will do is two chances for them to
+ * disagree about which agent they are describing.
+ *
+ * The three-state return is load-bearing. `undefined` for scope means "no agent
+ * row" -- the engine then skips the rule rather than treating the absence as
+ * permission. `null` means the row exists and is explicitly unscoped. Mapping a
+ * missing row to `null` would turn "we could not find this agent" into "this
+ * agent may buy anything", which is the wrong direction for a failure in the
+ * money path.
+ */
+export async function getAgentPolicyFacts(
+  agentId: string
+): Promise<{ trustScore?: number; catalogScope?: string[] | null }> {
+  const db = createAdminClient();
+  const { data, error } = await db
+    .from("agents")
+    .select("trust_score, catalog_scope")
+    .eq("id", agentId)
+    .maybeSingle();
+  if (error || !data) return {};
+  return { trustScore: data.trust_score, catalogScope: data.catalog_scope };
+}
+
 export interface InsertTraceInput {
   merchantId: string;
   parentTraceId?: string | null;

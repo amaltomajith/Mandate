@@ -7,7 +7,7 @@ import { counterOffersConfigured } from "@/lib/mcp/requestState";
 import type { OfferState } from "@/lib/mcp/requestState";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getMerchantIdForAgent } from "@/lib/merchant";
-import { getActiveRules, getAggregates, getAgentTrustScore } from "@/lib/mcp/traceHelpers";
+import { getActiveRules, getAggregates, getAgentPolicyFacts } from "@/lib/mcp/traceHelpers";
 import { fetchCatalog } from "@/lib/demo/catalog";
 
 /**
@@ -223,9 +223,9 @@ async function previewAndFindOffer(
   const db = createAdminClient();
   const merchantId = await getMerchantIdForAgent(db, agentId);
   const rules = await getActiveRules(merchantId);
-  const [aggregates, agentTrustScore] = await Promise.all([
+  const [aggregates, agentFacts] = await Promise.all([
     getAggregates(merchantId, agentId, rules, input.currency, input.customerId),
-    getAgentTrustScore(agentId),
+    getAgentPolicyFacts(agentId),
   ]);
 
   const offer = await findCounterOffer({
@@ -237,7 +237,12 @@ async function previewAndFindOffer(
     parentSku: parentSku(input),
     rules,
     aggregates,
-    agentTrustScore,
+    agentTrustScore: agentFacts.trustScore,
+    // Passed so every candidate is pre-cleared against this agent's scope too.
+    // Offering something the same engine would then block is worse than not
+    // offering at all -- it invites the agent to accept a purchase that cannot
+    // complete.
+    agentCatalogScope: agentFacts.catalogScope,
   });
 
   return offer ? { preview, offer } : null;

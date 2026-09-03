@@ -11,7 +11,7 @@
 
 export type Json = string | number | boolean | null | { [key: string]: Json } | Json[];
 
-export type PolicyRuleType = "cap" | "velocity" | "category_block" | "step_up" | "trust_floor";
+export type PolicyRuleType = "cap" | "velocity" | "category_block" | "catalog_scope" | "step_up" | "trust_floor";
 export type PolicyRuleStatus = "active" | "pending_review" | "rejected" | "superseded";
 export type PolicyRuleSource = "human" | "horizon";
 export type TraceMode = "simulate" | "enforce";

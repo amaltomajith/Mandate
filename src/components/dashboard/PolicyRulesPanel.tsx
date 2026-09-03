@@ -25,6 +25,7 @@ const TYPE_LABEL: Record<PolicyRule["type"], string> = {
   cap: "Cap",
   velocity: "Velocity",
   category_block: "Category block",
+  catalog_scope: "Catalog scope",
   trust_floor: "Trust floor",
   step_up: "Step-up",
 };

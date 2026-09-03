@@ -9,7 +9,7 @@ import {
   createAlert,
   createEscalationForTrace,
   getActiveRules,
-  getAgentTrustScore,
+  getAgentPolicyFacts,
   getAggregates,
   insertTrace,
   recomputeTrust,
@@ -106,7 +106,9 @@ export async function runActionEvaluation(
     // The acting agent's current trust score, for `trust_floor` rules. Read
     // here rather than inside the evaluator so the evaluator stays pure and
     // DB-free — same contract every other input follows.
-    const agentTrustScore = await getAgentTrustScore(agentId);
+    // Both per-agent facts the engine reads, in one round trip. The engine
+    // stays pure: it is handed the scope, it never looks it up.
+    const agentFacts = await getAgentPolicyFacts(agentId);
     const rules = await getActiveRules(merchantId);
     const aggregates = await getAggregates(merchantId, agentId, rules, input.currency, input.customerId);
     match = evaluatePolicy(
@@ -117,7 +119,8 @@ export async function runActionEvaluation(
         category: input.category,
         agentId,
         customerId: input.customerId,
-        agentTrustScore,
+        agentTrustScore: agentFacts.trustScore,
+        agentCatalogScope: agentFacts.catalogScope,
       },
       rules,
       aggregates

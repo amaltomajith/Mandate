@@ -78,6 +78,7 @@ export interface CounterOfferContext {
   rules: PolicyRule[];
   aggregates: EvaluationAggregates;
   agentTrustScore?: number;
+  agentCatalogScope?: string[] | null;
 }
 
 /**
@@ -119,6 +120,7 @@ export async function findCounterOffer(ctx: CounterOfferContext): Promise<Counte
         agentId: ctx.agentId,
         customerId: ctx.customerId,
         agentTrustScore: ctx.agentTrustScore,
+        agentCatalogScope: ctx.agentCatalogScope,
       },
       ctx.rules,
       ctx.aggregates

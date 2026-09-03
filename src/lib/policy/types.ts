@@ -48,10 +48,29 @@ export const TrustFloorParams = z.object({
 });
 export type TrustFloorParams = z.infer<typeof TrustFloorParams>;
 
+/**
+ * Per-agent catalog scope, read from the AGENT rather than from this rule.
+ *
+ * The rule carries no categories of its own, which looks odd next to
+ * category_block until you see what it is for: this is one merchant-wide rule
+ * saying "agents are held to their assigned scope", and the scope itself is a
+ * property of each agent. Exactly the shape of trust_floor, which states a
+ * threshold while the score it compares against lives on the agent.
+ *
+ * Putting the categories here instead would mean one rule per agent, which is
+ * per-rule targeting under another name -- built once, removed once, recorded
+ * in section 17.
+ */
+export const CatalogScopeParams = z.object({
+  ...actionTypes,
+});
+export type CatalogScopeParams = z.infer<typeof CatalogScopeParams>;
+
 export const RuleParamsByType = {
   cap: CapParams,
   velocity: VelocityParams,
   category_block: CategoryBlockParams,
+  catalog_scope: CatalogScopeParams,
   step_up: StepUpParams,
   trust_floor: TrustFloorParams,
 } satisfies Record<PolicyRuleType, z.ZodType>;
@@ -77,6 +96,23 @@ export interface ActionContext {
    *  score at the time isn't recoverable, and guessing would be worse than
    *  skipping the rule. */
   agentTrustScore?: number;
+  /**
+   * Categories this agent may transact, read by `catalog_scope` rules.
+   *
+   * Three states, and they are not interchangeable:
+   *   undefined -- the caller could not supply one. The rule is skipped, the
+   *                same way trust_floor is skipped without a score. The
+   *                draft_policy backtest replays historical actions where the
+   *                scope at the time is unrecoverable, and guessing would be
+   *                worse than not evaluating.
+   *   null      -- this agent is explicitly unscoped: the full catalog.
+   *   string[]  -- exactly these categories, and an EMPTY array means none.
+   *
+   * Collapsing undefined and null would make a backtest silently assert that
+   * every historical action was in scope, which is a confident claim about
+   * something nobody knows.
+   */
+  agentCatalogScope?: string[] | null;
 }
 
 export interface RuleMatch {
