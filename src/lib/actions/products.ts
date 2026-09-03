@@ -269,6 +269,41 @@ export async function deleteProduct(id: string): Promise<void> {
   revalidatePath("/dashboard");
 }
 
+/**
+ * Which agents may transact each category.
+ *
+ * The inverse of the Agents page control, and worth showing on the product
+ * rather than only on the agent: a merchant editing a product wants to know who
+ * can currently sell it without opening every agent in turn.
+ *
+ * Reports the LISTING boundary, not the enforcement. An agent naming an
+ * out-of-scope SKU directly is refused by the engine's catalog_scope rule; this
+ * says who would be offered it.
+ */
+export async function agentScopesByCategory(): Promise<
+  { category: string; agents: { id: string; name: string; managed: boolean }[] }[]
+> {
+  await requireDashboardUser();
+  const merchant = await getCurrentMerchant();
+  const db = createAdminClient();
+
+  const { data: agents } = await db
+    .from("agents")
+    .select("id, name, managed, catalog_scope")
+    .eq("merchant_id", merchant.id)
+    .order("name");
+
+  return PRODUCT_CATEGORIES.map((category) => ({
+    category,
+    agents: (agents ?? [])
+      // null is the full catalog, so an unscoped agent appears under every
+      // category. An empty array appears under none, which is correct and is
+      // the reason these two states are never collapsed.
+      .filter((a) => a.catalog_scope === null || a.catalog_scope.includes(category))
+      .map((a) => ({ id: a.id, name: a.name, managed: a.managed })),
+  }));
+}
+
 export interface CatalogHealthIssue {
   sku: string;
   name: string;

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, useTransition } from "react";
 import {
+  agentScopesByCategory,
   catalogHealth,
   createProduct,
   deleteProduct,
@@ -39,6 +40,7 @@ export function CatalogPanel() {
   const [products, setProducts] = useState<ProductRow[] | null>(null);
   const [health, setHealth] = useState<CatalogHealthIssue[]>([]);
   const [sellable, setSellable] = useState<SellableSnapshot | null>(null);
+  const [scopes, setScopes] = useState<{ category: string; agents: { id: string; name: string }[] }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState<ProductInput>(EMPTY);
@@ -48,9 +50,10 @@ export function CatalogPanel() {
   const refresh = useCallback(() => {
     startTransition(async () => {
       try {
-        const [p, h] = await Promise.all([listProducts(), catalogHealth()]);
+        const [p, h, sc] = await Promise.all([listProducts(), catalogHealth(), agentScopesByCategory()]);
         setProducts(p);
         setHealth(h);
+        setScopes(sc);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Couldn't load the catalog.");
       }
@@ -169,6 +172,7 @@ export function CatalogPanel() {
                 <ProductRowView
                   key={p.id}
                   product={p}
+                  buyers={scopes.find((x) => x.category === p.category)?.agents ?? []}
                   verdict={verdictFor(p.sku)}
                   verdictPending={!sellable}
                   busy={isPending}
@@ -204,6 +208,7 @@ export function CatalogPanel() {
 
 function ProductRowView({
   product,
+  buyers,
   verdict,
   verdictPending,
   busy,
@@ -212,6 +217,8 @@ function ProductRowView({
   onDelete,
 }: {
   product: ProductRow;
+  /** Agents whose scope currently admits this product's category. */
+  buyers: { id: string; name: string }[];
   verdict?: { decision: string; reasoning: string };
   verdictPending: boolean;
   busy: boolean;
@@ -277,6 +284,21 @@ function ProductRowView({
             </>
           )}
         </span>
+
+        {product.active && (
+          <span
+            style={{ color: buyers.length === 0 ? "var(--decision-escalate)" : "var(--muted-2)" }}
+            title={
+              buyers.length === 0
+                ? "No agent's catalog scope currently admits this category."
+                : buyers.map((b) => b.name).join(", ")
+            }
+          >
+            {buyers.length === 0
+              ? "no agent may buy this"
+              : `${buyers.length} agent${buyers.length === 1 ? "" : "s"} may buy this`}
+          </span>
+        )}
 
         {product.active && (
           <span style={{ color: verdict ? decisionColor(verdict.decision) : "var(--muted-2)" }} title={verdict?.reasoning}>

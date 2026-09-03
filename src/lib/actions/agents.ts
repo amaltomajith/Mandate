@@ -6,6 +6,7 @@ import { requireDashboardUser } from "./authGuard";
 import { getCurrentMerchant } from "@/lib/merchant";
 import { buildAgentSpec, type AgentSpec } from "@/lib/agentSpec";
 import type { Agent } from "@/types/db";
+import { PRODUCT_CATEGORIES } from "@/lib/demo/catalog";
 
 /**
  * The merchant's side of managing agents.
@@ -59,6 +60,45 @@ export async function setAgentPace(agentId: string, paceMs: number) {
   const { error } = await db
     .from("agents")
     .update({ pace_ms: Math.round(paceMs) })
+    .eq("id", agentId)
+    .eq("merchant_id", merchant.id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/dashboard");
+}
+
+/**
+ * Which parts of the catalog this agent may transact.
+ *
+ * `null` is the full catalog. An EMPTY array is a different, deliberate state:
+ * this agent may transact nothing. They render identically in a list of
+ * categories and mean opposite things, so anything calling this has to be
+ * explicit about which it is sending.
+ *
+ * Validated here as well as by the database CHECK, so a bad category comes back
+ * as a sentence rather than a constraint violation. That check is not fussiness:
+ * catalog_scope matches category strings EXACTLY, so a scope naming
+ * "electronic" would match no product and silently behave as though the agent
+ * were scoped to nothing -- a permission boundary moving on a typo.
+ *
+ * Takes effect on the very next request. The engine is handed the scope per
+ * call and caches nothing, so there is no restart and no propagation delay.
+ */
+export async function setAgentCatalogScope(agentId: string, scope: string[] | null) {
+  const { merchant, db } = await merchantScope();
+
+  if (scope !== null) {
+    const unknown = scope.filter((c) => !(PRODUCT_CATEGORIES as readonly string[]).includes(c));
+    if (unknown.length > 0) {
+      throw new Error(
+        `Not a known category: ${unknown.join(", ")}. Policy matches categories exactly, so an ` +
+          `unrecognised one would match no product and quietly scope this agent to nothing.`
+      );
+    }
+  }
+
+  const { error } = await db
+    .from("agents")
+    .update({ catalog_scope: scope })
     .eq("id", agentId)
     .eq("merchant_id", merchant.id);
   if (error) throw new Error(error.message);

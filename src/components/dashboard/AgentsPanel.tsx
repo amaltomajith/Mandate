@@ -8,6 +8,7 @@ import {
   agentSpec,
   exportAgent,
   registerAgent,
+  setAgentCatalogScope,
   setAgentPace,
   setAgentStatus,
   type AgentActivity,
@@ -15,6 +16,7 @@ import {
 import type { AgentSpec } from "@/lib/agentSpec";
 import { pauseMandate, revokeMandate, reactivateMandate } from "@/lib/actions/mandates";
 import { formatMoney } from "@/lib/format";
+import { PRODUCT_CATEGORIES } from "@/lib/demo/catalog";
 import { TrustBreakdown } from "./TrustBreakdown";
 import { EmptyState, GhostButton, Icons, Panel, PrimaryButton, Spinner, relativeTime } from "./ui";
 
@@ -373,6 +375,8 @@ function AgentRow({
       {open && (
         <div className="mt-2 border-t pt-2" style={{ borderColor: "var(--panel-border)" }}>
           {components && <TrustBreakdown components={components} />}
+
+          <CatalogScope agent={agent} busy={busy} onRun={onRun} />
           <p className="mt-2 text-[9.5px] font-semibold uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
             Recent actions, and what it said about them
           </p>
@@ -619,5 +623,91 @@ function CompatibilityContract({ spec }: { spec: AgentSpec | null }) {
         {spec.keygen}
       </p>
     </Panel>
+  );
+}
+
+
+/**
+ * Which parts of the catalog this agent may transact.
+ *
+ * The unset state is spelled out rather than shown as an empty row of chips.
+ * "Full catalog" and "scoped to nothing" both look like no-categories-selected,
+ * and they are opposites -- one lets the agent buy everything, the other lets it
+ * buy nothing at all. An empty control that could mean either is not a control,
+ * it is a coin toss, so the two are separate explicit states here and the
+ * summary line always says which one is in force.
+ *
+ * Enforcement is not this list. An agent naming an out-of-scope SKU directly is
+ * blocked by the engine's catalog_scope rule; this only decides what it is
+ * shown and offered.
+ */
+function CatalogScope({
+  agent,
+  busy,
+  onRun,
+}: {
+  agent: Agent;
+  busy: boolean;
+  onRun: (fn: () => Promise<unknown>) => void;
+}) {
+  const scope = agent.catalog_scope;
+  const unscoped = scope === null;
+
+  const toggle = (category: string) => {
+    const next = unscoped
+      ? PRODUCT_CATEGORIES.filter((c) => c !== category)
+      : scope.includes(category)
+        ? scope.filter((c) => c !== category)
+        : [...scope, category];
+    onRun(() => setAgentCatalogScope(agent.id, next));
+  };
+
+  return (
+    <div className="mt-3 border-t pt-2.5" style={{ borderColor: "var(--panel-border)" }}>
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="text-[9.5px] font-semibold uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
+          What it may buy
+        </p>
+        <button
+          onClick={() => onRun(() => setAgentCatalogScope(agent.id, unscoped ? [] : null))}
+          disabled={busy}
+          className="text-[10px] underline-offset-2 hover:underline disabled:opacity-50"
+          style={{ color: "var(--muted)" }}
+        >
+          {unscoped ? "restrict" : "allow everything"}
+        </button>
+      </div>
+
+      <p className="mt-1 text-[10.5px]" style={{ color: unscoped ? "var(--muted)" : "var(--entity-agent)" }}>
+        {unscoped
+          ? "Full catalog — every category, including any added later."
+          : scope.length === 0
+            ? "Nothing. This agent is scoped to no categories and can buy none of the catalog."
+            : `Only ${scope.join(", ")}.`}
+      </p>
+
+      {!unscoped && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {PRODUCT_CATEGORIES.map((c) => {
+            const on = scope.includes(c);
+            return (
+              <button
+                key={c}
+                onClick={() => toggle(c)}
+                disabled={busy}
+                className="rounded-full border px-2 py-1 text-[10px] font-medium transition-colors hover:brightness-125 disabled:opacity-50"
+                style={
+                  on
+                    ? { background: "var(--entity-agent)", borderColor: "var(--entity-agent)", color: "#08080c" }
+                    : { background: "transparent", borderColor: "var(--panel-border-strong)", color: "var(--muted)" }
+                }
+              >
+                {c}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
