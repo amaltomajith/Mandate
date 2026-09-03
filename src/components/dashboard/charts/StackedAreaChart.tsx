@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, type ReactNode } from "react";
+import { useId, useMemo, type CSSProperties, type ReactNode } from "react";
 import { useChartHover } from "./useChartHover";
 
 /**
@@ -15,6 +15,22 @@ import { useChartHover } from "./useChartHover";
  * bezier control point pushes a layer's boundary above the one stacked on top
  * of it for a few pixels. Straight segments can't do that, and at this data
  * density (day/hour buckets) the smoothing would be decorative, not legible.
+ *
+ * EVERY TEXT LABEL IS HTML, NOT SVG. The SVG here is stretched on purpose —
+ * `width="100%"` against a fixed 1000-unit `viewBox` with
+ * `preserveAspectRatio="none"` is what makes a 30-bucket chart fill a wide
+ * panel responsively. Shape strokes are protected from that stretch with
+ * `vectorEffect="non-scaling-stroke"`, but plain SVG `<text>` has no
+ * equivalent protection — its glyphs get stretched by the same non-uniform
+ * factor as the geometry, which reads as wide, distorted lettering the moment
+ * the container is wider than it is tall (every panel this renders in). That
+ * was shipped and unnoticed for a few iterations because two other bugs
+ * (a stray label collision, and axis text with no backing) were loud enough
+ * to fix first — once those were gone, the stretching was the next thing
+ * visible. HTML text sitting in an absolutely-positioned overlay over the SVG
+ * is never inside its coordinate transform, so it can't be stretched by it;
+ * this is the same technique the hover tooltip already used, extended to
+ * every other label.
  */
 
 export interface StackedAreaSeries {
@@ -38,6 +54,9 @@ export interface StackedAreaChartProps<T extends object> {
 }
 
 const VIEW_W = 1000;
+/** Fraction of the width left empty on each side, so the plotted shape has
+ *  visible breathing room instead of touching the panel's own edges. */
+const INSET = 0.015;
 
 export function StackedAreaChart<T extends object>({
   data,
@@ -122,7 +141,14 @@ export function StackedAreaChart<T extends object>({
     );
   }
 
-  const x = (i: number) => (data.length > 1 ? (i / (data.length - 1)) * VIEW_W : VIEW_W / 2);
+  // x() stays in SVG units (for paths); xPct() is the SAME position expressed
+  // as a percentage of width, for the HTML overlay labels — both read off one
+  // inset range so a label and the point it names always line up.
+  const x = (i: number) => {
+    const t = data.length > 1 ? i / (data.length - 1) : 0.5;
+    return (INSET + t * (1 - 2 * INSET)) * VIEW_W;
+  };
+  const xPct = (i: number) => (x(i) / VIEW_W) * 100;
   const y = (v: number) => plotH - (v / maxTotal) * plotH;
   const pathFor = (values: number[], baseline: number[]) => {
     const top = values.map((v, i) => `${i === 0 ? "M" : "L"}${x(i)},${y(v)}`).join(" ");
@@ -138,17 +164,32 @@ export function StackedAreaChart<T extends object>({
   // unreadable, every 5th is not.
   const labelEvery = Math.max(1, Math.ceil(data.length / 8));
 
+  const chip: CSSProperties = {
+    background: "var(--panel)",
+    color: "var(--muted-2)",
+    border: "1px solid var(--panel-border)",
+  };
+
   return (
-    <div className={`relative ${className ?? ""}`}>
-      <svg
+    <div className={className}>
+      {/* Fixed to exactly `height` — every absolute label below is positioned
+          against THIS box, including the x-axis row reserved in `plotH`'s
+          22px axisH gap. The legend deliberately lives OUTSIDE it, in normal
+          flow below, rather than being squeezed inside a box whose height is
+          locked to the plot area — that was a real bug in the first draft of
+          this rewrite, caught before it shipped: the legend would have
+          overflowed past its reserved space and overlapped whatever the panel
+          renders next. */}
+      <div className="relative" style={{ height }}>
+        <svg
         ref={svgRef}
-        viewBox={`0 0 ${VIEW_W} ${height}`}
+        viewBox={`0 0 ${VIEW_W} ${plotH}`}
         width="100%"
-        height={height}
+        height={plotH}
         preserveAspectRatio="none"
         onPointerMove={onPointerMove}
         onPointerLeave={onPointerLeave}
-        style={{ overflow: "visible", touchAction: "pan-y" }}
+        style={{ overflow: "visible", touchAction: "pan-y", display: "block" }}
       >
         <defs>
           {layers.map(({ s }) => (
@@ -188,58 +229,18 @@ export function StackedAreaChart<T extends object>({
           </g>
         ))}
 
-        {/* Where a bucket's true height was compressed to fit the cap, say so
-            right there — a short tick plus its real, uncapped total, EACH
-            WITH ITS OWN BACKING RECT so it reads as a solid label rather than
-            bare glyphs over a moving fill. A first pass at y=24 with no
-            backing looked fine in isolation but collided directly with the
-            axis-max label below when the clipped bucket sat at the chart's
-            left edge — the two texts visually fused into one unreadable run.
-            Fixed at the source below (the axis max label is not drawn AT ALL
-            once any bucket is clipped — see why there), so this no longer has
-            anything at that position to collide with; the backing rect and
-            wider gap stay anyway as insurance against a future new label. */}
-        {clipped.map(({ i, trueTotal }) => {
-          const anchor = i < 2 ? "start" : i > data.length - 3 ? "end" : "middle";
-          const labelX = anchor === "start" ? x(i) - 2 : anchor === "end" ? x(i) + 2 : x(i);
-          const label = `actual ${valueFormatter(trueTotal)}`;
-          // Rough width estimate for the backing rect — monospace-ish enough
-          // at this font size that a per-character multiplier reads fine
-          // without measuring the real glyph run.
-          const boxW = label.length * 5.6 + 8;
-          const boxX = anchor === "start" ? labelX - 4 : anchor === "end" ? labelX - boxW + 4 : labelX - boxW / 2;
-          return (
-            <g key={`clip-${i}`}>
-              <line x1={x(i)} x2={x(i)} y1={2} y2={14} stroke="var(--muted)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
-              <rect x={boxX} y={20} width={boxW} height={14} fill="var(--panel)" opacity={0.9} rx={2} />
-              <text x={labelX} y={30} fontSize={10} textAnchor={anchor} fill="var(--muted)">
-                {label}
-              </text>
-            </g>
-          );
-        })}
-
-        {/* The y-axis "max" reading — the top of the stack — is only ever
-            drawn when NOTHING was clipped. Once a bucket's rendered height has
-            been compressed, `maxTotal` is a percentile cutoff, not a true
-            maximum, and printing it plainly as "the max" right beside a
-            bucket explicitly labelled with a bigger "actual" number reads as
-            contradictory — a viewer sees two numbers, one implicitly claiming
-            to be the ceiling, and has to work out that they mean different
-            things. The per-bucket "actual" labels already carry the real
-            large numbers; a bare, unqualified figure that could be mistaken
-            for the true max is worse than showing no ceiling number at all. */}
-        {clipped.length === 0 && (
-          <>
-            <rect x={0} y={2} width={70} height={14} fill="var(--panel)" opacity={0.85} rx={2} />
-            <text x={4} y={12} fontSize={10.5} fill="var(--muted-2)">
-              {valueFormatter(maxTotal)}
-            </text>
-          </>
-        )}
-        <text x={4} y={plotH - 4} fontSize={10.5} fill="var(--muted-2)">
-          0
-        </text>
+        {clipped.map(({ i }) => (
+          <line
+            key={`clip-${i}`}
+            x1={x(i)}
+            x2={x(i)}
+            y1={2}
+            y2={14}
+            stroke="var(--muted)"
+            strokeWidth={1.5}
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
 
         {hoverIndex !== null && (
           <line
@@ -253,37 +254,86 @@ export function StackedAreaChart<T extends object>({
             vectorEffect="non-scaling-stroke"
           />
         )}
+      </svg>
+
+      {/* Every label below is a plain HTML element, positioned by percentage
+          (horizontal) or by pixel (vertical — the SVG's height IS real
+          pixels; only its width is stretched, so vertical placement needs no
+          conversion). None of this sits inside the SVG's transform, so none
+          of it can be stretched by it. */}
+      <div className="pointer-events-none absolute inset-0">
+        {/* Where a bucket's true height was compressed to fit the cap, its
+            real total is stated directly, right above the clipped peak. */}
+        {clipped.map(({ i, trueTotal }) => {
+          const pct = xPct(i);
+          const edge = pct < 12 ? "start" : pct > 88 ? "end" : "middle";
+          return (
+            <div
+              key={`clip-${i}`}
+              className="absolute whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium"
+              style={{
+                ...chip,
+                left: `${pct}%`,
+                top: 18,
+                transform: `translateX(${edge === "start" ? "0%" : edge === "end" ? "-100%" : "-50%"})`,
+              }}
+            >
+              actual {valueFormatter(trueTotal)}
+            </div>
+          );
+        })}
+
+        {/* The y-axis "max" reading is only ever shown when nothing was
+            clipped — once a bucket's rendered height is compressed, this
+            number is a percentile cutoff, not a true maximum, and printing it
+            plainly beside a bucket labelled with a BIGGER "actual" figure
+            reads as contradictory. The per-bucket labels above already carry
+            every large number that matters. */}
+        {clipped.length === 0 && (
+          <div className="absolute rounded px-1.5 py-0.5 text-[10.5px]" style={{ ...chip, left: 0, top: 2 }}>
+            {valueFormatter(maxTotal)}
+          </div>
+        )}
+        <div className="absolute rounded px-1.5 py-0.5 text-[10.5px]" style={{ ...chip, left: 0, top: plotH - 12 }}>
+          0
+        </div>
 
         {/* x-axis labels, thinned to fit */}
-        {data.map((d, i) =>
-          i % labelEvery === 0 ? (
-            <text
+        {data.map((d, i) => {
+          if (i % labelEvery !== 0) return null;
+          const pct = xPct(i);
+          const edge = i === 0 ? "start" : i === data.length - 1 ? "end" : "middle";
+          return (
+            <div
               key={i}
-              x={x(i)}
-              y={height - 6}
-              fontSize={10.5}
-              textAnchor={i === 0 ? "start" : i === data.length - 1 ? "end" : "middle"}
-              fill="var(--muted-2)"
+              className="absolute whitespace-nowrap text-[10.5px]"
+              style={{
+                color: "var(--muted-2)",
+                left: `${pct}%`,
+                top: plotH + 4,
+                transform: `translateX(${edge === "start" ? "0%" : edge === "end" ? "-100%" : "-50%"})`,
+              }}
             >
               {String(d[indexKey])}
-            </text>
-          ) : null
-        )}
-      </svg>
+            </div>
+          );
+        })}
+      </div>
 
       {hovered && hoverIndex !== null && renderTooltip && (
         <div
           className="pointer-events-none absolute top-0 z-20 -translate-y-2"
           style={{
-            left: `${data.length > 1 ? (hoverIndex / (data.length - 1)) * 100 : 50}%`,
-            transform: `translate(${hoverIndex < data.length / 2 ? "0" : "-100%"}, -4px)`,
+            left: `${xPct(hoverIndex)}%`,
+            transform: `translate(${xPct(hoverIndex) < 50 ? "0" : "-100%"}, -4px)`,
           }}
         >
           {renderTooltip(hovered, hoverIndex)}
         </div>
       )}
+      </div>
 
-      {/* Legend */}
+      {/* Legend — outside the fixed-height box above, in normal flow. */}
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
         {series.map((s) => (
           <span key={s.key} className="flex items-center gap-1.5 text-[10.5px]" style={{ color: "var(--muted)" }}>

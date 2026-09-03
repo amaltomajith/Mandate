@@ -16,6 +16,16 @@ import { useChartHover } from "./useChartHover";
  * which means an effect and a re-render; `pathLength` lets the browser do the
  * normalization and the animation is one CSS transition on `stroke-dashoffset`
  * triggered by a class toggled a tick after mount.
+ *
+ * EVERY TEXT LABEL IS HTML, NOT SVG — the same fix StackedAreaChart needed for
+ * the same reason. `width="100%"` against a fixed-width `viewBox` with
+ * `preserveAspectRatio="none"` stretches the SVG horizontally to fill a wide
+ * panel; shape strokes are protected from that with `vectorEffect=
+ * "non-scaling-stroke"`, but plain SVG `<text>` has no equivalent protection,
+ * so its glyphs were getting stretched by the same non-uniform factor —
+ * visible as unnaturally wide lettering once the axis labels were otherwise
+ * legible enough to notice it. An HTML element positioned in an absolute
+ * overlay over the SVG sits outside that transform entirely.
  */
 
 export interface AnimatedLineChartProps {
@@ -39,6 +49,9 @@ export interface AnimatedLineChartProps {
 }
 
 const VIEW_W = 1000;
+/** Fraction of the width left empty on each side, so the line has visible
+ *  breathing room instead of touching the panel's own edges. */
+const INSET = 0.015;
 
 export function AnimatedLineChart({
   data,
@@ -89,24 +102,36 @@ export function AnimatedLineChart({
     );
   }
 
-  const x = (i: number) => (data.length > 1 ? (i / (data.length - 1)) * VIEW_W : VIEW_W / 2);
+  // x() stays in SVG units (for the path); xPct() is the same position as a
+  // percentage of width, for the HTML label overlay — both read off one inset
+  // range so a label and the point it names always agree.
+  const x = (i: number) => {
+    const t = data.length > 1 ? i / (data.length - 1) : 0.5;
+    return (INSET + t * (1 - 2 * INSET)) * VIEW_W;
+  };
+  const xPct = (i: number) => (x(i) / VIEW_W) * 100;
   const y = (v: number) => plotH - ((v - min) / Math.max(max - min, 1e-6)) * plotH;
   const linePath = data.map((d, i) => `${i === 0 ? "M" : "L"}${x(i)},${y(d.value)}`).join(" ");
   const areaPath = `${linePath} L${x(data.length - 1)},${plotH} L${x(0)},${plotH} Z`;
 
   const hovered = hoverIndex !== null ? data[hoverIndex] : null;
+  const chip = {
+    background: "var(--panel)",
+    color: "var(--muted-2)",
+    border: "1px solid var(--panel-border)",
+  } as const;
 
   return (
-    <div className={`relative ${className ?? ""}`}>
+    <div className={`relative ${className ?? ""}`} style={{ height }}>
       <svg
         ref={svgRef}
-        viewBox={`0 0 ${VIEW_W} ${height}`}
+        viewBox={`0 0 ${VIEW_W} ${plotH}`}
         width="100%"
-        height={height}
+        height={plotH}
         preserveAspectRatio="none"
         onPointerMove={onPointerMove}
         onPointerLeave={onPointerLeave}
-        style={{ overflow: "visible", touchAction: "pan-y" }}
+        style={{ overflow: "visible", touchAction: "pan-y", display: "block" }}
       >
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
@@ -116,29 +141,17 @@ export function AnimatedLineChart({
         </defs>
 
         {thresholdLine && (
-          <>
-            <line
-              x1={0}
-              x2={VIEW_W}
-              y1={y(thresholdLine.value)}
-              y2={y(thresholdLine.value)}
-              stroke={thresholdLine.color ?? "var(--decision-block)"}
-              strokeWidth={1}
-              strokeDasharray="5 4"
-              vectorEffect="non-scaling-stroke"
-              opacity={0.7}
-            />
-            <text
-              x={VIEW_W}
-              y={y(thresholdLine.value) - 5}
-              fontSize={10}
-              textAnchor="end"
-              fill={thresholdLine.color ?? "var(--decision-block)"}
-              opacity={0.85}
-            >
-              {thresholdLine.label}
-            </text>
-          </>
+          <line
+            x1={0}
+            x2={VIEW_W}
+            y1={y(thresholdLine.value)}
+            y2={y(thresholdLine.value)}
+            stroke={thresholdLine.color ?? "var(--decision-block)"}
+            strokeWidth={1}
+            strokeDasharray="5 4"
+            vectorEffect="non-scaling-stroke"
+            opacity={0.7}
+          />
         )}
 
         <path d={areaPath} fill={`url(#${gradientId})`} opacity={drawn ? 1 : 0} style={{ transition: "opacity 0.6s ease 0.3s" }} />
@@ -172,43 +185,55 @@ export function AnimatedLineChart({
             <circle cx={x(hoverIndex)} cy={y(data[hoverIndex].value)} r={4.5} fill={color} stroke="var(--panel)" strokeWidth={2} />
           </>
         )}
+      </svg>
 
-        {/* Backing rects behind both axis labels — the same fix
-            StackedAreaChart already needed. Without one, a data line whose
-            early trajectory sits near the axis floor draws its stroke
-            straight through the label's glyphs, and "the min value" comes out
-            as an unreadable smear rather than a number — exactly what
-            happened here, since a cumulative curve's first points are, by
-            construction, near whatever the floor is. */}
-        <rect x={0} y={2} width={88} height={14} fill="var(--panel)" opacity={0.88} rx={2} />
-        <text x={4} y={12} fontSize={10.5} fill="var(--muted-2)">
+      {/* Every label is HTML, positioned against this same box — the SVG's
+          height IS real pixels (only its width is stretched), so vertical
+          placement carries straight over with no conversion. */}
+      <div className="pointer-events-none absolute inset-0">
+        {thresholdLine && (
+          <div
+            className="absolute whitespace-nowrap text-[10px]"
+            style={{
+              color: thresholdLine.color ?? "var(--decision-block)",
+              opacity: 0.9,
+              right: 0,
+              top: y(thresholdLine.value) - 14,
+            }}
+          >
+            {thresholdLine.label}
+          </div>
+        )}
+
+        <div className="absolute rounded px-1.5 py-0.5 text-[10.5px]" style={{ ...chip, left: 0, top: 2 }}>
           {valueFormatter(max)}
-        </text>
-        <rect x={0} y={plotH - 15} width={88} height={14} fill="var(--panel)" opacity={0.88} rx={2} />
-        <text x={4} y={plotH - 4} fontSize={10.5} fill="var(--muted-2)">
+        </div>
+        <div className="absolute rounded px-1.5 py-0.5 text-[10.5px]" style={{ ...chip, left: 0, top: plotH - 12 }}>
           {valueFormatter(min)}
-        </text>
+        </div>
 
         {[0, data.length - 1].map((i) => (
-          <text
+          <div
             key={i}
-            x={x(i)}
-            y={height - 6}
-            fontSize={10.5}
-            textAnchor={i === 0 ? "start" : "end"}
-            fill="var(--muted-2)"
+            className="absolute whitespace-nowrap text-[10.5px]"
+            style={{
+              color: "var(--muted-2)",
+              left: `${xPct(i)}%`,
+              top: plotH + 4,
+              transform: `translateX(${i === 0 ? "0%" : "-100%"})`,
+            }}
           >
             {data[i].label}
-          </text>
+          </div>
         ))}
-      </svg>
+      </div>
 
       {hovered && hoverIndex !== null && (
         <div
           className="pointer-events-none absolute top-0 z-20 rounded-lg border px-2 py-1 text-[11px] font-medium shadow-lg"
           style={{
-            left: `${data.length > 1 ? (hoverIndex / (data.length - 1)) * 100 : 50}%`,
-            transform: `translate(${hoverIndex < data.length / 2 ? "6px" : "calc(-100% - 6px)"}, -2px)`,
+            left: `${xPct(hoverIndex)}%`,
+            transform: `translate(${xPct(hoverIndex) < 50 ? "6px" : "calc(-100% - 6px)"}, -2px)`,
             background: "var(--panel)",
             borderColor: "var(--panel-border-strong)",
             color: "var(--foreground)",
