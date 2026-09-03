@@ -1,31 +1,48 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useFrame } from "@react-three/fiber";
-import { Color, type ShaderMaterial } from "three";
+import { Billboard } from "@react-three/drei";
+import { AdditiveBlending, Color } from "three";
 
 /**
- * An organic, noise-displaced, glow-rimmed sphere — the visual asked for by
- * React Bits Pro's "AI Blob" (`@reactbits-starter/ai-blob-tw`), which is
- * gated behind a Pro license key this deployment doesn't have (confirmed live
- * with the actual install command, same wall `simple-graph` hit). Hand-rolled
- * instead, in the exact technique this project already uses for its other
- * generative visual — the landing page's `GradientWaves` hero is a raymarched
- * fragment shader; this is a vertex-displaced one, same house style, now
- * inside the entity graph's own three.js/react-three-fiber scene rather than
- * `ogl`.
+ * The agent node's visual — the look React Bits Pro's "AI Blob"
+ * (`@reactbits-starter/ai-blob-tw`) produces. That component is gated behind a
+ * Pro license key this deployment doesn't have; confirmed live again with the
+ * exact install command, which fails on `Unknown registry "@reactbits-starter"`
+ * for want of a registry URL. Hand-rolled instead, in the technique this
+ * project already uses for its other generative visual — the landing page's
+ * `GradientWaves` hero is a raymarched fragment shader; this is a
+ * vertex-displaced one, same house style, inside the entity graph's own
+ * three.js scene.
+ *
+ * STRUCTURE, which is the part the first attempt got wrong. The reference is
+ * not a big glowing sphere: it is a THIN, crisp ring with a SMALL, intensely
+ * hot organic blob floating at its centre and mostly empty dark space between
+ * the two. The first pass built a large pale lumpy sphere wrapped in soft
+ * additive fog, which read as a lit moon rather than a contained plasma. The
+ * ratio matters as much as the shading — the blob is roughly a quarter of the
+ * ring's diameter.
+ *
+ * Brightness is deliberately pushed well past 1.0 on the core. This scene runs
+ * a Bloom pass, and a small, genuinely over-bright object is what makes bloom
+ * produce a saturated glow bleeding outward from a white-hot centre. Painting
+ * a large surface at moderate brightness — the first attempt — gives bloom
+ * nothing to work with and washes out to grey-white instead.
  *
  * The noise function is the standard Ashima Arts 3D simplex noise (MIT/public
- * domain, the same implementation nearly every GLSL blob/terrain/cloud effect
- * on the web is built on) — inlined as a template literal, matching how
- * GradientWaves.tsx inlines its own ~150-line fragment shader rather than
- * pulling in a shader-chunk dependency for one function.
+ * domain, what nearly every GLSL blob/terrain/cloud effect on the web is built
+ * on) — inlined as a template literal, matching how GradientWaves.tsx inlines
+ * its own fragment shader rather than adding a shader-chunk dependency.
  *
- * AMPLITUDE AND SPEED ARE TIED TO TRUST, not arbitrary. A calmer, more
- * spherical blob for a high-trust agent and a more agitated, wobbling one for
- * a low-trust agent is a real mapping from this app's own data — the same
- * discipline every other visual in this scene follows (colour by verdict,
- * size by trust) — rather than motion added purely for spectacle.
+ * AMPLITUDE AND SWEEP SPEED ARE TIED TO TRUST, not arbitrary: a calmer, more
+ * spherical core and a slower ring sweep for a high-trust agent, a more
+ * agitated one for a low-trust agent. That is a real mapping from this app's
+ * own data, the same discipline the rest of the scene follows (colour by
+ * entity type, size by trust), rather than motion added for spectacle.
+ *
+ * NOTE ON BACKTICKS: these shaders live inside JS template literals, so a
+ * backtick anywhere in a GLSL comment terminates the string. Use quotes.
  */
 
 const SIMPLEX_NOISE_GLSL = `
@@ -95,7 +112,7 @@ float snoise(vec3 v) {
 }
 `;
 
-const vertexShader = `
+const coreVertexShader = `
 uniform float uTime;
 uniform float uAmplitude;
 uniform float uFrequency;
@@ -116,7 +133,7 @@ void main() {
 }
 `;
 
-const fragmentShader = `
+const coreFragmentShader = `
 uniform vec3 uColor;
 varying vec3 vNormal;
 varying vec3 vWorldPosition;
@@ -125,124 +142,200 @@ varying float vNoise;
 void main() {
   vec3 viewDir = normalize(cameraPosition - vWorldPosition);
   vec3 n = normalize(vNormal);
+
   float facing = clamp(dot(n, viewDir), 0.0, 1.0);
-  float fresnel = pow(1.0 - facing, 2.2);
 
-  // A strong, mostly-stable glow across the WHOLE visible face -- this is
-  // what the old formula didn't have. Before, the face-on centre sat at
-  // 0.5x while the rim spiked to 2.5x; combined with the outer aura/halo
-  // layers and this scene's bloom, that overdrove the rim into a
-  // tone-mapping colour-fringe artefact (the cyan/magenta ring) and left the
-  // centre reading as a small dim dot instead of one glowing mass. "base"
-  // keeps the whole body lit regardless of view angle or noise phase, so
-  // there's always a solid blob to see, not just a rim.
-  float base = 0.55 + 0.25 * facing;
+  // The body is kept close to 1.0 ON PURPOSE, and this is the whole lesson of
+  // this shader. Multiplying a saturated colour far past 1.0 does not make it
+  // a brighter version of itself -- its strongest channel pins first and the
+  // others catch up, so the hue slides to cyan and then to flat white. An
+  // offscreen render of these exact shaders showed precisely that: a
+  // near-white ball with a thin blue edge. Bloom's threshold in this scene is
+  // 0.22, well under this, so a body at ~1.0 still blooms while keeping its
+  // colour.
+  float body = 0.85 + 0.25 * facing;
 
-  // The rim still gets a boost so the silhouette reads with depth, just a
-  // moderate one now instead of a blowout.
-  float rim = fresnel * 0.55;
+  // A TIGHT central hotspot. The steep exponent is what confines white to the
+  // middle of the blob instead of letting it spread across the whole face --
+  // a gentle falloff whitens most of the visible disc, because a sphere seen
+  // head-on presents a lot of near-camera-facing surface.
+  float coreHot = pow(facing, 8.0);
 
-  // Organic shimmer, driven by the SAME noise value already displacing this
-  // fragment's neighbourhood -- bright patches track wherever the surface
-  // currently bulges outward, so the glow visibly moves WITH the shape
-  // rather than being a separate view-dependent hot spot that swings
-  // around independently of it (the "moves around, not fixed" complaint).
-  float shimmer = 0.18 * clamp(vNoise, -1.0, 1.0);
+  // Organic shimmer driven by the SAME noise value that displaces this
+  // fragment, so bright patches track the shape's own bulges rather than
+  // sliding around independently of it.
+  float shimmer = 0.2 * clamp(vNoise, -1.0, 1.0);
 
-  float intensity = base + rim + shimmer;
+  float intensity = body + coreHot * 2.6 + shimmer;
 
-  // Mix deliberately toward white at the hottest points -- a controlled
-  // "white-hot core" instead of leaving an over-1.0 saturated colour to
-  // whatever the renderer's tone-mapping curve does with it, which is what
-  // produced the uncontrolled hue-shift before.
-  vec3 hot = mix(uColor, vec3(1.0), clamp(intensity - 0.75, 0.0, 1.0) * 1.6);
-  gl_FragColor = vec4(hot * intensity, 1.0);
+  vec3 col = mix(uColor, vec3(1.0), clamp(coreHot * 0.9, 0.0, 1.0));
+  gl_FragColor = vec4(col * intensity, 1.0);
 }
 `;
 
-export function AgentBlobCore({
+const ringVertexShader = `
+varying vec2 vLocal;
+
+void main() {
+  // RingGeometry is built in the XY plane, so the local xy IS the radial
+  // coordinate the fragment shader needs. Billboard turns the whole thing to
+  // face the camera, which is what keeps it reading as a circle from every
+  // orbit angle instead of collapsing to an ellipse.
+  vLocal = position.xy;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+`;
+
+const ringFragmentShader = `
+uniform vec3 uColor;
+uniform vec3 uAccent;
+uniform float uTime;
+uniform float uInner;
+uniform float uOuter;
+uniform float uSpeed;
+varying vec2 vLocal;
+
+void main() {
+  float r = length(vLocal);
+  float t = clamp((r - uInner) / max(uOuter - uInner, 1e-5), 0.0, 1.0);
+
+  // The geometry is a WIDE annulus but the visible ring is a thin line drawn
+  // inside it -- the surplus width is what gives the glow somewhere to fall
+  // off into. A hard-edged thin annulus would alias badly at this scale.
+  float band = pow(max(1.0 - abs(t - 0.5) * 2.0, 0.0), 3.0);
+
+  // A slow sweep around the circumference, so the ring shifts between the
+  // entity colour and a lighter tint rather than sitting as a flat circle.
+  // Speed is tied to trust (see uSpeed); the tint itself is atmosphere.
+  float angle = atan(vLocal.y, vLocal.x);
+  float sweep = 0.5 + 0.5 * sin(angle - uTime * uSpeed);
+
+  vec3 tint = mix(uColor, uAccent, 0.45 * sweep);
+  float alpha = band * (0.35 + 0.65 * sweep);
+  gl_FragColor = vec4(tint * (0.85 + 1.7 * sweep), alpha);
+}
+`;
+
+/** Blob radius as a fraction of the ring radius. The reference sits near a
+ *  quarter; going much larger is what made the first attempt read as a sphere
+ *  in fog rather than a contained core. */
+const CORE_TO_RING = 0.25;
+/** Ring radius as a multiple of the node's base scale — matches the footprint
+ *  the old aura layer occupied, so node spacing in the graph is unchanged. */
+const RING_TO_BASE = 2.0;
+
+export function AgentBlob({
   color,
   scale,
   trustScore,
 }: {
   color: string;
   scale: number;
-  /** 0-100. Drives how agitated the blob's surface reads — see the module
-   *  doc comment for why this is tied to real data rather than decorative. */
+  /** 0-100. Drives core agitation and ring sweep speed — see the module doc
+   *  comment for why this is tied to real data rather than decorative. */
   trustScore: number;
 }) {
-  const materialRef = useRef<ShaderMaterial>(null);
-
-  // Low trust -> larger amplitude, faster-feeling wobble (higher spatial
-  // frequency reads as more "restless" even at the same time-scale). High
-  // trust -> a calmer, closer-to-spherical surface. Clamped so even a 0-trust
-  // agent stays recognisably a blob, not a spike ball, and even a 100-trust
-  // agent still visibly breathes rather than looking static/dead.
   const t = Math.max(0, Math.min(100, trustScore)) / 100;
-  // Pulled back from the first pass (0.34..0.12 / 2.6..1.7): that amplitude,
-  // at low trust, displaced vertices by up to a third of the sphere's own
-  // radius, which combined with the fragment shader's old rim-only glow made
-  // the brightest-looking point swing around the surface as the noise phase
-  // advanced -- read as the whole node "moving". Lower amplitude keeps the
-  // shape recognisably anchored while still visibly organic; lower frequency
-  // produces fewer, broader lobes (closer to a real "blob") instead of many
-  // small bumps.
-  const amplitude = 0.16 - t * 0.08; // 0.16 .. 0.08
-  const frequency = 1.8 - t * 0.6; // 1.8 .. 1.2
 
-  // useState's lazy initializer, not useMemo and not a ref read during
-  // render. Three separate constraints all have to hold at once: the object
-  // has to exist at RENDER time (it's handed to <shaderMaterial uniforms={}>
-  // as a prop, which R3F reads once to build the material), it has to be
-  // MUTATED every frame afterward (the standard, performance-correct way to
-  // drive a shader — replacing it each frame would make R3F treat it as a
-  // changed prop and recompile the whole shader program instead of updating a
-  // float), and the setter is NEVER called again, so React never re-renders
-  // because of it. A ref satisfies the second constraint but not the first —
-  // reading `.current` during render is exactly what tripped the
-  // GradientWaves fallback-layer fix earlier this session. useState's
-  // returned value is safe to read during render by contract; only its
-  // OUTER reference needs to stay stable for that, and it does, since setUniforms
-  // is deliberately unused past this line.
-  const [uniforms] = useState(() => ({
+  // Low trust -> a more agitated, less spherical core and a faster ring
+  // sweep. High trust -> calmer and closer to round. Low FREQUENCY is what
+  // keeps the shape a few broad lobes (a teardrop, like the reference) rather
+  // than many small bumps.
+  const amplitude = 0.22 - t * 0.1; // 0.22 .. 0.12
+  const frequency = 1.6 - t * 0.5; // 1.6 .. 1.1
+  const sweepSpeed = 0.9 - t * 0.45; // 0.9 .. 0.45
+
+  const ringR = scale * RING_TO_BASE;
+  const coreR = ringR * CORE_TO_RING;
+  // The annulus is wider than the visible line; the shader draws the line at
+  // its midpoint and fades outward from there.
+  const ringInner = ringR * 0.8;
+  const ringOuter = ringR * 1.2;
+
+  // useState's lazy initializer, not useMemo and not a ref read during render.
+  // Three constraints hold at once: the object must exist at RENDER time (it
+  // is handed to <shaderMaterial uniforms={}>, which R3F reads once to build
+  // the material), it must be MUTATED every frame afterward (replacing it
+  // would make R3F treat it as a changed prop and recompile the shader
+  // program instead of updating a float), and the setter is never called, so
+  // React never re-renders because of it. A ref satisfies the second but not
+  // the first — reading `.current` during render is what the refs lint rule
+  // catches, and did catch on the GradientWaves fallback layer earlier.
+  const [coreUniforms] = useState(() => ({
     uTime: { value: 0 },
     uAmplitude: { value: amplitude },
     uFrequency: { value: frequency },
     uColor: { value: new Color(color) },
   }));
 
-  // Only fires if `color` itself changes identity, which it doesn't for the
-  // one caller today (ENTITY_COLORS.agent is a module-level constant) — kept
-  // correct anyway rather than assuming the prop can never change.
-  useEffect(() => {
-    uniforms.uColor.value.set(color);
-  }, [color, uniforms]);
+  const [ringUniforms] = useState(() => ({
+    uTime: { value: 0 },
+    uInner: { value: ringInner },
+    uOuter: { value: ringOuter },
+    uSpeed: { value: sweepSpeed },
+    uColor: { value: new Color(color) },
+    // A lighter, cooler tint for the sweep to travel toward. Kept close to the
+    // entity hue so the ring still reads as "agent" at a glance rather than
+    // introducing a colour the legend doesn't explain.
+    uAccent: { value: new Color("#bfe6ff") },
+  }));
 
-  // Mutating an existing uniform's `.value` every frame is three.js's own
-  // documented contract for driving a shader (the same pattern drei's
-  // `shaderMaterial` helper and the official R3F examples use), not an
-  // accidental state mutation. The rule below is tuned for React state/memo
-  // semantics and has no exception for the WebGL uniform-update convention;
-  // REPLACING this object each frame instead (the "fix" it would accept)
-  // would make R3F treat `uniforms` as a changed prop and force three.js to
-  // rebuild the shader program every frame — strictly worse than what it's
-  // flagging. Block-disabled rather than per-line: the directive has to sit
-  // directly above the mutating statements themselves, not above `useFrame(`,
-  // or it silences nothing and the real violation still fires a few lines
-  // down — which is exactly the mistake the first version of this comment
-  // made.
+  useEffect(() => {
+    coreUniforms.uColor.value.set(color);
+    ringUniforms.uColor.value.set(color);
+  }, [color, coreUniforms, ringUniforms]);
+
+  // Mutating an existing uniform's `.value` per frame is three.js's own
+  // documented contract for driving a shader (what drei's `shaderMaterial`
+  // helper and the official R3F examples do), not accidental state mutation.
+  // The rule below is tuned for React state/memo semantics and has no
+  // exception for it; the restructuring it would accept — a fresh object each
+  // frame — forces a shader rebuild every frame and is strictly worse. Block
+  // disable rather than next-line: the directive has to bracket the mutating
+  // statements themselves, not sit above `useFrame(`, or it silences nothing.
   useFrame(({ clock }) => {
+    const elapsed = clock.getElapsedTime();
     /* eslint-disable react-hooks/immutability */
-    uniforms.uTime.value = clock.getElapsedTime();
-    uniforms.uAmplitude.value = amplitude;
-    uniforms.uFrequency.value = frequency;
+    coreUniforms.uTime.value = elapsed;
+    coreUniforms.uAmplitude.value = amplitude;
+    coreUniforms.uFrequency.value = frequency;
+    ringUniforms.uTime.value = elapsed;
+    ringUniforms.uInner.value = ringInner;
+    ringUniforms.uOuter.value = ringOuter;
+    ringUniforms.uSpeed.value = sweepSpeed;
     /* eslint-enable react-hooks/immutability */
   });
 
   return (
-    <mesh scale={scale}>
-      <sphereGeometry args={[1, 64, 64]} />
-      <shaderMaterial ref={materialRef} uniforms={uniforms} vertexShader={vertexShader} fragmentShader={fragmentShader} />
-    </mesh>
+    <>
+      {/* An invisible, generous hit target. The visible core is deliberately
+          small now, and hovering a node is how the whole graph is inspected —
+          shrinking the clickable area along with the art would be a real
+          regression. Zero opacity rather than visible={false}, because
+          three.js skips invisible objects during raycasting. */}
+      <mesh scale={scale * 1.3}>
+        <sphereGeometry args={[1, 12, 12]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+
+      <Billboard>
+        <mesh>
+          <ringGeometry args={[ringInner, ringOuter, 128]} />
+          <shaderMaterial
+            uniforms={ringUniforms}
+            vertexShader={ringVertexShader}
+            fragmentShader={ringFragmentShader}
+            transparent
+            depthWrite={false}
+            blending={AdditiveBlending}
+          />
+        </mesh>
+      </Billboard>
+
+      <mesh scale={coreR}>
+        <sphereGeometry args={[1, 64, 64]} />
+        <shaderMaterial uniforms={coreUniforms} vertexShader={coreVertexShader} fragmentShader={coreFragmentShader} />
+      </mesh>
+    </>
   );
 }

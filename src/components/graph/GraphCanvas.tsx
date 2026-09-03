@@ -8,7 +8,7 @@ import type * as THREE from "three";
 import { AdditiveBlending, Vector3 } from "three";
 import type { Agent, Customer, Escalation, Mandate, PolicyRule, Trace } from "@/types/db";
 import { computeLayout, type Vec3 } from "./layout";
-import { AgentBlobCore } from "./AgentBlobMaterial";
+import { AgentBlob } from "./AgentBlobMaterial";
 
 /**
  * Frames the whole cluster on first load.
@@ -116,14 +116,7 @@ function AgentNode({
   position: Vec3;
   onHover: (h: HoverInfo) => void;
 }) {
-  const auraRef = useRef<THREE.Mesh>(null);
   const baseScale = 0.32 + (agent.trust_score / 100) * 0.34;
-
-  useFrame(({ clock }) => {
-    if (!auraRef.current) return;
-    const breathe = 1 + Math.sin(clock.getElapsedTime() * 0.6 + position[0]) * 0.1;
-    auraRef.current.scale.setScalar(baseScale * 2.1 * breathe);
-  });
 
   return (
     <group
@@ -137,38 +130,15 @@ function AgentNode({
         onHover(null);
       }}
     >
-      {/* Three layers, and every one of them ADDITIVE.
-          ------------------------------------------------------------------
-          A normal-blended translucent sphere averages toward whatever is
-          behind it, so over a black scene it goes grey -- and bloom then
-          smears that grey into a pale blob with no colour left in it. Additive
-          blending adds light instead of mixing pigment, which is what a glow
-          physically is, and it keeps the hue all the way out to the edge. */}
-      <mesh ref={auraRef}>
-        <sphereGeometry args={[1, 16, 16]} />
-        <meshBasicMaterial
-          color={ENTITY_COLORS.agent}
-          transparent
-          opacity={0.075}
-          depthWrite={false}
-          blending={AdditiveBlending}
-        />
-      </mesh>
-      <mesh scale={baseScale * 1.5}>
-        <sphereGeometry args={[1, 20, 20]} />
-        <meshBasicMaterial
-          color={ENTITY_COLORS.agent}
-          transparent
-          opacity={0.16}
-          depthWrite={false}
-          blending={AdditiveBlending}
-        />
-      </mesh>
-      {/* The core: an organic, noise-displaced, fresnel-glowing blob rather
-          than a solid sphere — see AgentBlobMaterial.tsx. Its wobble amplitude
-          is tied to this agent's own trust score, so a calmer or more
-          agitated surface is a real reading of the data, not decoration. */}
-      <AgentBlobCore color={ENTITY_COLORS.agent} scale={baseScale} trustScore={agent.trust_score} />
+      {/* A thin billboarded ring with a small, white-hot organic core floating
+          at its centre — see AgentBlobMaterial.tsx, which owns the whole
+          look. The two soft additive fog spheres that used to sit here are
+          gone: they filled the space between core and boundary that this
+          reference deliberately leaves dark, and washed the node out into a
+          pale blob. Core agitation and ring sweep speed are both tied to this
+          agent's own trust score, so the motion is a reading of the data
+          rather than decoration. */}
+      <AgentBlob color={ENTITY_COLORS.agent} scale={baseScale} trustScore={agent.trust_score} />
     </group>
   );
 }
