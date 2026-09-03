@@ -51,8 +51,21 @@ export function computeLayout(
   });
 
   const AGENT_RADIUS = 4;
-  const positionedAgents: PositionedAgent[] = agents.map((agent, i) => {
-    const angle = (i / Math.max(agents.length, 1)) * Math.PI * 2;
+  // The incoming `agents` array is ordered by trust_score (dashboardData.ts),
+  // which is LIVE and shifts on essentially every decision — two agents a
+  // point apart swap order all the time. Assigning angle straight from that
+  // array's index made each agent's position swing to a different slot on
+  // the ring every time its trust rank moved relative to its neighbours,
+  // which read as nodes drifting/wandering rather than staying put. Angle is
+  // assigned from a separately stable ordering (by id) instead, so an
+  // agent's position depends only on which agents exist, never on their
+  // current trust ranking.
+  const stableOrder = [...agents].sort((a, b) => a.id.localeCompare(b.id));
+  const angleByAgentId = new Map(
+    stableOrder.map((agent, i) => [agent.id, (i / Math.max(stableOrder.length, 1)) * Math.PI * 2])
+  );
+  const positionedAgents: PositionedAgent[] = agents.map((agent) => {
+    const angle = angleByAgentId.get(agent.id) ?? 0;
     return { agent, position: [Math.cos(angle) * AGENT_RADIUS, 0, Math.sin(angle) * AGENT_RADIUS] };
   });
 

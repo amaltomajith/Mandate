@@ -101,12 +101,14 @@ uniform float uAmplitude;
 uniform float uFrequency;
 varying vec3 vNormal;
 varying vec3 vWorldPosition;
+varying float vNoise;
 
 ${SIMPLEX_NOISE_GLSL}
 
 void main() {
   vNormal = normalize(normalMatrix * normal);
   float n = snoise(position * uFrequency + vec3(0.0, 0.0, uTime * 0.35));
+  vNoise = n;
   vec3 displaced = position + normal * n * uAmplitude;
   vec4 worldPos = modelMatrix * vec4(displaced, 1.0);
   vWorldPosition = worldPos.xyz;
@@ -118,16 +120,43 @@ const fragmentShader = `
 uniform vec3 uColor;
 varying vec3 vNormal;
 varying vec3 vWorldPosition;
+varying float vNoise;
 
 void main() {
-  // Fresnel: the rim (where the surface normal points away from the camera)
-  // glows; the face pointed at the viewer stays a duller, saturated core --
-  // the same "brighter at the edge than the middle" read every glass/plasma
-  // shader uses, and what makes this feel lit rather than flat-painted.
   vec3 viewDir = normalize(cameraPosition - vWorldPosition);
-  float fresnel = pow(1.0 - clamp(dot(normalize(vNormal), viewDir), 0.0, 1.0), 2.2);
-  vec3 color = uColor * 0.5 + uColor * fresnel * 2.0;
-  gl_FragColor = vec4(color, 1.0);
+  vec3 n = normalize(vNormal);
+  float facing = clamp(dot(n, viewDir), 0.0, 1.0);
+  float fresnel = pow(1.0 - facing, 2.2);
+
+  // A strong, mostly-stable glow across the WHOLE visible face -- this is
+  // what the old formula didn't have. Before, the face-on centre sat at
+  // 0.5x while the rim spiked to 2.5x; combined with the outer aura/halo
+  // layers and this scene's bloom, that overdrove the rim into a
+  // tone-mapping colour-fringe artefact (the cyan/magenta ring) and left the
+  // centre reading as a small dim dot instead of one glowing mass. "base"
+  // keeps the whole body lit regardless of view angle or noise phase, so
+  // there's always a solid blob to see, not just a rim.
+  float base = 0.55 + 0.25 * facing;
+
+  // The rim still gets a boost so the silhouette reads with depth, just a
+  // moderate one now instead of a blowout.
+  float rim = fresnel * 0.55;
+
+  // Organic shimmer, driven by the SAME noise value already displacing this
+  // fragment's neighbourhood -- bright patches track wherever the surface
+  // currently bulges outward, so the glow visibly moves WITH the shape
+  // rather than being a separate view-dependent hot spot that swings
+  // around independently of it (the "moves around, not fixed" complaint).
+  float shimmer = 0.18 * clamp(vNoise, -1.0, 1.0);
+
+  float intensity = base + rim + shimmer;
+
+  // Mix deliberately toward white at the hottest points -- a controlled
+  // "white-hot core" instead of leaving an over-1.0 saturated colour to
+  // whatever the renderer's tone-mapping curve does with it, which is what
+  // produced the uncontrolled hue-shift before.
+  vec3 hot = mix(uColor, vec3(1.0), clamp(intensity - 0.75, 0.0, 1.0) * 1.6);
+  gl_FragColor = vec4(hot * intensity, 1.0);
 }
 `;
 
@@ -150,8 +179,16 @@ export function AgentBlobCore({
   // agent stays recognisably a blob, not a spike ball, and even a 100-trust
   // agent still visibly breathes rather than looking static/dead.
   const t = Math.max(0, Math.min(100, trustScore)) / 100;
-  const amplitude = 0.34 - t * 0.22; // 0.34 .. 0.12
-  const frequency = 2.6 - t * 0.9; // 2.6 .. 1.7
+  // Pulled back from the first pass (0.34..0.12 / 2.6..1.7): that amplitude,
+  // at low trust, displaced vertices by up to a third of the sphere's own
+  // radius, which combined with the fragment shader's old rim-only glow made
+  // the brightest-looking point swing around the surface as the noise phase
+  // advanced -- read as the whole node "moving". Lower amplitude keeps the
+  // shape recognisably anchored while still visibly organic; lower frequency
+  // produces fewer, broader lobes (closer to a real "blob") instead of many
+  // small bumps.
+  const amplitude = 0.16 - t * 0.08; // 0.16 .. 0.08
+  const frequency = 1.8 - t * 0.6; // 1.8 .. 1.2
 
   // useState's lazy initializer, not useMemo and not a ref read during
   // render. Three separate constraints all have to hold at once: the object
