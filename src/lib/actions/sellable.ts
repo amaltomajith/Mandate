@@ -3,8 +3,9 @@
 import { requireDashboardUser } from "./authGuard";
 import { getCurrentMerchant } from "@/lib/merchant";
 import { fetchCatalog } from "@/lib/demo/catalog";
-import { MandateClient } from "@/lib/demo/mandateClient";
-import { createAdminClient, ensureAgentIdentity } from "@/lib/demo/shared";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { evaluatePolicy } from "@/lib/policy/engine";
+import { getActiveRules, getAggregates } from "@/lib/mcp/traceHelpers";
 
 /**
  * What the agent can actually sell right now.
@@ -21,9 +22,28 @@ import { createAdminClient, ensureAgentIdentity } from "@/lib/demo/shared";
  * catalog cannot tell a merchant that half their range has become unsellable
  * because an agent's trust fell.
  *
- * Costs nothing to run: velocity aggregates count only `enforce`-mode traces
- * (see getAggregates), so probing the whole catalog does not consume the
- * agent's rate limit or move any money.
+ * PER AGENT, and evaluated IN PROCESS rather than over the wire. That change is
+ * forced by the thing this project is proudest of: signing as an agent requires
+ * that agent's private key, and a third party's key is never generated, stored
+ * or reachable here. So there is no way to send a signed probe on another
+ * agent's behalf — and the moment there were, the isolation the buyer exists to
+ * demonstrate would be a claim rather than a fact.
+ *
+ * What it calls instead is `evaluatePolicy` — the same pure engine the MCP path
+ * calls, with the same live rules, the same aggregates and the same per-agent
+ * trust and scope. Exactly the precedent counterOffer.ts already sets. The
+ * mandate gate is the one thing the wire path adds, and it only runs when an
+ * action names a customer; these probes name none, so the two paths decide
+ * identically here.
+ *
+ * The catalog stays UNSCOPED on purpose. Filtering out what an agent may not
+ * touch would answer a different question — the merchant wants to see that this
+ * product is refused *and why*, not to have it quietly disappear. An
+ * out-of-scope item renders as a block with the scope named, which is what
+ * makes two agents' views differ visibly rather than just differ in length.
+ *
+ * Costs nothing to run: nothing is written, so probing the whole catalog does
+ * not consume the agent's rate limit or move any money.
  *
  * Returns per-item verdicts and nothing aggregated. Summing list prices across
  * these buckets produced a number that measured nothing real — not revenue,
@@ -48,74 +68,104 @@ export interface SellableItem {
 export interface SellableSnapshot {
   items: SellableItem[];
   checkedAt: string;
+  /** Whose view this is. Named so a merchant reading two different answers
+   *  knows which agent each belongs to. */
+  agent: { id: string; name: string; trustScore: number; catalogScope: string[] | null } | null;
 }
 
-interface ActionResult {
-  decision: "allow" | "block" | "escalate";
-  reasoning: string;
+export interface HeadroomAgent {
+  id: string;
+  name: string;
+  managed: boolean;
+  catalogScope: string[] | null;
 }
 
-export async function getSellableCatalog(): Promise<SellableSnapshot> {
+/** The agents a merchant can ask "what could this one sell?" about. */
+export async function listHeadroomAgents(): Promise<HeadroomAgent[]> {
+  await requireDashboardUser();
+  const merchant = await getCurrentMerchant();
+  const db = createAdminClient();
+  const { data } = await db
+    .from("agents")
+    .select("id, name, managed, catalog_scope")
+    .eq("merchant_id", merchant.id)
+    .order("managed")
+    .order("name");
+  return (data ?? []).map((a) => ({
+    id: a.id,
+    name: a.name,
+    managed: a.managed,
+    catalogScope: a.catalog_scope,
+  }));
+}
+
+export async function getSellableCatalog(agentId?: string): Promise<SellableSnapshot> {
   await requireDashboardUser();
   const merchant = await getCurrentMerchant();
   const db = createAdminClient();
 
+  // Scoped by merchant as well as id. A row id is not authorization -- section
+  // 17 records treating one as such as a real bug -- so an id from another
+  // tenant resolves to nothing rather than to someone else's agent.
+  const { data: agentRow } = agentId
+    ? await db
+        .from("agents")
+        .select("id, name, trust_score, catalog_scope")
+        .eq("id", agentId)
+        .eq("merchant_id", merchant.id)
+        .maybeSingle()
+    : await db
+        .from("agents")
+        .select("id, name, trust_score, catalog_scope")
+        .eq("merchant_id", merchant.id)
+        .eq("managed", true)
+        .maybeSingle();
+
   const catalog = await fetchCatalog(db, merchant.id);
-  const { id: agentId, secretKeyBase64 } = await ensureAgentIdentity(db, merchant.id, {
-    envIdVar: "SIM_AGENT_ID",
-    envSecretVar: "SIM_AGENT_SECRET_KEY",
-    name: "Checkout Agent",
-    description: "An AI buyer agent transacting on behalf of customers.",
-  });
 
-  const client = new MandateClient(
-    process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
-    merchant.slug,
-    agentId,
-    secretKeyBase64
-  );
-  await client.initialize("mandate-sellable-check");
+  if (!agentRow) {
+    // No agent to answer for. Honest emptiness rather than a view attributed to
+    // nobody -- a verdict with no agent behind it is not a verdict.
+    return { items: [], checkedAt: new Date().toISOString(), agent: null };
+  }
 
-  // Probed in parallel. Verified before changing it: both the velocity count
-  // and the per-day cap sum in getAggregates filter on `mode = 'enforce'`, so
-  // simulate-mode probes are invisible to them and cannot race each other into
-  // spending a rate budget. Sequentially this took six round trips end to end,
-  // which is what left the panel sitting on "asking the engine about each
-  // item" long enough to read as hung.
-  //
-  // Per-item try/catch for the same reason the loop was the problem: one slow
-  // or failed probe used to reject the whole action, so a single bad answer
-  // replaced five good ones.
-  const items: SellableItem[] = await Promise.all(
-    catalog.map(async (item): Promise<SellableItem> => {
-      const base = {
-        sku: item.sku,
-        name: item.name,
-        description: item.description,
+  const rules = await getActiveRules(merchant.id);
+  const aggregates = await getAggregates(merchant.id, agentRow.id, rules, "INR");
+
+  const items: SellableItem[] = catalog.map((item) => {
+    const match = evaluatePolicy(
+      {
+        actionType: "order.create",
+        amount: item.priceInPaise,
+        currency: "INR",
         category: item.category,
-        priceInPaise: item.priceInPaise,
-      };
-      try {
-        const probe = await client.callTool<ActionResult>("simulate_action", {
-          actionType: "order.create",
-          amount: item.priceInPaise,
-          currency: "INR",
-          category: item.category,
-          params: { receipt: `sellable-${Date.now()}-${item.sku}` },
-        });
-        return { ...base, decision: probe.decision, reasoning: probe.reasoning };
-      } catch (err) {
-        return {
-          ...base,
-          decision: "unknown",
-          reasoning: `Couldn't check this one: ${err instanceof Error ? err.message : "the engine didn't answer"}`,
-        };
-      }
-    })
-  );
+        agentId: agentRow.id,
+        agentTrustScore: agentRow.trust_score,
+        agentCatalogScope: agentRow.catalog_scope,
+      },
+      rules,
+      aggregates
+    );
+    return {
+      sku: item.sku,
+      name: item.name,
+      description: item.description,
+      category: item.category,
+      priceInPaise: item.priceInPaise,
+      decision: match ? match.decision : "allow",
+      reasoning: match ? match.reasoning : "No policy rule matched — this would clear.",
+    };
+  });
 
   return {
     items: items.sort((a, b) => a.priceInPaise - b.priceInPaise),
     checkedAt: new Date().toISOString(),
+    agent: {
+      id: agentRow.id,
+      name: agentRow.name,
+      trustScore: agentRow.trust_score,
+      catalogScope: agentRow.catalog_scope,
+    },
   };
 }
+

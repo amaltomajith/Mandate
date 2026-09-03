@@ -19,6 +19,8 @@ import { fetchCatalog, applySeedProducts, PRODUCT_CATEGORIES } from "../src/lib/
 import { generateKeyPair } from "../src/lib/webBotAuth/keys";
 import { signRequest } from "../src/lib/webBotAuth/sign";
 import { computeContentDigest } from "../src/lib/webBotAuth/canonical";
+import { evaluatePolicy } from "../src/lib/policy/engine";
+import type { PolicyRule } from "../src/lib/policy/types";
 
 const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
   auth: { autoRefreshToken: false, persistSession: false },
@@ -190,6 +192,102 @@ async function main() {
       "an empty scope yields no candidates at all",
       (await fetchCatalog(db, m!.id, [])).length === 0,
       "0 candidates"
+    );
+
+    // ------------------------------------------------------------- headroom
+    //
+    // THE CLAIM section 10 has been overstating: the same catalog renders
+    // differently per agent, for a reason the merchant chose. Pass one found it
+    // false -- the view took no agent and probed as the merchant's own identity,
+    // so it was identical for everyone. Asserted here directly rather than
+    // described.
+    //
+    // Evaluated through the same pure engine the wire path uses. Signing as a
+    // third-party agent is impossible by design (its private key is never
+    // generated, stored or reachable here), so a per-agent probe cannot go over
+    // the wire -- and if it could, the isolation the buyer demonstrates would be
+    // a claim rather than a fact.
+    await db.from("policy_rules").insert({
+      merchant_id: m!.id,
+      type: "catalog_scope" as never,
+      name: "Agents keep to their assigned catalog",
+      params: {},
+      status: "active",
+      source: "human",
+      rationale: "verify-catalog",
+    });
+
+    const wideKeys = generateKeyPair();
+    const { data: wideAgent } = await db
+      .from("agents")
+      .insert({ merchant_id: m!.id, name: "Unscoped Buyer", public_key: wideKeys.publicKey })
+      .select()
+      .single();
+
+    // Rules read straight from the table rather than through getActiveRules:
+    // that module imports "server-only", which throws outside Next's server
+    // context, and this is a CLI script. Same reason src/lib/demo/shared.ts
+    // builds its own admin client.
+    const { data: ruleRows } = await db
+      .from("policy_rules")
+      .select("id, type, name, params")
+      .eq("merchant_id", m!.id)
+      .eq("status", "active");
+    const rules = (ruleRows ?? []) as PolicyRule[];
+
+    // Empty aggregates are correct HERE and only here: this merchant is fresh,
+    // so catalog_scope is the only active rule and nothing being asserted
+    // depends on velocity counts or daily totals.
+    const aggregates = { velocityCounts: {}, dailyAmountSoFar: {} };
+
+    const verdictsFor = async (agent: { id: string; trust_score: number; catalog_scope: string[] | null }) => {
+      const live = await fetchCatalog(db, m!.id);
+      return live.map((item) => ({
+        sku: item.sku,
+        category: item.category,
+        decision:
+          evaluatePolicy(
+            {
+              actionType: "order.create",
+              amount: item.priceInPaise,
+              currency: "INR",
+              category: item.category,
+              agentId: agent.id,
+              agentTrustScore: agent.trust_score,
+              agentCatalogScope: agent.catalog_scope,
+            },
+            rules,
+            aggregates
+          )?.decision ?? "allow",
+      }));
+    };
+
+    const { data: scopedFull } = await db.from("agents").select("id, trust_score, catalog_scope").eq("id", scopedAgent!.id).single();
+    const { data: wideFull } = await db.from("agents").select("id, trust_score, catalog_scope").eq("id", wideAgent!.id).single();
+
+    const scopedVerdicts = await verdictsFor(scopedFull!);
+    const wideVerdicts = await verdictsFor(wideFull!);
+
+    const differing = scopedVerdicts.filter(
+      (v, i) => v.decision !== wideVerdicts[i].decision
+    );
+    check(
+      "HEADROOM: two agents render the SAME catalog differently",
+      differing.length > 0,
+      `${differing.length} of ${scopedVerdicts.length} products differ`
+    );
+    check(
+      "the difference is the scope, on non-office products",
+      differing.every((d) => d.category !== "office") && differing.every((d) => d.decision === "block"),
+      differing.map((d) => `${d.sku}:${d.decision}`).slice(0, 3).join(" ")
+    );
+    // CONTROL: both agents see the same NUMBER of products -- the catalog is
+    // unscoped for headroom on purpose, so the difference is in the verdicts
+    // rather than in things quietly vanishing.
+    check(
+      "CONTROL: both see every product, they just judge them differently",
+      scopedVerdicts.length === wideVerdicts.length && scopedVerdicts.length > 0,
+      `${scopedVerdicts.length} products each`
     );
 
     // Seeded products must all carry a category the engine can match on, or a
