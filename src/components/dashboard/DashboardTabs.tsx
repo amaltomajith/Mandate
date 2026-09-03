@@ -111,10 +111,10 @@ export function DashboardTabs(props: Props) {
 
       {tab === "overview" && (
         <div className="flex flex-1 flex-col gap-5">
-          {/* The scoreboard leads: what the control plane did to revenue is the
-              headline, and the graph explains how. Fixed height, so it can't
-              push the graph down as figures grow. */}
-          <RevenueImpactPanel traces={traces} escalations={escalations} />
+          {/* Simulation leads: it's the control that makes everything below it
+              move, so it reads better as the first thing on the tab than as an
+              afterthought under the graph. */}
+          <SimulationPanel />
 
           {/* Height is pinned rather than content-driven. Previously the row
               grew with the sidebar, so every new escalation made the graph
@@ -145,7 +145,9 @@ export function DashboardTabs(props: Props) {
             </div>
           </div>
 
-          <SimulationPanel />
+          {/* Revenue impact closes the tab: the payoff, read after watching
+              the graph and the queue move rather than before either has. */}
+          <RevenueImpactPanel traces={traces} escalations={escalations} />
         </div>
       )}
 
