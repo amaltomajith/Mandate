@@ -77,7 +77,8 @@ This is the whole system in one path. Everything else is a variation on it.
     |  4. mandate gate    — is this agent still authorized for       |
     |                       this customer? revoked/paused -> block   |
     |  5. policy engine   — pure, DB-free, first match wins          |
-    |     category_block > cap > velocity > trust_floor > step_up    |
+    |     category_block > catalog_scope > cap > velocity >          |
+    |     trust_floor > step_up                                      |
     |                                                                |
     |  allow    ------------------------------------------------------
     |  escalate -> escalations row, waits for a human
@@ -202,7 +203,7 @@ Ten tables, all scoped by `merchant_id`, all with RLS enabled.
 | Table | What it holds |
 |---|---|
 | `merchants` | the tenant. `slug` is its public identity, `clerk_user_id` its owner |
-| `agents` | name, description, Ed25519 public key, trust score and components, and `managed` |
+| `agents` | name, description, Ed25519 public key, trust score and components, `managed`, and `catalog_scope` |
 | `customers` | who an action is on behalf of |
 | `products` | the catalog an agent reads and reasons over. Merchant-managed, `active` retires without deleting |
 | `policy_rules` | type, params, status (`active` / `pending_review` / `rejected` / `superseded`), source, rationale |
@@ -256,11 +257,7 @@ that writes it.
 The distinction matters in three places. The Agents page lists third parties as
 the primary roster and puts the managed row under its own heading, because a
 traffic generator sitting among them overstates how many parties are actually
-integrated. `src/lib/actions/products.ts
-                         catalog CRUD + derived units/revenue + health checks
-src/components/dashboard/CatalogPanel.tsx
-                         the Catalog tab
-scripts/mint-sim-identity.ts` will only ever re-key a `managed`
+integrated. `scripts/mint-sim-identity.ts` will only ever re-key a `managed`
 row — re-keying an agent whose private half we have never held would lock a real
 third party out of its own identity. And the simulation's identity resolution
 refuses to touch anything else.
@@ -312,12 +309,13 @@ rather than a UI re-implementation that could drift from it.
 ### Five rule types, fixed priority, first match wins
 
 ```
-category_block  →  cap  →  velocity  →  trust_floor  →  step_up
+category_block  →  catalog_scope  →  cap  →  velocity  →  trust_floor  →  step_up
 ```
 
 | Type | Measures | Decision |
 |---|---|---|
 | `category_block` | a named category (`gambling`, `crypto`) | block |
+| `catalog_scope` | the acting agent's assigned catalog, on the agent | block |
 | `cap` | a money ceiling, per transaction or per day | block |
 | `velocity` | a count within a time window, per agent or per customer | block |
 | `trust_floor` | the agent's reputation | escalate (or block) |
@@ -329,6 +327,40 @@ than refusing. `trust_floor` sits above `step_up` because "this agent has not
 earned the benefit of the doubt" is a stronger reason to involve a human than
 "this amount is large" — a distrusted agent should be held at *any* amount, so
 its reasoning is the one the merchant should read.
+
+`catalog_scope` sits **second**, and the reason is about which sentence the
+merchant ends up reading. A merchant-wide prohibition is a stronger and more
+general fact than one agent's permission boundary: if gambling is blocked for
+everyone, *"gambling is blocked"* is the true and useful explanation, whereas
+*"this agent is out of scope"* would imply that widening the scope would help —
+and it would not. Scope then precedes the money rules because "may not transact
+this at all" outranks "how much of it".
+
+### `catalog_scope` — a global rule reading a per-agent fact
+
+The rule carries **no categories of its own**. It is one merchant-wide statement
+— *agents are held to their assigned catalog* — and the scope it compares
+against lives on `agents.catalog_scope`. That is exactly the shape of
+`trust_floor`, which states a threshold while the score lives on the agent.
+
+Putting the categories on the rule instead would mean one rule per agent, which
+is per-rule targeting under another name. §17 records that being built and
+removed once already.
+
+Three states, kept apart deliberately: `undefined` means the caller had no scope
+to give, so the rule is **skipped** (the `draft_policy` backtest replays actions
+whose scope at the time is unrecoverable); `null` means explicitly unscoped;
+an array means exactly those, and an **empty array means none**. Collapsing
+`undefined` into `null` would make a backtest quietly assert every historical
+action was in scope. A missing agent row maps to `undefined`, so *"we could not
+find this agent"* never becomes *"this agent may buy anything"*.
+
+A scope block **consumes velocity budget and costs trust**, both because
+`category_block` is the exact analogue and does both. Making it free would hand
+an agent an unmetered enumeration oracle — name SKUs until one sticks — and
+would create the only block type in the system that costs nothing, which is the
+shape of three separate bugs in §17. Asserted on the counts themselves in
+`verify-policy`, not left to inference.
 
 ### Rules can be scoped to action types
 
@@ -596,7 +628,14 @@ change is still reviewed rather than applied silently.
 Blocks are excluded from the sample — a cap or category refusal stays refused at
 any step-up threshold, so counting them would overstate what the slider can do.
 
-### Headroom (`src/lib/actions/sellable.ts`)
+### Headroom (`src/lib/actions/sellable.ts`) — per agent
+
+Takes an agent and judges the whole active catalog against **that agent's**
+trust, rate budget and catalog scope. The catalog deliberately stays *unscoped*
+here, which is the opposite choice from `/catalog`: the merchant wants to see
+that a product is refused **and why**, not to have it quietly disappear. An
+out-of-scope item renders as a block naming the scope, which is what makes two
+agents' views differ visibly rather than merely differ in length.
 
 The catalog answered by the policy engine rather than listed: which products the
 agent can sell unaided right now, which need approval, which are refused. It
@@ -970,7 +1009,8 @@ supabase/migrations/     0001 schema+RLS · 0002 products · 0004-0008 rule-type
                          0009 campaigns · 0010 merchants (tenancy) ·
                          0011 offer-id index · 0012 agent control ·
                          0013 replay nonces · 0014 managed agents ·
-                         0015 products.active
+                         0015 products.active · 0016 agents.catalog_scope ·
+                         0017 catalog_scope rule type
 src/lib/actions/products.ts
                          catalog CRUD + derived units/revenue + health checks
 src/components/dashboard/CatalogPanel.tsx
@@ -1032,15 +1072,44 @@ Stated here rather than discovered by a reviewer.
   does not free quota — verified. `payment_link.create` fails with HTTP 429 for
   the life of this key, which takes out campaigns and the payment-link leg of
   `verify-e2e`. `order.create` is unaffected. A fresh test account restores it.
-- **"What this agent can sell" is not per-agent.** `getSellableCatalog()` takes
-  no agent argument: it probes every product as the merchant's own simulation
-  identity, so opening it for a high-trust and a low-trust agent shows the same
-  answer. Two things would have to change for the headroom story to hold. The
-  view would need to accept an agent id — and the only rule whose outcome varies
-  by agent is `trust_floor`, currently set to 35 while every live agent scores
-  50–80, so even per-agent probing would render identically today. The headroom
-  mechanism is real (the probes run through the real engine); the *per-agent*
-  claim is not yet true, and should not be made on camera.
+- **Headroom used to be identical for every agent, and the claim was false.**
+  `getSellableCatalog()` took no agent and probed as the merchant's own identity,
+  so opening it for a high-trust and a low-trust agent showed the same answer.
+  Fixed: it takes an agent, and `verify-catalog` asserts the claim directly
+  rather than describing it — 4 of 6 products differ between a scoped and an
+  unscoped agent, with a control confirming both still see every product so the
+  difference is in the verdicts and not in things vanishing. What varies is
+  `catalog_scope`; `trust_floor` still would not vary it on its own, since it is
+  set to 35 while every live agent scores 50–80.
+- **The per-agent probe cannot go over the wire, and that is the point.**
+  Signing as an agent needs that agent's private key, and a third party's key is
+  never generated, stored or reachable here. So headroom calls `evaluatePolicy`
+  in process — same pure engine, same rules, same aggregates, same per-agent
+  trust and scope, exactly the precedent `counterOffer.ts` sets. The mandate gate
+  is the only thing the wire path adds and it runs only when an action names a
+  customer; these probes name none. If this ever *could* sign on another agent's
+  behalf, the isolation `buyer/` demonstrates would be a claim rather than a
+  fact.
+- **A scope block consumes velocity budget and costs trust — decided, not
+  defaulted.** `category_block` is the exact analogue and does both. Making
+  scope free would hand an agent an unmetered enumeration oracle (name SKUs
+  until one sticks) and create the only block type in the system that costs
+  nothing. The "boundary it cannot see" objection does not survive Phase 3: a
+  scoped agent's `/catalog` shows exactly what it may buy. Asserted on the trace
+  count and the trust score themselves.
+- **`catalog_scope` sits second, above the money rules.** A merchant-wide
+  prohibition is a stronger and more general fact than one agent's boundary — if
+  gambling is blocked for everyone, saying "this agent is out of scope" would
+  imply widening the scope would help, and it would not.
+- **`null` and `[]` on `catalog_scope` are opposites that look identical.** Full
+  catalog versus nothing at all, both rendering as "no categories listed". Every
+  surface that shows a scope states which one is in force in words; anything
+  added later has to do the same.
+- **`ed.verifyAsync` throws on malformed input** rather than returning false — a
+  signature that is not 64 bytes raises. Unwrapped, that turned a bad signature
+  into a 500 from an endpoint whose whole job is refusing them cleanly. Now
+  wrapped in `verify.ts`, so every reachable failure returns a reason. Found by
+  adding a third caller; it had been latent on `/mcp` and `/agent-control`.
 - **A stale `SIM_AGENT_ID` used to be invisible.** The env pin names one agent
   id, which belongs to one merchant, and the lookup filters on `merchant_id`. On
   any other tenant it missed — and the old fallback registered a brand new agent
