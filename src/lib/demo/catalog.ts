@@ -11,6 +11,32 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * which point retrieval (embeddings + a vector index) is the correct next
  * step, not a "nice to have." See HANDOVER.md for the fuller reasoning.
  */
+/**
+ * The categories a product may carry.
+ *
+ * A closed vocabulary, and not for tidiness. `category_block` rules match the
+ * category string EXACTLY -- a product typed as "electronic" instead of
+ * "electronics" would silently walk straight past a rule blocking
+ * "electronics", and nothing would report an error because both are valid
+ * strings. The same exactness is what lets the model reason about complements
+ * by category. Free text here would make both of those quietly unreliable.
+ *
+ * `gambling` and `crypto` are in the list deliberately: the seeded policy
+ * blocks them, and a merchant needs to be able to create a product in a
+ * blocked category to see the block actually fire.
+ */
+export const PRODUCT_CATEGORIES = [
+  "electronics",
+  "office",
+  "fitness",
+  "furniture",
+  "apparel",
+  "gambling",
+  "crypto",
+] as const;
+
+export type ProductCategory = (typeof PRODUCT_CATEGORIES)[number];
+
 export interface CatalogItem {
   sku: string;
   name: string;
@@ -83,11 +109,22 @@ export async function applySeedProducts(
   return { created };
 }
 
+/**
+ * The LIVE catalog: what an agent can actually buy right now.
+ *
+ * Active-only, and this is the single place that decides it. Three of the four
+ * readers -- the headroom probe, counter-offer candidates and campaign planning
+ * -- go through here, so a retired product leaves all three at once. The fourth,
+ * the public /catalog route, runs its own query and filters the same way; that
+ * duplication is called out in both files because two places deciding what "for
+ * sale" means is exactly how a deactivated SKU stays offerable.
+ */
 export async function fetchCatalog(db: SupabaseClient, merchantId: string): Promise<CatalogItem[]> {
   const { data, error } = await db
     .from("products")
     .select("sku, name, description, price_paise, category")
     .eq("merchant_id", merchantId)
+    .eq("active", true)
     .order("name");
   if (error) throw error;
   return (data ?? []).map((p) => ({

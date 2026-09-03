@@ -204,13 +204,46 @@ Ten tables, all scoped by `merchant_id`, all with RLS enabled.
 | `merchants` | the tenant. `slug` is its public identity, `clerk_user_id` its owner |
 | `agents` | name, description, Ed25519 public key, trust score and components, and `managed` |
 | `customers` | who an action is on behalf of |
-| `products` | the catalog an agent reads and reasons over |
+| `products` | the catalog an agent reads and reasons over. Merchant-managed, `active` retires without deleting |
 | `policy_rules` | type, params, status (`active` / `pending_review` / `rejected` / `superseded`), source, rationale |
 | `traces` | **the audit trail.** Every decision, ever |
 | `escalations` | an escalated trace waiting for, or carrying, a human answer |
 | `alerts` | what surfaced in the bell and the toasts |
 | `mandates` | an agent's standing authorization for a customer |
 | `campaigns` / `campaign_targets` | a campaign and every offer it made |
+
+### `products.active` — retire, do not delete
+
+Traces record a SKU in `params.notes.sku` and **nothing enforces that as a
+foreign key**. So deleting a product that has sold would not fail — it would
+quietly leave traces pointing at a name that no longer resolves. `active`
+retires a product instead: it leaves the public `/catalog`, counter-offer
+candidates and campaign planning, while the row stays put so history still
+reads correctly. Hard delete is offered only when no trace references the SKU,
+and the Delete button only renders in that case, because a button that usually
+errors is worse than no button.
+
+"Appears in the audit trail" is deliberately wider than "has sold" — a product
+that only ever escalated or was blocked still has history worth keeping. On the
+live tenant the Premium Standing Desk has zero units sold and is still
+undeletable for exactly that reason.
+
+`fetchCatalog()` is the single place that decides what "for sale" means, so a
+retired product leaves three of the four readers at once. The fourth, the
+public `/catalog` route, runs its own query and filters the same way — that
+duplication is the real risk in this design and is called out in both files,
+with `verify-catalog` asserting the route specifically (with a cache-buster,
+since it sets `max-age=60` and a naive test would assert the cache).
+
+### Categories are a closed vocabulary
+
+`PRODUCT_CATEGORIES` in `src/lib/demo/catalog.ts`. Not tidiness:
+`category_block` rules match the category string **exactly**, so a product
+typed `electronic` would walk straight past a rule blocking `electronics` and
+nothing would report an error, because both are valid strings. `gambling` and
+`crypto` are in the list on purpose — the seeded policy blocks them, and a
+merchant needs to be able to create a product in a blocked category to watch
+the block fire.
 
 ### `agents.managed` — merchant scaffolding vs. a real third party
 
@@ -223,7 +256,11 @@ that writes it.
 The distinction matters in three places. The Agents page lists third parties as
 the primary roster and puts the managed row under its own heading, because a
 traffic generator sitting among them overstates how many parties are actually
-integrated. `scripts/mint-sim-identity.ts` will only ever re-key a `managed`
+integrated. `src/lib/actions/products.ts
+                         catalog CRUD + derived units/revenue + health checks
+src/components/dashboard/CatalogPanel.tsx
+                         the Catalog tab
+scripts/mint-sim-identity.ts` will only ever re-key a `managed`
 row — re-keying an agent whose private half we have never held would lock a real
 third party out of its own identity. And the simulation's identity resolution
 refuses to touch anything else.
@@ -622,6 +659,17 @@ blended), the threshold tuner, and Horizon (a regulatory notice → drafted rule
 
 **Mandates** — pause, resume, revoke. Enforced live, not cosmetic.
 
+**Catalog** — what the merchant sells, and two columns a shop admin could not
+show. Units sold and revenue are derived from the audit trail rather than a
+stored counter, same rule every other panel follows. And each active row
+carries the policy engine's current verdict on it, reusing the headroom probe
+rather than asking a second way — two implementations of "would this clear" is
+how they drift, and a catalog disagreeing with the Buy tab about the same
+product is worse than one that says nothing. Catalog health is deterministic,
+no model, in the same spirit as the policy health checker: an agent has the
+JSON and nothing else, so a missing description is not untidy, it is a product
+the agent cannot reason about and will pass over.
+
 ### The simulation is not a script
 
 An earlier version was an eleven-step scripted demo. It showed the beats
@@ -637,7 +685,8 @@ shifts with it.
 
 1. **Supabase** — create a project. Put the URL, publishable key and
    service-role key in `.env.local` (copy `.env.example`). Run every file in
-   `supabase/migrations/` in numeric order through the SQL Editor. They are
+   `supabase/migrations/` in numeric order through the SQL Editor (through
+   `0015_product_active.sql`). They are
    additive and safe to re-run. **`0010` is required** — nothing works without
    it. *Free-tier projects auto-pause after 7 days idle.*
 2. **Razorpay** — test-mode keys into `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET`.
@@ -759,6 +808,19 @@ collapses — so the history that comes out is a record of a system being
 rate-limited rather than one behaving normally.
 
 ---
+
+### `verify-catalog` — 10 checks
+
+Retiring a product has to reach every reader, and the one most likely to keep
+silently working off a stale read is counter-offer candidacy. So that check is
+written to fail loudly if it ever stops proving anything: it asserts the SKU
+**is** offerable *before* retiring it, which makes "not offered after" a change
+rather than a vacuous truth about an empty candidate list.
+
+Also asserts that `/catalog` still withholds policy thresholds after the
+change — the filter touched that route, and a catalog that started leaking
+`threshold_amount` would hand an adversary the map the rate limiter exists to
+deny them.
 
 ## 15. The buyer — a real third party
 
@@ -907,7 +969,12 @@ supabase/migrations/     0001 schema+RLS · 0002 products · 0004-0008 rule-type
                          changes and the removal of policy domains ·
                          0009 campaigns · 0010 merchants (tenancy) ·
                          0011 offer-id index · 0012 agent control ·
-                         0013 replay nonces · 0014 managed agents
+                         0013 replay nonces · 0014 managed agents ·
+                         0015 products.active
+src/lib/actions/products.ts
+                         catalog CRUD + derived units/revenue + health checks
+src/components/dashboard/CatalogPanel.tsx
+                         the Catalog tab
 scripts/mint-sim-identity.ts
                          provisions ONE merchant's simulation keypair. The only
                          place a public key is rewritten, run by a person

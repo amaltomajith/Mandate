@@ -33,10 +33,15 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string }
     return NextResponse.json({ error: "unknown_merchant", slug }, { status: 404 });
   }
 
+  // Active only. This mirrors fetchCatalog() rather than calling it, because
+  // this route serves a different shape -- but the FILTER has to stay identical
+  // or a product the merchant retired keeps being advertised to buyers. If one
+  // of these two changes, change the other.
   const { data: products, error } = await db
     .from("products")
     .select("sku, name, description, price_paise, category")
     .eq("merchant_id", merchant.id)
+    .eq("active", true)
     .order("price_paise", { ascending: true });
 
   if (error) {

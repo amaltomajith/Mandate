@@ -15,6 +15,7 @@ import { SellableCatalog } from "./SellableCatalog";
 import { StorefrontCard } from "./StorefrontCard";
 import { BuyingActivity } from "./BuyingActivity";
 import { CampaignsPanel } from "./CampaignsPanel";
+import { CatalogPanel } from "./CatalogPanel";
 import { AgentsPanel } from "./AgentsPanel";
 import { RevenueImpactPanel } from "./RevenueImpactPanel";
 import { TransactionsView } from "./TransactionsView";
@@ -22,11 +23,12 @@ import { MandatesPanel } from "./MandatesPanel";
 import { GraphCanvas } from "@/components/graph/GraphCanvas";
 import { GraphLegend } from "@/components/graph/GraphLegend";
 
-type Tab = "overview" | "buy" | "campaigns" | "agents" | "transactions" | "policies" | "mandates";
+type Tab = "overview" | "buy" | "catalog" | "campaigns" | "agents" | "transactions" | "policies" | "mandates";
 
 const TABS: { key: Tab; label: string; badge?: (props: Props) => number }[] = [
   { key: "overview", label: "Overview" },
   { key: "buy", label: "Buy" },
+  { key: "catalog", label: "Catalog" },
   { key: "campaigns", label: "Campaigns" },
   { key: "agents", label: "Agents", badge: (p) => p.agents.filter((a) => a.status === "paused").length },
   { key: "transactions", label: "Transactions", badge: (p) => p.traces.length },
@@ -155,6 +157,8 @@ export function DashboardTabs(props: Props) {
           />
         </div>
       )}
+
+      {tab === "catalog" && <CatalogPanel />}
 
       {tab === "campaigns" && <CampaignsPanel />}
 

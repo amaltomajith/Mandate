@@ -325,6 +325,9 @@ export interface Database {
           description: string;
           price_paise: number;
           category: string;
+          /** False retires it: gone from /catalog, counter-offers and campaign
+           *  planning, while past traces still resolve to its name. */
+          active: boolean;
           created_at: string;
         };
         Insert: {
@@ -335,6 +338,7 @@ export interface Database {
           description: string;
           price_paise: number;
           category: string;
+          active?: boolean;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["products"]["Insert"]>;
