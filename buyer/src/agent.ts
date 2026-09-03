@@ -52,6 +52,9 @@ export class BuyerAgent {
     const tools = await this.mcp.listTools();
 
     rule();
+    // Named first, because three buyers sharing one terminal are unreadable
+    // otherwise -- every line below is identical in shape between profiles.
+    if (config.profile) say(`I am the "${config.profile}" buyer.`);
     say(`Found a merchant: ${this.storefront.merchantName}`);
     indent(`${this.storefront.items.length} products, prices in ${this.storefront.currency}`);
     indent(`tools offered: ${tools.map((t) => t.name).join(", ") || "(none listed)"}`);
@@ -89,13 +92,38 @@ export class BuyerAgent {
       return this.reportRejection(err);
     }
 
-    if (preview.decision !== "allow") {
-      say(`Checked first — they would ${preview.decision} it, so I am not committing.`);
+    /**
+     * An escalation is not a refusal, and treating it as one was a real bug.
+     *
+     * This used to back off from anything that was not `allow`, which meant no
+     * buyer could ever produce a pending escalation -- the merchant's whole
+     * gated path was undemonstrable from the outside. Worse, it modelled the
+     * exact behaviour this system exists to argue against: an agent that walks
+     * away from a legitimate large purchase because a human would have to look
+     * at it is how over-blocking destroys revenue.
+     *
+     * So `block` and `protocol_reject` still stop it -- committing there is
+     * pointless, the answer will not change. `escalate` proceeds: the merchant
+     * has said a person will decide, and a buyer that wants the item submits it
+     * and waits. A profile can opt out (`BUYER_AVOIDS_ESCALATION=true`), which
+     * is a persona choice -- someone stretching a small budget genuinely would
+     * not wait on sign-off -- not a default.
+     */
+    if (preview.decision === "escalate" && !config.avoidsEscalation) {
+      say("They will want a human to approve this. That is fine — I am submitting it anyway.");
+      indent(preview.reasoning);
+    } else if (preview.decision !== "allow") {
+      const why =
+        preview.decision === "escalate"
+          ? "they would send it for approval, and I would rather not wait"
+          : `they would ${preview.decision} it`;
+      say(`Checked first — ${why}, so I am not committing.`);
       indent(preview.reasoning);
       this.bought.push(choice.item.sku); // don't ask again for the same thing
       return true;
+    } else {
+      indent("checked first: this would clear");
     }
-    indent("checked first: this would clear");
 
     // ---- commit, and answer whatever comes back
     let outcome: ActionOutcome;

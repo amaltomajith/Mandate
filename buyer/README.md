@@ -58,7 +58,7 @@ BUYER_PRIVATE_KEY=<from keygen — never leaves this machine>
 GROQ_API_KEY=<judgement runs on a hosted model>
 ```
 
-Optional: `BUYER_PERSONA`, `BUYER_BUDGET_PAISE`, `BUYER_GAP_MS`.
+Optional: `BUYER_PERSONA`, `BUYER_BUDGET_PAISE`, `BUYER_GAP_MS`, `BUYER_MAX_ACTIONS`.
 
 ## Running
 
@@ -66,6 +66,72 @@ Optional: `BUYER_PERSONA`, `BUYER_BUDGET_PAISE`, `BUYER_GAP_MS`.
 npm --prefix buyer start        # browse until the budget runs out
 npm --prefix buyer run once     # a single purchase
 ```
+
+## Running several buyers at once
+
+One process is one agent. Several processes are several agents, and that is
+worth doing: trust is only visibly *earned* when different agents behave
+differently against the same catalog, and the merchant's "what can this agent
+sell" view only proves anything if two agents see it differently.
+
+Each buyer gets a **profile** — its own keypair, agent id, persona, budget and
+pace, in `buyer/profiles/<name>.env`. Nothing is shared between them but the
+merchant URL.
+
+```bash
+npm --prefix buyer start -- --profile ergonomic
+```
+
+Three examples ship as `.env.example` files, chosen to diverge rather than to
+be three copies:
+
+| profile | budget | behaviour | what it demonstrates |
+| --- | --- | --- | --- |
+| `ergonomic` | ₹15,000 | deliberate, takes sensible complements | clean allows; the high-trust end |
+| `budget` | ₹6,000 | never spends over ₹2,000, declines most offers | a counter-offer being *refused* is data too |
+| `bulk` | ₹60,000 | routine ₹8,000–15,000 orders | crosses the step-up line, so the escalation queue fills on its own |
+
+`bulk` is doing real work, not making up numbers: its orders land above the
+merchant's step-up threshold because of what it buys, so the escalations that
+appear are the policy engine reacting, not a script staging them.
+
+### Setting one up
+
+```bash
+# 1. mint an identity and print both halves, labelled
+npm --prefix buyer run keygen -- --profile ergonomic
+
+# 2. register the PUBLIC half in the dashboard:
+#    Agents -> Register an agent -> paste the public key.
+#    The merchant hands back an agent id. There is no API key and no
+#    self-registration -- the merchant decides who may act.
+
+# 3. save buyer/profiles/ergonomic.env with the private half and that id
+#    (start from buyer/profiles/ergonomic.env.example)
+
+# 4. run it
+npm --prefix buyer start -- --profile ergonomic
+```
+
+Repeat for `budget` and `bulk`, in three terminals. Each announces which
+profile it is on startup, because three buyers sharing one terminal are
+otherwise unreadable.
+
+`buyer/profiles/*.env` is gitignored; the `.env.example` files are not. The
+root `.gitignore`'s `.env*` rule does **not** cover these — it matches names
+*beginning* with `.env`, and these end with it — so there is an explicit rule.
+Worth knowing before adding a fourth profile.
+
+### Overrides that stay local
+
+```bash
+npm --prefix buyer start -- --profile bulk --pace=5000 --max-actions=3
+```
+
+`--pace` is a local override of the gap between actions. `--max-actions` is a
+hard ceiling that nothing remote can raise — the merchant's pace and pause are
+cooperative and this agent honours them, but a loop spending real money must
+not need a reachable server in order to stop.
 
 ## What it actually does
 

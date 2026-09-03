@@ -53,6 +53,11 @@ export function AgentsPanel({ agents, rules, mandates }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  // `managed` is the merchant's own traffic generator; everything else was
+  // registered by a third party who holds their own key.
+  const managed = agents.filter((a) => a.managed);
+  const thirdParty = agents.filter((a) => !a.managed);
+
   const trustFloor = (() => {
     const rule = rules.find((r) => r.type === "trust_floor" && r.status === "active");
     const params = rule?.params as { min_score?: number } | null;
@@ -105,11 +110,15 @@ export function AgentsPanel({ agents, rules, mandates }: Props) {
             </p>
           )}
 
-          {agents.length === 0 ? (
-            <EmptyState text="No agents registered yet. Register one below." />
+          {/* Third-party agents first, and alone in the primary list. Mandate's
+              own traffic generator used to sit among them looking like a fourth
+              customer of the platform, which quietly overstates how many
+              parties are actually integrated. */}
+          {thirdParty.length === 0 ? (
+            <EmptyState text="No third-party agents registered yet. Register one below." />
           ) : (
             <div className="space-y-3">
-              {agents.map((agent) => (
+              {thirdParty.map((agent) => (
                 <AgentRow
                   key={agent.id}
                   agent={agent}
@@ -122,9 +131,39 @@ export function AgentsPanel({ agents, rules, mandates }: Props) {
               ))}
             </div>
           )}
+
+          {managed.length > 0 && (
+            <div className="mt-5 border-t pt-4" style={{ borderColor: "var(--panel-border)" }}>
+              <p
+                className="text-[9.5px] font-semibold uppercase tracking-wider"
+                style={{ color: "var(--muted-2)" }}
+              >
+                Mandate&rsquo;s own traffic generator
+              </p>
+              <p className="mt-1 mb-3 text-[10.5px] leading-relaxed" style={{ color: "var(--muted-2)" }}>
+                Not a third party. This is the merchant-side simulation, signing with a key this
+                deployment holds. It produces the ordinary, high-value, banned-category and forged
+                requests — a real buyer never forges its own signature, so this is where the
+                protocol-reject evidence comes from.
+              </p>
+              <div className="space-y-3">
+                {managed.map((agent) => (
+                  <AgentRow
+                    key={agent.id}
+                    agent={agent}
+                    trustFloor={trustFloor}
+                    activity={activity.find((a) => a.agentId === agent.id)}
+                    mandates={mandates.filter((m) => m.agent_id === agent.id)}
+                    busy={isPending}
+                    onRun={run}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </Panel>
 
-        <RegisterAgent busy={isPending} onRun={run} />
+        <RegisterAgent onError={setError} onRegistered={refresh} />
       </div>
 
       {/* Full width, not a sidebar rail. This is the most distinctive artifact
@@ -200,9 +239,18 @@ function AgentRow({
           {paused ? "asked to pause" : "asked to work"}
         </span>
         <span>pace {agent.pace_ms === 0 ? "unlimited" : `${Math.round(agent.pace_ms / 1000)}s`}</span>
+        {/* "never deployed" rather than "last seen never". A registered agent
+            that has not run has no history, and saying so plainly is the honest
+            display -- the old wording read like a fault in the dashboard. */}
         <span style={{ color: stale ? "var(--decision-escalate)" : undefined }}>
-          {stale && !paused ? "not acting · " : ""}
-          last seen {activity?.lastSeen ? relativeTime(activity.lastSeen) : "never"}
+          {activity?.lastSeen ? (
+            <>
+              {stale && !paused ? "not acting · " : ""}
+              last seen {relativeTime(activity.lastSeen)}
+            </>
+          ) : (
+            "never deployed"
+          )}
         </span>
         {restricted && <span style={{ color: "var(--decision-block)" }}>below the trust floor</span>}
       </div>
@@ -232,11 +280,18 @@ function AgentRow({
                 key={p.label}
                 onClick={() => onRun(() => setAgentPace(agent.id, p.ms))}
                 disabled={busy}
-                className="rounded-full px-2 py-1 text-[10px] transition-colors hover:brightness-125 disabled:opacity-50"
-                style={{
-                  background: agent.pace_ms === p.ms ? "var(--entity-agent)" : "transparent",
-                  color: agent.pace_ms === p.ms ? "#fff" : "var(--muted-2)",
-                }}
+                className="rounded-full border px-2 py-1 text-[10px] font-medium transition-colors hover:brightness-125 disabled:opacity-50"
+                /* Inactive pills used to be --muted-2 text on transparent over
+                   --panel-2, which is barely above the background: the labels
+                   were there, just invisible, so the row read as one selected
+                   pill and three blanks. They now carry the same border and
+                   readable foreground as any other control, and selection is
+                   shown by the fill rather than by being the only legible one. */
+                style={
+                  agent.pace_ms === p.ms
+                    ? { background: "var(--entity-agent)", borderColor: "var(--entity-agent)", color: "#08080c" }
+                    : { background: "transparent", borderColor: "var(--panel-border-strong)", color: "var(--muted)" }
+                }
               >
                 {p.label}
               </button>
@@ -323,7 +378,14 @@ function AgentRow({
           </p>
           {!activity?.recent.length ? (
             <p className="mt-1 text-[10.5px]" style={{ color: "var(--muted-2)" }}>
-              Nothing yet.
+              {/* Three states, said out loud. "Nothing yet" used to cover both
+                  "never called" and "called, but never moved money", which are
+                  different facts about whether an integration is working. */}
+              {activity && activity.totalRequests > 0
+                ? `Connected, but no money actions yet — ${activity.totalRequests} request${
+                    activity.totalRequests === 1 ? "" : "s"
+                  }, all headroom checks.`
+                : "Never called. Registered, but this agent has not run."}
             </p>
           ) : (
             <div className="mt-1 space-y-1">
@@ -355,12 +417,33 @@ function AgentRow({
   );
 }
 
-function RegisterAgent({ busy, onRun }: { busy: boolean; onRun: (fn: () => Promise<unknown>) => void }) {
+/**
+ * Owns its own submit state rather than reading the panel's shared `isPending`.
+ *
+ * Two problems with sharing it. The transition covered `registerAgent`, which
+ * ends in `revalidatePath("/dashboard")` -- so the pending flag stayed true
+ * through a full re-render of a force-dynamic page that queries ten tables, and
+ * the button sat spinning long after the agent had been created. And because
+ * the flag was shared, nudging a pace pill anywhere in the roster spun the
+ * Register button too, which is a claim about the wrong thing entirely.
+ *
+ * Local state clears the moment the call returns, which is when registration is
+ * actually finished. Refreshing the roster afterwards is a separate concern and
+ * is allowed to take as long as it takes.
+ */
+function RegisterAgent({
+  onError,
+  onRegistered,
+}: {
+  onError: (message: string | null) => void;
+  onRegistered: () => void;
+}) {
   const [name, setName] = useState("");
   const [persona, setPersona] = useState("");
   const [publicKey, setPublicKey] = useState("");
   const [endpointUrl, setEndpointUrl] = useState("");
   const [registered, setRegistered] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   return (
     <Panel title="Register an agent" icon={<Icons.Sparkles />} accent="var(--decision-allow)">
@@ -402,22 +485,29 @@ function RegisterAgent({ busy, onRun }: { busy: boolean; onRun: (fn: () => Promi
       </div>
 
       <PrimaryButton
-        onClick={() =>
-          onRun(async () => {
+        onClick={async () => {
+          onError(null);
+          setSubmitting(true);
+          try {
             const agent = await registerAgent({ name, persona, publicKey, endpointUrl });
             setRegistered(agent.id);
             setName("");
             setPersona("");
             setPublicKey("");
             setEndpointUrl("");
-          })
-        }
-        disabled={busy || !name.trim() || !publicKey.trim()}
+            onRegistered();
+          } catch (err) {
+            onError(err instanceof Error ? err.message : "That didn't work.");
+          } finally {
+            setSubmitting(false);
+          }
+        }}
+        disabled={submitting || !name.trim() || !publicKey.trim()}
         className="mt-3 w-full"
       >
         <span className="flex items-center justify-center gap-1.5">
-          {busy && <Spinner />}
-          Register
+          {submitting && <Spinner />}
+          {submitting ? "Registering…" : "Register"}
         </span>
       </PrimaryButton>
 

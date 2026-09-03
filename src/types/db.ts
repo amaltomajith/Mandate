@@ -69,6 +69,12 @@ export interface Database {
         Row: {
           merchant_id: string;
           status: AgentStatus;
+          /** True only for identities Mandate mints and signs as itself (the
+           *  built-in traffic simulation). Its public key is rotated on each
+           *  process start, which is safe because the merchant owns it. Always
+           *  false for an agent registered through the dashboard: that key
+           *  belongs to a third party and rotating it would lock them out. */
+          managed: boolean;
           /** How long the merchant asks this agent to wait between actions. A
            *  request the agent honours, not a limit the engine enforces —
            *  velocity rules are the limit. */
@@ -90,6 +96,7 @@ export interface Database {
         };
         Insert: {
           merchant_id: string;
+          managed?: boolean;
           status?: AgentStatus;
           pace_ms?: number;
           persona?: string | null;

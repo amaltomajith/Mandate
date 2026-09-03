@@ -184,6 +184,10 @@ export interface AgentActivity {
    * ordinary gap between two actions.
    */
   stale: boolean;
+  /** Every request this agent has ever made, in any mode. `recent` below only
+   *  lists money actions, so without this an agent that has done nothing but
+   *  headroom probes is indistinguishable from one that has never called. */
+  totalRequests: number;
   recent: {
     traceId: string;
     at: string;
@@ -204,6 +208,25 @@ export interface AgentActivity {
  * fails after the action happened — and "last seen" drifting means an agent
  * looks alive when it is not, which is the wrong direction for a field a
  * merchant uses to decide whether something is stuck.
+ *
+ * Two things about HOW it is derived, both of which were wrong:
+ *
+ * It is a per-agent query, not a slice of the merchant's newest traces. The old
+ * version pulled the latest 200 enforce traces for the whole merchant and then
+ * filtered in memory, so a quiet agent whose last action fell outside that
+ * window reported "never seen" — the same window bug that once made resolved
+ * escalations look pending, in a second place.
+ *
+ * And it counts requests in ANY mode. "Last seen" means the last time this
+ * agent called, and a simulate-mode headroom probe is a signed, verified
+ * request that this agent made. Filtering to enforce meant an agent with
+ * eighteen real requests and no purchases read as never seen at all, while the
+ * entity graph — which applies no mode filter — happily drew it. Two surfaces
+ * disagreeing about whether an agent exists.
+ *
+ * `recent` stays enforce-only on purpose. Those are money actions, and listing
+ * a headroom probe beside a real order under one heading would be its own kind
+ * of lie. Seen-at and acted-on are separate facts, so they are separate fields.
  */
 export async function agentActivity(): Promise<AgentActivity[]> {
   const { merchant, db } = await merchantScope();
@@ -211,34 +234,52 @@ export async function agentActivity(): Promise<AgentActivity[]> {
   const { data: agents } = await db.from("agents").select("id, pace_ms").eq("merchant_id", merchant.id);
   if (!agents?.length) return [];
 
-  const { data: traces } = await db
-    .from("traces")
-    .select("id, agent_id, created_at, decision, reasoning, params")
-    .eq("merchant_id", merchant.id)
-    .eq("mode", "enforce")
-    .not("agent_id", "is", null)
-    .order("created_at", { ascending: false })
-    .limit(200);
+  return Promise.all(
+    agents.map(async (agent) => {
+      const [lastAny, moneyActions, total] = await Promise.all([
+        db
+          .from("traces")
+          .select("created_at")
+          .eq("merchant_id", merchant.id)
+          .eq("agent_id", agent.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        db
+          .from("traces")
+          .select("id, created_at, decision, reasoning, params")
+          .eq("merchant_id", merchant.id)
+          .eq("agent_id", agent.id)
+          .eq("mode", "enforce")
+          .order("created_at", { ascending: false })
+          .limit(5),
+        db
+          .from("traces")
+          .select("*", { count: "exact", head: true })
+          .eq("merchant_id", merchant.id)
+          .eq("agent_id", agent.id),
+      ]);
 
-  return agents.map((agent) => {
-    const mine = (traces ?? []).filter((t) => t.agent_id === agent.id);
-    const lastSeen = mine[0]?.created_at ?? null;
-    const staleAfterMs = Math.max(5 * 60_000, (agent.pace_ms || 30_000) * 6);
-    return {
-      agentId: agent.id,
-      lastSeen,
-      stale: !!lastSeen && Date.now() - new Date(lastSeen).getTime() > staleAfterMs,
-      recent: mine.slice(0, 5).map((t) => {
-        const p = t.params as { amount?: number; notes?: { agent_reason?: string } } | null;
-        return {
-          traceId: t.id,
-          at: t.created_at,
-          decision: t.decision,
-          reasoning: t.reasoning,
-          amountPaise: typeof p?.amount === "number" ? p.amount : null,
-          agentReason: p?.notes?.agent_reason ?? null,
-        };
-      }),
-    };
-  });
+      const lastSeen = lastAny.data?.created_at ?? null;
+      const staleAfterMs = Math.max(5 * 60_000, (agent.pace_ms || 30_000) * 6);
+
+      return {
+        agentId: agent.id,
+        lastSeen,
+        stale: !!lastSeen && Date.now() - new Date(lastSeen).getTime() > staleAfterMs,
+        totalRequests: total.count ?? 0,
+        recent: (moneyActions.data ?? []).map((t) => {
+          const p = t.params as { amount?: number; notes?: { agent_reason?: string } } | null;
+          return {
+            traceId: t.id,
+            at: t.created_at,
+            decision: t.decision,
+            reasoning: t.reasoning,
+            amountPaise: typeof p?.amount === "number" ? p.amount : null,
+            agentReason: p?.notes?.agent_reason ?? null,
+          };
+        }),
+      };
+    })
+  );
 }

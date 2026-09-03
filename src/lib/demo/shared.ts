@@ -29,19 +29,51 @@ export interface AgentIdentity {
 }
 
 /**
- * Reuses the agent identity named by `envIdVar`/`envSecretVar` if it's
- * configured (register one from the dashboard's Agent trust panel, which now
- * hands back the id and secret together) and still exists — so that identity's
- * trust score keeps accumulating instead of resetting.
+ * The ONE identity the built-in traffic simulation signs as, per merchant.
  *
- * Without those env vars there is nothing to reuse: Mandate never stores an
- * agent's secret key, so a previously-registered identity cannot be signed as
- * again. A fresh one is registered instead — but memoised per process, which
- * matters more than it looks. Continuous background traffic calls this once
- * per transaction; without the cache that is a brand-new agent row for every
- * single order, burying the real agents in the roster and resetting the trust
- * score to 50 forever. Cached, an unpinned bot gets one identity per server
- * run; pinned via env, one identity permanently.
+ * Note what this is not: it is not a way to act as an arbitrary agent. It
+ * resolves the merchant's own simulation identity and nothing else. A trace can
+ * only ever carry an agent id because that agent's key signed the request, and
+ * the only keys reachable from here are ones this process minted for
+ * merchant-owned scaffolding.
+ *
+ * Resolution order, and why:
+ *
+ *   1. The env pin (`SIM_AGENT_ID` / `SIM_AGENT_SECRET_KEY`) when it names a row
+ *      belonging to THIS merchant. Deployment-controlled, survives restarts.
+ *   2. No pin, but the merchant already has a managed identity: REFUSE. We hold
+ *      no key for it, and the only ways forward would be to rewrite that row's
+ *      public key or to register a second identity. The second is the bug this
+ *      replaced; the first is machinery that, pointed at the wrong row, locks an
+ *      agent out of its own identity. Provisioning is an operator action, so it
+ *      lives in scripts/mint-sim-identity.ts and the error says so.
+ *   3. No pin and no managed identity: bootstrap exactly one, marked managed.
+ *      The partial unique index makes a second impossible thereafter.
+ *
+ * Step 2 is the fix for a real bug. The env pin is a single agent id and it
+ * belongs to a single merchant, so on every OTHER tenant step 1 missed and the
+ * old code fell through to registering a brand new agent -- with a
+ * "(HH:MM:SS)" suffix to dodge the name clash -- once per server process,
+ * forever. Three "Checkout Agent" rows on one tenant, all of them the
+ * simulation, splitting its history and its velocity budget three ways. The
+ * suffix was the load-bearing mistake: it made the name collision survivable
+ * instead of fatal, so the duplication never surfaced as an error.
+ *
+ * WHERE THE PRIVATE KEY LIVES, precisely -- the old note here claimed "Mandate
+ * never stores an agent's secret key", which was true of the database and false
+ * of the process:
+ *
+ *   - No private key is ever written to any table. Only `public_key` is.
+ *   - The secret for the merchant's OWN managed identity is held in memory, in
+ *     `identityCache`, for the life of the process -- exactly as buyer/ holds
+ *     its own key in its own process. It is the merchant signing as itself.
+ *   - No third-party agent's private key is ever generated, stored, cached or
+ *     reachable from here. An agent registered through the dashboard supplies
+ *     only its public half, and there is no code path that could produce a
+ *     signature on its behalf.
+ *
+ * Memoised per process so continuous traffic resolves once rather than per
+ * transaction.
  */
 const identityCache = new Map<string, Promise<AgentIdentity>>();
 
@@ -77,19 +109,52 @@ async function resolveAgentIdentity(
     if (data) return { id: envId, secretKeyBase64: envSecret, reused: true };
   }
 
+  // Scoped to `managed` rows. An agent registered through the dashboard belongs
+  // to a third party, we have never held its key, and nothing here may touch it.
+  const { data: existing, error: lookupError } = await db
+    .from("agents")
+    .select("id, name")
+    .eq("merchant_id", merchantId)
+    .eq("managed", true)
+    .maybeSingle();
+  if (lookupError) throw new Error(lookupError.message);
+
+  if (existing) {
+    // Refusing is the whole point. Signing as this row would need its private
+    // key, which was never stored; the alternatives are to overwrite its public
+    // key or to register a second identity, and the second is exactly the bug
+    // that produced three "Checkout Agent" rows. An operator provisions this
+    // deliberately, once.
+    throw new Error(
+      `This merchant already has a simulation identity ("${existing.name}", ${existing.id}), but ` +
+        `${opts.envIdVar} / ${opts.envSecretVar} do not name it. Mandate never stores an agent's ` +
+        `private key, so it cannot sign as that identity without one, and it will not register a ` +
+        `second identity to work around that -- duplicate identities split trust and velocity and ` +
+        `are the bug this check exists to prevent. Provision a key with:
+
+` +
+        `  npx tsx scripts/mint-sim-identity.ts <merchant-slug>
+
+` +
+        `then set ${opts.envIdVar} and ${opts.envSecretVar} from its output.`
+    );
+  }
+
+  // First run for this merchant: bootstrap exactly one, and no timestamp suffix
+  // to fall back on. The partial unique index makes a second one impossible.
   const { secretKey, publicKey } = generateKeyPair();
-  // Only disambiguate when the plain name is already taken. The timestamp
-  // suffix used to be unconditional, which leaked demo scaffolding into what
-  // is meant to read as a merchant's real agent roster — "Background Traffic
-  // Bot (06:59:50)" is not a name anyone would give an agent.
-  const { data: clash } = await db.from("agents").select("id").eq("merchant_id", merchantId).eq("name", opts.name).maybeSingle();
-  const name = clash ? `${opts.name} (${new Date().toISOString().slice(11, 19)})` : opts.name;
   const { data, error } = await db
     .from("agents")
-    .insert({ merchant_id: merchantId, name, description: opts.description, public_key: publicKey })
+    .insert({
+      merchant_id: merchantId,
+      name: opts.name,
+      description: opts.description,
+      public_key: publicKey,
+      managed: true,
+    })
     .select()
     .single();
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 
   return { id: data.id, secretKeyBase64: secretKey, reused: false };
 }

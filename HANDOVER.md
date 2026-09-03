@@ -202,7 +202,7 @@ Ten tables, all scoped by `merchant_id`, all with RLS enabled.
 | Table | What it holds |
 |---|---|
 | `merchants` | the tenant. `slug` is its public identity, `clerk_user_id` its owner |
-| `agents` | name, description, Ed25519 public key, trust score and components |
+| `agents` | name, description, Ed25519 public key, trust score and components, and `managed` |
 | `customers` | who an action is on behalf of |
 | `products` | the catalog an agent reads and reasons over |
 | `policy_rules` | type, params, status (`active` / `pending_review` / `rejected` / `superseded`), source, rationale |
@@ -211,6 +211,22 @@ Ten tables, all scoped by `merchant_id`, all with RLS enabled.
 | `alerts` | what surfaced in the bell and the toasts |
 | `mandates` | an agent's standing authorization for a customer |
 | `campaigns` / `campaign_targets` | a campaign and every offer it made |
+
+### `agents.managed` — merchant scaffolding vs. a real third party
+
+`managed` is true for exactly one row per merchant: the identity Mandate's own
+traffic simulation signs as. It is false for every agent registered through the
+dashboard, and a partial unique index (`agents_one_managed_per_merchant`)
+enforces the "exactly one" part in the database rather than trusting the code
+that writes it.
+
+The distinction matters in three places. The Agents page lists third parties as
+the primary roster and puts the managed row under its own heading, because a
+traffic generator sitting among them overstates how many parties are actually
+integrated. `scripts/mint-sim-identity.ts` will only ever re-key a `managed`
+row — re-keying an agent whose private half we have never held would lock a real
+third party out of its own identity. And the simulation's identity resolution
+refuses to touch anything else.
 
 ### `traces` is the spine
 
@@ -841,13 +857,65 @@ the program could output.
 
 See `buyer/README.md` for keypair generation and registration.
 
+
+### Several buyers at once
+
+One process is one agent. `--profile <name>` reads `buyer/profiles/<name>.env`
+instead of `buyer/.env`, so three can run side by side, each with its own
+keypair, agent id, persona, budget and pace:
+
+```bash
+npm --prefix buyer run keygen -- --profile ergonomic   # mint, print both halves
+# register the PUBLIC half in the dashboard, save the private half in the profile
+npm --prefix buyer start -- --profile ergonomic
+```
+
+Three ship as `.env.example` files, chosen to diverge rather than to be copies:
+`ergonomic` (₹15,000, deliberate, takes sensible complements), `budget`
+(₹6,000, never over ₹2,000 an item, declines most offers) and `bulk` (₹60,000,
+routine ₹8,000–15,000 orders that cross the step-up line).
+
+Measured after ~40 actions each, trust does diverge: budget 80, bulk 76,
+ergonomic 74 — driven by escalations, which are weighted separately from clean
+allows. Every trace landed on its own agent id and none on the managed
+simulation row.
+
+`--pace` is a local override. `--max-actions` is a ceiling nothing remote can
+raise: the merchant's pace and pause are cooperative and this agent honours
+them, but a loop spending real money must not need a reachable server to stop.
+
+### An escalation is not a refusal
+
+The buyer used to back off from anything its pre-flight `simulate_action` did
+not return as `allow` — including `escalate`. That had two costs. The merchant's
+gated path became undemonstrable from outside: no external buyer could ever
+produce a pending escalation, so the queue only ever filled from the simulation.
+And it modelled precisely the behaviour this whole system argues against — an
+agent walking away from a legitimate large purchase because a human would have
+to look at it is how over-blocking destroys revenue.
+
+`block` and `protocol_reject` still stop it; committing there is pointless. On
+`escalate` it now submits and waits, because the merchant has said a person will
+decide. A profile can opt out with `BUYER_AVOIDS_ESCALATION=true` — that is a
+persona choice (the frugal buyer has no patience for sign-off), not a safety
+setting.
+
 ## 16. Where things live
 
 ```
 supabase/migrations/     0001 schema+RLS · 0002 products · 0004-0008 rule-type
                          changes and the removal of policy domains ·
-                         0009 campaigns · 0010 merchants (tenancy)
-src/proxy.ts             Clerk middleware; /api/m/(.*) is public
+                         0009 campaigns · 0010 merchants (tenancy) ·
+                         0011 offer-id index · 0012 agent control ·
+                         0013 replay nonces · 0014 managed agents
+scripts/mint-sim-identity.ts
+                         provisions ONE merchant's simulation keypair. The only
+                         place a public key is rewritten, run by a person
+buyer/profiles/          one .env per independent buyer; *.env is gitignored,
+                         *.env.example is not
+src/components/landing/  the public landing page: GradientWaves (ogl shader),
+                         SiteNav, CurvedLoop, DecisionFlow
+src/proxy.ts             Clerk middleware; / and /api/m/(.*) are public
 src/app/api/m/[slug]/    the public surface, one merchant per slug:
                            mcp/            verify → session → transport
                            catalog/        agent-readable storefront
@@ -893,6 +961,28 @@ Stated here rather than discovered by a reviewer.
   reads 0%. The reconciler is real; the demand is not there.
 - **The campaign orchestrator has no UI.** Planner, orchestrator and reconciler
   are working, tested libraries with no dashboard surface yet.
+- **The Razorpay test account has hit its 30 payment-link ceiling.** Cancelling
+  does not free quota — verified. `payment_link.create` fails with HTTP 429 for
+  the life of this key, which takes out campaigns and the payment-link leg of
+  `verify-e2e`. `order.create` is unaffected. A fresh test account restores it.
+- **"What this agent can sell" is not per-agent.** `getSellableCatalog()` takes
+  no agent argument: it probes every product as the merchant's own simulation
+  identity, so opening it for a high-trust and a low-trust agent shows the same
+  answer. Two things would have to change for the headroom story to hold. The
+  view would need to accept an agent id — and the only rule whose outcome varies
+  by agent is `trust_floor`, currently set to 35 while every live agent scores
+  50–80, so even per-agent probing would render identically today. The headroom
+  mechanism is real (the probes run through the real engine); the *per-agent*
+  claim is not yet true, and should not be made on camera.
+- **A stale `SIM_AGENT_ID` used to be invisible.** The env pin names one agent
+  id, which belongs to one merchant, and the lookup filters on `merchant_id`. On
+  any other tenant it missed — and the old fallback registered a brand new agent
+  with an `(HH:MM:SS)` suffix rather than failing, so one identity silently
+  became one per server process. Three "Checkout Agent" rows on one tenant were
+  three restarts. The suffix was the load-bearing mistake: it made a name
+  collision survivable instead of fatal, so the duplication never surfaced. The
+  fallback now refuses and names the provisioning script; the unique index makes
+  a second managed row impossible.
 - **The dashboard reads the most recent 300 actions.** The panels making money
   claims say so. These are not lifetime totals.
 - **Web Bot Auth keys do not rotate.** Registered once, no expiry.

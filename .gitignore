@@ -41,3 +41,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Buyer profiles hold agent private keys. The `.env*` rule above does not cover
+# these -- it matches names beginning with `.env`, and these end with it.
+buyer/profiles/*.env
+!buyer/profiles/*.env.example
