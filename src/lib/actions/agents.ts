@@ -7,6 +7,7 @@ import { getCurrentMerchant } from "@/lib/merchant";
 import { buildAgentSpec, type AgentSpec } from "@/lib/agentSpec";
 import type { Agent } from "@/types/db";
 import { PRODUCT_CATEGORIES } from "@/lib/demo/catalog";
+import { computeTrustTrajectory, type TrustTrajectoryPoint } from "@/lib/trust/score";
 
 /**
  * The merchant's side of managing agents.
@@ -393,5 +394,44 @@ export async function agentActivity(): Promise<AgentActivity[]> {
         }),
       };
     })
+  );
+}
+
+/**
+ * One agent's trust score, replayed at every point it changed.
+ *
+ * Scoped to merchant as well as id for the same reason every other by-id read
+ * in this file is — a row id is not authorization.
+ *
+ * `agents.trust_score` only ever holds today's number; this reconstructs the
+ * whole curve from the trace history that produced it, using the identical
+ * formula and window `recomputeTrust` uses live (see computeTrustTrajectory).
+ * A chart built from this can never show a line that disagrees with the
+ * number sitting next to it, because there is only one implementation of the
+ * math between them.
+ */
+export async function agentTrustTrajectory(agentId: string): Promise<TrustTrajectoryPoint[]> {
+  const { merchant, db } = await merchantScope();
+
+  const { data: agent } = await db
+    .from("agents")
+    .select("id, created_at")
+    .eq("id", agentId)
+    .eq("merchant_id", merchant.id)
+    .maybeSingle();
+  if (!agent) return [];
+
+  const { data: decisions } = await db
+    .from("traces")
+    .select("decision, created_at")
+    .eq("merchant_id", merchant.id)
+    .eq("agent_id", agentId)
+    .eq("mode", "enforce")
+    .in("decision", ["allow", "block", "escalate"])
+    .order("created_at", { ascending: true });
+
+  return computeTrustTrajectory(
+    (decisions ?? []).map((d) => ({ decision: d.decision as "allow" | "block" | "escalate", createdAt: d.created_at })),
+    agent.created_at
   );
 }

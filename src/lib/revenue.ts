@@ -63,6 +63,70 @@ function amountOf(trace: Trace): number {
   return typeof params?.amount === "number" ? params.amount : 0;
 }
 
+export type RevenueBucket =
+  | "clearedAutomatically"
+  | "approvedThroughGate"
+  | "awaitingApproval"
+  | "deniedAtGate"
+  | "refused";
+
+export interface ClassifiedTrace {
+  bucket: RevenueBucket | null;
+  amount: number;
+  actionType: string;
+  isUpsell: boolean;
+  /** Money actually reached Razorpay for this trace — allowed outright, or
+   *  escalated and then approved. Independent of `bucket`, which is keyed by
+   *  *how* the decision was reached rather than *whether* it settled. */
+  settled: boolean;
+  createdAt: string;
+}
+
+/**
+ * The one place a trace becomes a revenue bucket.
+ *
+ * Both `computeRevenueImpact` (the totals) and `computeRevenueTimeline` (the
+ * day-by-day series) reduce over this, so the two can never disagree about
+ * what counts as "cleared" versus "approved at the gate" versus "refused" —
+ * exactly the failure this project keeps finding in other shapes: two
+ * implementations of the same classification drifting apart. `mode !==
+ * "enforce"` traces (previews, protocol rejects) classify as `bucket: null`
+ * and are excluded by both callers.
+ */
+export function classifyTrace(trace: Trace, escalationStatus: Map<string, string>): ClassifiedTrace {
+  const amount = amountOf(trace);
+  const base = { amount, actionType: trace.action_type, createdAt: trace.created_at };
+
+  if (trace.mode !== "enforce") {
+    return { ...base, bucket: null, isUpsell: false, settled: false };
+  }
+
+  if (trace.decision === "allow") {
+    return { ...base, bucket: "clearedAutomatically", isUpsell: !!trace.parent_trace_id, settled: true };
+  }
+  if (trace.decision === "block") {
+    return { ...base, bucket: "refused", isUpsell: false, settled: false };
+  }
+  if (trace.decision === "escalate") {
+    // An escalated action's own decision never changes; whether a human
+    // answered lives on the escalation row. No row is treated as still
+    // waiting rather than assumed approved — counting unanswered money as
+    // earned would be the one dishonest thing this could do.
+    const status = escalationStatus.get(trace.id);
+    if (status === "approved") {
+      return { ...base, bucket: "approvedThroughGate", isUpsell: !!trace.parent_trace_id, settled: true };
+    }
+    if (status === "denied") {
+      return { ...base, bucket: "deniedAtGate", isUpsell: false, settled: false };
+    }
+    return { ...base, bucket: "awaitingApproval", isUpsell: false, settled: false };
+  }
+  // protocol_reject with mode === "enforce" doesn't occur in practice (a
+  // rejected signature never reaches the mode branch), but the switch has to
+  // be total.
+  return { ...base, bucket: null, isUpsell: false, settled: false };
+}
+
 export function computeRevenueImpact(traces: Trace[], escalations: Escalation[]): RevenueImpact {
   const escalationStatus = new Map(escalations.map((e) => [e.trace_id, e.status]));
 
@@ -85,57 +149,86 @@ export function computeRevenueImpact(traces: Trace[], escalations: Escalation[])
   };
 
   for (const trace of traces) {
-    // simulate-mode traces are previews that never moved money, and a
-    // protocol_reject never carried a verified amount to begin with.
-    if (trace.mode !== "enforce") continue;
-    const amount = amountOf(trace);
-
-    // Settled means money reached Razorpay: allowed outright, or escalated and
-    // then approved by a human. Tracked alongside the buckets rather than
-    // derived from them, because the buckets are keyed by how a decision was
-    // reached and this is keyed by what was bought.
-    const settled =
-      trace.decision === "allow" ||
-      (trace.decision === "escalate" && escalationStatus.get(trace.id) === "approved");
-    if (settled) {
-      impact.byActionType[trace.action_type] = (impact.byActionType[trace.action_type] ?? 0) + amount;
+    const c = classifyTrace(trace, escalationStatus);
+    if (c.settled) {
+      impact.byActionType[c.actionType] = (impact.byActionType[c.actionType] ?? 0) + c.amount;
     }
+    if (!c.bucket) continue;
 
-    if (trace.decision === "allow") {
-      impact.clearedAutomatically += amount;
-      impact.counts.clearedAutomatically += 1;
-      if (trace.parent_trace_id) {
-        impact.upsell += amount;
-        impact.counts.upsell += 1;
-      }
-    } else if (trace.decision === "block") {
-      impact.refused += amount;
-      impact.counts.refused += 1;
-    } else if (trace.decision === "escalate") {
-      // An escalated action's own decision never changes; whether a human
-      // answered lives on the escalation row. A trace with no escalation row
-      // is treated as still waiting rather than assumed approved — counting
-      // unanswered money as earned would be the one dishonest thing this
-      // panel could do.
-      const status = escalationStatus.get(trace.id);
-      if (status === "approved") {
-        impact.approvedThroughGate += amount;
-        impact.counts.approvedThroughGate += 1;
-        if (trace.parent_trace_id) {
-          impact.upsell += amount;
-          impact.counts.upsell += 1;
-        }
-      } else if (status === "denied") {
-        impact.deniedAtGate += amount;
-        impact.counts.deniedAtGate += 1;
-      } else {
-        impact.awaitingApproval += amount;
-        impact.counts.awaitingApproval += 1;
-      }
+    impact[c.bucket] += c.amount;
+    impact.counts[c.bucket] += 1;
+    if (c.isUpsell) {
+      impact.upsell += c.amount;
+      impact.counts.upsell += 1;
     }
   }
 
   return impact;
+}
+
+export interface RevenueTimelinePoint {
+  /** A short, locale-stable label for the x-axis — day or hour, chosen by
+   *  {@link computeRevenueTimeline} based on how much the data actually spans. */
+  label: string;
+  /** The bucket boundary in epoch ms, for anything that needs to sort or
+   *  re-derive rather than just display. */
+  at: number;
+  clearedAutomatically: number;
+  approvedThroughGate: number;
+  awaitingApproval: number;
+  deniedAtGate: number;
+  refused: number;
+}
+
+/**
+ * The same classification as the totals above, bucketed over time.
+ *
+ * Buckets by DAY when the traces span more than 36 hours, otherwise by HOUR.
+ * A demo dataset generated in one sitting spans minutes to a few hours; a
+ * day-bucketed chart over that would draw one bar. Choosing the grain from the
+ * data rather than hardcoding "daily" is what keeps this honest on both a
+ * fresh install and a merchant with months of history.
+ *
+ * Empty buckets are filled in (zeros, not omitted) so the chart draws a
+ * continuous axis rather than compressing gaps — a quiet Tuesday should read
+ * as flat, not vanish.
+ */
+export function computeRevenueTimeline(traces: Trace[], escalations: Escalation[]): RevenueTimelinePoint[] {
+  const escalationStatus = new Map(escalations.map((e) => [e.trace_id, e.status]));
+  const classified = traces.map((t) => classifyTrace(t, escalationStatus)).filter((c) => c.bucket !== null);
+  if (classified.length === 0) return [];
+
+  const times = classified.map((c) => new Date(c.createdAt).getTime());
+  const min = Math.min(...times);
+  const max = Math.max(...times);
+  const spanMs = Math.max(max - min, 1);
+  const byHour = spanMs < 36 * 60 * 60 * 1000;
+  const bucketMs = byHour ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+
+  const firstBucket = Math.floor(min / bucketMs) * bucketMs;
+  const lastBucket = Math.floor(max / bucketMs) * bucketMs;
+  const buckets = new Map<number, RevenueTimelinePoint>();
+  for (let t = firstBucket; t <= lastBucket; t += bucketMs) {
+    buckets.set(t, {
+      at: t,
+      label: byHour
+        ? new Date(t).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })
+        : new Date(t).toLocaleDateString("en-IN", { month: "short", day: "numeric" }),
+      clearedAutomatically: 0,
+      approvedThroughGate: 0,
+      awaitingApproval: 0,
+      deniedAtGate: 0,
+      refused: 0,
+    });
+  }
+
+  for (const c of classified) {
+    const bucketAt = Math.floor(new Date(c.createdAt).getTime() / bucketMs) * bucketMs;
+    const point = buckets.get(bucketAt);
+    if (point && c.bucket) point[c.bucket] += c.amount;
+  }
+
+  return [...buckets.values()].sort((a, b) => a.at - b.at);
 }
 
 /** Money that actually reached Razorpay: cleared outright plus approved at the

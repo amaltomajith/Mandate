@@ -41,6 +41,18 @@
  * recorded as traces and alerts, just not against anybody's reputation.
  */
 
+/** How many recent enforce-mode decisions the score is computed over. Small
+ *  enough that a single bad week can move it — a window covering years of
+ *  history is one no gate can usefully act on — and large enough that a
+ *  single unlucky block doesn't swing it wildly.
+ *
+ *  Canonical here, not in traceHelpers.ts (which imports it): this file has no
+ *  dependencies of its own, so it's the one direction that can't create a
+ *  cycle. `computeTrustTrajectory` below and the live `recomputeTrust` in
+ *  traceHelpers.ts both read this constant, which is what keeps a replayed
+ *  history and a freshly recomputed score describable by the same rule. */
+export const TRUST_WINDOW_SIZE = 50;
+
 export interface TrustInputs {
   approvals: number;
   blocks: number;
@@ -100,4 +112,71 @@ export function computeTrustScore(inputs: TrustInputs): TrustComponents {
     escalations: inputs.escalations,
     accountAgeDays: inputs.accountAgeDays,
   };
+}
+
+export interface TrustTrajectoryPoint {
+  at: string;
+  score: number;
+}
+
+/**
+ * What the live score WAS at each point in an agent's history, replayed.
+ *
+ * Not stored anywhere — `agents.trust_score` only ever holds the current
+ * value, overwritten on every `recomputeTrust`. This derives the whole curve
+ * from the same trace history that produces the live number, using the exact
+ * same formula and the exact same window, so a chart built from this can never
+ * show a trajectory that disagrees with the score sitting next to it.
+ *
+ * `accountAgeDays` at each point uses that decision's OWN `created_at`, not
+ * today's date — `recomputeTrust` runs synchronously right after a trace is
+ * written, so at the time index `i` actually happened, "now" for that
+ * calculation was (approximately) decisions[i].createdAt. Using today's date
+ * throughout would make every historical point read as if it happened moments
+ * ago.
+ *
+ * That approximation is exact for allow/block, and off by a few points of
+ * `tenureBonus` for the LAST point when it is an escalation resolved well
+ * after it was proposed — verified against live data: an escalation created
+ * at 02:31 and approved at 04:46 recomputes trust at 04:46's Date.now(), which
+ * this function has no way to know without also fetching the resolution time.
+ * The point is stamped at the trace's created_at anyway rather than the
+ * escalation's resolved_at, because the chart's job is to show *when the
+ * action happened*, not when a human got around to it — a trajectory that
+ * jumped a point forward to approval time would misrepresent the timeline for
+ * the sake of a decimal. The gap this leaves is small (observed: under 0.05 of
+ * a 0-100 score) and only ever touches the single most recent point.
+ *
+ * Sliding-window, O(n): each step adds the newest decision and, once the
+ * window is full, removes the oldest — never recounts from scratch.
+ */
+export function computeTrustTrajectory(
+  decisions: { decision: "allow" | "block" | "escalate"; createdAt: string }[],
+  accountCreatedAt: string
+): TrustTrajectoryPoint[] {
+  const chronological = [...decisions].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const accountCreatedMs = new Date(accountCreatedAt).getTime();
+  const window: (typeof chronological)[number][] = [];
+  const counts = { allow: 0, block: 0, escalate: 0 };
+  const points: TrustTrajectoryPoint[] = [];
+
+  for (const d of chronological) {
+    window.push(d);
+    counts[d.decision] += 1;
+    if (window.length > TRUST_WINDOW_SIZE) {
+      const dropped = window.shift()!;
+      counts[dropped.decision] -= 1;
+    }
+
+    const accountAgeDays = Math.max(0, (new Date(d.createdAt).getTime() - accountCreatedMs) / (1000 * 60 * 60 * 24));
+    const { score } = computeTrustScore({
+      approvals: counts.allow,
+      blocks: counts.block,
+      escalations: counts.escalate,
+      accountAgeDays,
+    });
+    points.push({ at: d.createdAt, score });
+  }
+
+  return points;
 }

@@ -2,8 +2,22 @@
 
 import { useMemo } from "react";
 import type { Escalation, Trace } from "@/types/db";
-import { computeRevenueImpact, totalExecuted } from "@/lib/revenue";
+import { computeRevenueImpact, computeRevenueTimeline, totalExecuted, type RevenueTimelinePoint } from "@/lib/revenue";
 import { formatMoney } from "@/lib/format";
+import { StackedAreaChart, type StackedAreaSeries } from "./charts/StackedAreaChart";
+
+/** The same four categories the figure grid below shows — kept identical on
+ *  purpose, so the chart and the numbers next to it are never describing a
+ *  different slice of the same data. `deniedAtGate` exists in the underlying
+ *  model but was never one of the four headline figures either; the chart
+ *  follows that precedent rather than introducing a fifth category the rest
+ *  of the panel doesn't have. */
+const SERIES: StackedAreaSeries[] = [
+  { key: "clearedAutomatically", label: "Cleared automatically", color: "var(--decision-allow)" },
+  { key: "approvedThroughGate", label: "Approved at the gate", color: "var(--entity-agent)" },
+  { key: "awaitingApproval", label: "Awaiting approval", color: "var(--decision-escalate)" },
+  { key: "refused", label: "Refused", color: "var(--decision-block)" },
+];
 
 /**
  * What the control plane did to this merchant's revenue.
@@ -29,6 +43,7 @@ export function RevenueImpactPanel({
   escalations: Escalation[];
 }) {
   const impact = useMemo(() => computeRevenueImpact(traces, escalations), [traces, escalations]);
+  const timeline = useMemo(() => computeRevenueTimeline(traces, escalations), [traces, escalations]);
   const executed = totalExecuted(impact);
 
   // Largest first, and named as a merchant would name them rather than by
@@ -44,22 +59,21 @@ export function RevenueImpactPanel({
     .sort((a, b) => b[1] - a[1])
     .map(([type, value]) => [ACTION_LABELS[type] ?? type, value] as [string, number]);
 
-  const decided = executed + impact.refused + impact.deniedAtGate;
-  const share = (value: number) => (decided > 0 ? (value / decided) * 100 : 0);
-
   return (
-    <section className="panel-card relative overflow-hidden rounded-2xl p-5">
-      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+    <section className="panel-card relative overflow-hidden rounded-2xl p-6">
+      <div className="mb-5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1.5">
         <div className="flex items-baseline gap-3">
-          <h2 className="text-[13px] font-semibold tracking-tight">Revenue impact</h2>
-          <span className="text-[11px]" style={{ color: "var(--muted-2)" }}>
+          <h2 className="text-[15px] font-semibold tracking-tight">Revenue impact</h2>
+          <span className="text-[11.5px]" style={{ color: "var(--muted-2)" }}>
             across the last {traces.length} actions
           </span>
         </div>
         <div className="text-right">
           <div className="flex items-baseline justify-end gap-2">
-            <span className="text-[22px] font-semibold tabular-nums">{formatMoney(executed, "INR")}</span>
-            <span className="text-[11px]" style={{ color: "var(--muted)" }}>
+            <span className="text-[30px] font-semibold leading-none tracking-tight tabular-nums">
+              {formatMoney(executed, "INR")}
+            </span>
+            <span className="text-[11.5px]" style={{ color: "var(--muted)" }}>
               total money moved
             </span>
           </div>
@@ -75,17 +89,20 @@ export function RevenueImpactPanel({
         </div>
       </div>
 
-      {/* One bar, proportioned by value rather than count — a single large
-          refusal matters more than a dozen small clearances, and a count-based
-          bar would say the opposite. */}
-      <div className="flex h-2 w-full overflow-hidden rounded-full" style={{ background: "var(--panel-border)" }}>
-        <Segment width={share(impact.clearedAutomatically)} color="var(--decision-allow)" />
-        <Segment width={share(impact.approvedThroughGate)} color="var(--entity-agent)" />
-        <Segment width={share(impact.deniedAtGate)} color="var(--muted-2)" />
-        <Segment width={share(impact.refused)} color="var(--decision-block)" />
-      </div>
+      {/* Replaces a single proportioned bar: same four categories, but over
+          time rather than collapsed into one instant. The bar could say "this
+          much has been refused"; it couldn't say "refusals spiked Tuesday
+          afternoon," which is the more useful shape of the same data. */}
+      <StackedAreaChart
+        data={timeline}
+        indexKey="label"
+        series={SERIES}
+        valueFormatter={(v) => formatMoney(v, "INR")}
+        height={200}
+        renderTooltip={(point) => <RevenueTooltip point={point} />}
+      />
 
-      <div className="mt-4 grid grid-cols-2 gap-x-5 gap-y-3 sm:grid-cols-4">
+      <div className="mt-5 grid grid-cols-2 gap-x-5 gap-y-3 border-t pt-4 sm:grid-cols-4" style={{ borderColor: "var(--panel-border)" }}>
         <Figure
           label="Cleared automatically"
           value={impact.clearedAutomatically}
@@ -139,11 +156,6 @@ export function RevenueImpactPanel({
   );
 }
 
-function Segment({ width, color }: { width: number; color: string }) {
-  if (width <= 0) return null;
-  return <div className="h-full transition-all duration-500" style={{ width: `${width}%`, background: color }} />;
-}
-
 function Figure({
   label,
   value,
@@ -161,14 +173,52 @@ function Figure({
     <div>
       <div className="flex items-center gap-1.5">
         <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} />
-        <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
+        <span className="text-[10.5px] font-semibold uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
           {label}
         </span>
       </div>
-      <p className="mt-1 text-[15px] font-semibold tabular-nums">{formatMoney(value, "INR")}</p>
-      <p className="text-[10px]" style={{ color: "var(--muted-2)" }}>
+      <p className="mt-1.5 text-[18px] font-semibold leading-none tracking-tight tabular-nums">
+        {formatMoney(value, "INR")}
+      </p>
+      <p className="mt-1 text-[10.5px]" style={{ color: "var(--muted-2)" }}>
         {count} action{count === 1 ? "" : "s"} · {note}
       </p>
+    </div>
+  );
+}
+
+/**
+ * The rich per-bucket breakdown, in the reference's shape — a date header card
+ * plus a category list with dot / value / share-of-bucket — rebuilt on this
+ * app's own tokens rather than the reference's blue/cyan/violet, so it reads
+ * as the same visual language as the rest of the dashboard rather than a
+ * pasted-in widget.
+ */
+function RevenueTooltip({ point }: { point: RevenueTimelinePoint }) {
+  const total = SERIES.reduce((sum, s) => sum + (Number(point[s.key as keyof RevenueTimelinePoint]) || 0), 0);
+  return (
+    <div className="w-56 overflow-hidden rounded-lg border shadow-xl" style={{ borderColor: "var(--panel-border-strong)" }}>
+      <div className="px-3 py-1.5 text-[11px] font-semibold text-white" style={{ background: "var(--brand-violet)" }}>
+        {point.label}
+      </div>
+      <div className="space-y-1.5 px-3 py-2.5" style={{ background: "var(--panel)" }}>
+        {SERIES.map((s) => {
+          const value = Number(point[s.key as keyof RevenueTimelinePoint]) || 0;
+          const pct = total > 0 ? (value / total) * 100 : 0;
+          return (
+            <div key={s.key} className="flex items-center gap-2">
+              <span className="h-2 w-2 shrink-0 rounded-[2px]" style={{ background: s.color }} />
+              <div className="flex w-full items-baseline justify-between gap-2 text-[11px]">
+                <span style={{ color: "var(--muted)" }}>{s.label}</span>
+                <span className="tabular-nums" style={{ color: "var(--foreground)" }}>
+                  {formatMoney(value, "INR")}{" "}
+                  <span style={{ color: "var(--muted-2)" }}>({pct.toFixed(0)}%)</span>
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

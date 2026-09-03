@@ -2,7 +2,7 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { PolicyRule as EngineRule, EvaluationAggregates } from "@/lib/policy/types";
 import type { CapParams, VelocityParams } from "@/lib/policy/types";
-import { computeTrustScore } from "@/lib/trust/score";
+import { computeTrustScore, TRUST_WINDOW_SIZE } from "@/lib/trust/score";
 import type { Database, Decision, Json, Mandate, TraceMode } from "@/types/db";
 
 /**
@@ -287,14 +287,9 @@ export async function createAlert(
   assertNoSupabaseError(error);
 }
 
-/** Recomputes and persists an agent's trust score from its enforce-mode trace history. */
-/** How many recent decisions the trust score is computed over. Small enough
- *  that an agent's score visibly responds to how it is behaving now — which is
- *  what makes the trust_floor rule meaningful, since a score that barely moves
- *  is one no gate can usefully act on — and large enough that a single unlucky
- *  block doesn't swing it wildly. */
-const TRUST_WINDOW_SIZE = 50;
-
+/** Recomputes and persists an agent's trust score from its enforce-mode trace
+ *  history. `TRUST_WINDOW_SIZE` is imported rather than redeclared — see its
+ *  doc comment in trust/score.ts for why that file owns it. */
 export async function recomputeTrust(agentId: string) {
   const db = createAdminClient();
 

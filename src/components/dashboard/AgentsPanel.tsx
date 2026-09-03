@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useState, useTransition } from "react";
 import type { Agent, Mandate, PolicyRule } from "@/types/db";
-import type { TrustComponents } from "@/lib/trust/score";
+import type { TrustComponents, TrustTrajectoryPoint } from "@/lib/trust/score";
 import {
   agentActivity,
   agentSpec,
+  agentTrustTrajectory,
   deleteAgent,
   exportAgent,
   registerAgent,
@@ -21,6 +22,7 @@ import { PRODUCT_CATEGORIES } from "@/lib/demo/catalog";
 import { TrustBreakdown } from "./TrustBreakdown";
 import { EmptyState, GhostButton, Icons, Panel, PrimaryButton, Spinner } from "./ui";
 import { TimeAgo } from "./TimeAgo";
+import { AnimatedLineChart } from "./charts/AnimatedLineChart";
 
 const PACE_OPTIONS = [
   { label: "Calm", ms: 60_000 },
@@ -210,6 +212,20 @@ function AgentRow({
   onRun: (fn: () => Promise<unknown>) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [trajectory, setTrajectory] = useState<TrustTrajectoryPoint[] | null>(null);
+
+  // Lazy, on first expand — not on mount for every row in the roster. A
+  // trajectory fetch replays this agent's whole enforce history through the
+  // same formula recomputeTrust runs live (see computeTrustTrajectory), which
+  // is cheap for one agent and wasteful to run for every row before anyone
+  // has asked to see it.
+  useEffect(() => {
+    if (!open || trajectory !== null) return;
+    agentTrustTrajectory(agent.id)
+      .then(setTrajectory)
+      .catch(() => setTrajectory([]));
+  }, [open, trajectory, agent.id]);
+
   const paused = agent.status === "paused";
   const components = agent.trust_components as unknown as TrustComponents | null;
   const restricted = trustFloor !== null && agent.trust_score < trustFloor;
@@ -392,6 +408,36 @@ function AgentRow({
       {open && (
         <div className="mt-2 border-t pt-2" style={{ borderColor: "var(--panel-border)" }}>
           {components && <TrustBreakdown components={components} />}
+
+          {/* The number next to this line only ever shows today. Replayed
+              from the same trace history and the same formula, so the curve
+              can never disagree with the score printed above it — see
+              agentTrustTrajectory / computeTrustTrajectory. */}
+          <div className="mt-3 border-t pt-2.5" style={{ borderColor: "var(--panel-border)" }}>
+            <p className="mb-1.5 text-[9.5px] font-semibold uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
+              Trust over time
+            </p>
+            {trajectory === null ? (
+              <div className="flex h-[120px] items-center justify-center text-[10.5px]" style={{ color: "var(--muted-2)" }}>
+                Loading history…
+              </div>
+            ) : trajectory.length < 2 ? (
+              <p className="py-3 text-center text-[10.5px]" style={{ color: "var(--muted-2)" }}>
+                Not enough history yet for a trend — one point isn&rsquo;t a line.
+              </p>
+            ) : (
+              <AnimatedLineChart
+                data={trajectory.map((p) => ({
+                  label: new Date(p.at).toLocaleDateString("en-IN", { month: "short", day: "numeric" }),
+                  value: p.score,
+                }))}
+                color="var(--entity-agent)"
+                height={120}
+                valueFormatter={(v) => v.toFixed(0)}
+                thresholdLine={trustFloor !== null ? { value: trustFloor, label: `floor ${trustFloor}` } : undefined}
+              />
+            )}
+          </div>
 
           <CatalogScope agent={agent} busy={busy} onRun={onRun} />
 
