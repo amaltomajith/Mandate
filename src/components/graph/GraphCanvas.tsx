@@ -45,7 +45,7 @@ function FitToNodes({ positions }: { positions: Vec3[] }) {
 
   return null;
 }
-import { DECISION_COLORS, ENTITY_COLORS, traceColor } from "./colors";
+import { ENTITY_COLORS, MANDATE_STATUS_COLORS, traceColor, tracePresence } from "./colors";
 import { actionTypeLabel, formatMoney } from "@/lib/format";
 
 const RULE_TYPE_LABELS: Record<PolicyRule["type"], string> = {
@@ -83,13 +83,6 @@ const ESCALATION_STATUS_SUFFIX: Record<Escalation["status"], string> = {
 const MANDATE_TYPE_LABELS: Record<Mandate["type"], string> = {
   upi_autopay: "UPI Autopay mandate",
   ap2_style: "AP2-style mandate",
-};
-
-const MANDATE_STATUS_COLORS: Record<Mandate["status"], string> = {
-  active: DECISION_COLORS.allow,
-  paused: DECISION_COLORS.escalate,
-  revoked: DECISION_COLORS.block,
-  expired: "#6b7280",
 };
 
 const MANDATE_STATUS_LABELS: Record<Mandate["status"], string> = {
@@ -161,9 +154,9 @@ function RuleNode({ rule, position, onHover }: { rule: PolicyRule; position: Vec
       <mesh>
         <octahedronGeometry args={[0.34]} />
         <meshStandardMaterial
-          color="#ffe6ad"
+          color="#e8f2ff"
           emissive={ENTITY_COLORS.rule}
-          emissiveIntensity={0.95}
+          emissiveIntensity={0.5}
           roughness={0.25}
           metalness={0.2}
         />
@@ -172,7 +165,7 @@ function RuleNode({ rule, position, onHover }: { rule: PolicyRule; position: Vec
           sits on the rim, so the solid reads as glowing instead of coated. */}
       <mesh>
         <octahedronGeometry args={[0.6]} />
-        <GlowShellMaterial color={ENTITY_COLORS.rule} power={2.2} strength={1.15} />
+        <GlowShellMaterial color={ENTITY_COLORS.rule} power={2.2} strength={0.75} />
       </mesh>
     </group>
   );
@@ -259,6 +252,10 @@ function TraceNode({
   const [mountedAt] = useState(() => Date.now());
   const isFresh = (mountedAt - new Date(trace.created_at).getTime()) / 1000 < 6;
   const decisionColor = traceColor(trace.decision, escalationStatus);
+  // Colour says what happened; presence says how loudly. Both answered in
+  // colors.ts so the scene can't disagree with itself — see tracePresence for
+  // why routine allows deliberately sit back.
+  const restOpacity = tracePresence(trace.decision, escalationStatus);
   const isSevere = trace.decision === "block" || trace.decision === "protocol_reject";
 
   // The scene clock is shared across every node and keeps running for the
@@ -293,11 +290,14 @@ function TraceNode({
       const mat = ringRef.current.material as THREE.MeshBasicMaterial;
       if (!isFresh) {
         ringRef.current.scale.setScalar(1);
-        mat.opacity = 0.55;
+        mat.opacity = restOpacity;
       } else {
+        // A new action always announces itself at full strength, then settles
+        // to whatever weight its verdict actually deserves — so arrivals are
+        // never missed, but routine ones stop competing once they are history.
         const t = Math.min(localElapsed / 2.2, 1);
         ringRef.current.scale.setScalar(1.9 - t * 0.9);
-        mat.opacity = 1 - t * 0.45;
+        mat.opacity = restOpacity + (1 - restOpacity) * (1 - t);
       }
     }
 
@@ -335,7 +335,7 @@ function TraceNode({
         <meshStandardMaterial
           color={ENTITY_COLORS.transaction}
           emissive={ENTITY_COLORS.transaction}
-          emissiveIntensity={0.3}
+          emissiveIntensity={0.18}
           roughness={0.35}
         />
       </mesh>
@@ -486,15 +486,22 @@ function Scene({
   }, [layout]);
 
   const ruleEdges = useMemo(() => {
-    const edges: { from: Vec3; to: Vec3; color: string }[] = [];
+    const edges: { from: Vec3; to: Vec3; color: string; opacity: number }[] = [];
     for (const t of layout.traces) {
       if (!t.trace.rule_fired_id) continue;
       const rulePos = layout.rulePositionById[t.trace.rule_fired_id];
       if (!rulePos) continue;
+      // Weighted by the same presence scale the verdict rings use. Most
+      // traffic is allowed, so colouring these purely by decision meant a
+      // bright fan of allow-green edges converging on every rule -- the
+      // routine case flooding the scene again, one layer up. Exceptions now
+      // draw the line that actually gets noticed.
+      const status = escalationStatusByTrace.get(t.trace.id);
       edges.push({
         from: t.position,
         to: rulePos,
-        color: traceColor(t.trace.decision, escalationStatusByTrace.get(t.trace.id)),
+        color: traceColor(t.trace.decision, status),
+        opacity: 0.09 + 0.22 * tracePresence(t.trace.decision, status),
       });
     }
     return edges;
@@ -528,7 +535,7 @@ function Scene({
   const pulseEdges = useMemo<PulseEdge[]>(
     () => [
       ...agentEdges.map((e) => ({ from: e.from, to: e.to, color: e.agentColor, opacity: 0.12 })),
-      ...ruleEdges.map((e) => ({ from: e.from, to: e.to, color: e.color, opacity: 0.25 })),
+      ...ruleEdges.map((e) => ({ from: e.from, to: e.to, color: e.color, opacity: e.opacity })),
       ...forkEdges.map((e) => ({ from: e.from, to: e.to, color: ENTITY_COLORS.mandate, opacity: 0.45, dashed: true })),
       ...mandateEdges.map((e) => ({ from: e.from, to: e.to, color: e.color, opacity: 0.4 })),
     ],
