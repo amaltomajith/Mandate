@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import type { Agent, Customer, Escalation, Mandate, Merchant, PolicyRule, Product, Trace } from "@/types/db";
 import type { PolicyIssue } from "@/lib/policy/audit";
@@ -107,6 +108,20 @@ export function DashboardTabs(props: Props) {
             </button>
           );
         })}
+
+        {/* Settings is a real route, not a tab, so it is a Link rather than a
+            state toggle — see src/app/dashboard/settings/page.tsx for why it
+            has its own URL. Styled to sit with the tabs because to a merchant
+            it is simply the next item in the nav, but separated by a rule
+            because leaving this page is a navigation, not a tab switch. */}
+        <span className="mx-1 my-1.5 w-px shrink-0" style={{ background: "var(--panel-border-strong)" }} />
+        <Link
+          href="/dashboard/settings"
+          className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-[13px] font-medium transition-colors hover:bg-[var(--panel)]"
+          style={{ color: "var(--muted)" }}
+        >
+          Settings
+        </Link>
       </nav>
 
       {tab === "overview" && (

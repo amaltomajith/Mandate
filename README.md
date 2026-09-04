@@ -183,7 +183,14 @@ that decided it) · Policies (rule management, conflict detection,
 plain-language drafting, and a threshold tuner that backtests a proposed
 step-up level against this merchant's own traffic before anything is applied) ·
 Mandates (pause, revoke — a revoked mandate blocks the agent's very next
-action).
+action) · Settings (account, and a self-serve reset).
+
+**Starting over** is a button rather than a support ticket. Settings offers two
+resets, both scoped to the signed-in account and both showing exact row counts
+before you confirm: *Reset transactions* clears history but keeps every
+registered agent and its keypair, which is the slow part of starting again;
+*Reset everything* returns the account to what a new sign-up gets, and asks you
+to type the account slug rather than trusting a single click.
 
 ---
 
@@ -205,9 +212,9 @@ from actual history.
 
 ## Verifying it yourself
 
-Correctness here is not a matter of clicking around the dashboard. Six suites
-drive the real engine against a throwaway merchant and assert what actually
-happened — 96 checks:
+Correctness here is not a matter of clicking around the dashboard. Seven suites
+drive the real engine against throwaway merchants and assert what actually
+happened — 121 checks:
 
 ```bash
 npx tsx scripts/verify-policy.ts        # every rule type, both directions      24
@@ -216,6 +223,7 @@ npx tsx scripts/verify-agent-control.ts # cooperative pause vs enforced retire  
 npx tsx scripts/verify-mrtr.ts          # counter-offers and the MRTR invariant 17
 npx tsx scripts/verify-graph-colors.ts  # what a node in the graph may mean      8
 npx tsx scripts/verify-replay.ts        # a captured request, resent             6
+npx tsx scripts/verify-settings.ts      # the self-serve reset, and isolation   25
 npx tsx scripts/verify-e2e.ts           # end to end, including tenant isolation
 ```
 
