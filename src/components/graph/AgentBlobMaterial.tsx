@@ -164,7 +164,7 @@ void main() {
   vec2 p = (vUv - 0.5) * 2.0;
   float t = uTime * uSpeed;
 
-  vec2 off = vec2(0.055, -0.045);
+  vec2 off = vec2(0.040, -0.032);
   float dA = blobField(p - off, t, uAmplitude);
   float dB = blobField(p + off, t, uAmplitude);
 
@@ -180,13 +180,13 @@ void main() {
   // there, so their sum came out pink rather than white. (An earlier offscreen
   // check disagreed only because it ran without colour management, where the
   // same sum does clip to white -- the harness now matches the app's pipeline.)
-  vec3 col = (uColor * mA + uAccent * mB) * 0.68 + vec3(1.0) * pow(both, 1.3) * 0.58;
+  vec3 col = (uColor * mA + uAccent * mB) * 0.46 + vec3(1.0) * pow(both, 1.3) * 0.60;
 
   // A faint halo so the blob sits in its own light instead of ending abruptly
   // where the field does. Deliberately tight and weak: the dark gap between
   // core and ring is part of the composition, and a generous halo fills it
   // with a pink wash that closes the gap up.
-  float halo = smoothstep(0.26, -0.05, min(dA, dB)) * 0.07;
+  float halo = smoothstep(0.22, -0.05, min(dA, dB)) * 0.045;
   col += (uColor + uAccent) * 0.5 * halo;
 
   // Alpha carries COVERAGE, not a constant 1. The material blends One/One so
@@ -236,7 +236,7 @@ void main() {
   // it is given, so a line that looked right in an unbloomed render came out
   // as a fat soft tube on screen. Drawing it tighter than it should finally
   // look leaves bloom room to do its half of the work.
-  float band = pow(max(1.0 - abs(t - 0.5) * 2.0, 0.0), 5.0);
+  float band = pow(max(1.0 - abs(t - 0.5) * 2.0, 0.0), 7.0);
 
   float angle = atan(vLocal.y, vLocal.x);
 
@@ -267,10 +267,12 @@ void main() {
  */
 const RING_SWEEP_ACCENT = "#3ee0ff";
 
-/** Blob radius as a fraction of the ring radius. The reference sits near a
- *  quarter; going much larger is what made the first attempt read as a sphere
- *  in fog rather than a contained core. */
-const CORE_TO_RING = 0.44;
+/** Blob radius as a fraction of the ring radius — a small, contained dot with
+ *  a lot of dark space around it, which is what the reference actually does.
+ *  Earlier passes ran this two to three times larger; combined with bloom that
+ *  filled the ring with a glowing magenta mass instead of leaving the interior
+ *  dark, and the restraint turns out to be most of the look. */
+const CORE_TO_RING = 0.19;
 /** Ring radius as a multiple of the node's base scale — matches the footprint
  *  the old aura layer occupied, so node spacing in the graph is unchanged. */
 const RING_TO_BASE = 2.0;
