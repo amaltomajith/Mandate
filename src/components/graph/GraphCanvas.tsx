@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Grid, Html, Line, OrbitControls, Stars } from "@react-three/drei";
+import { Grid, Html, OrbitControls, Stars } from "@react-three/drei";
 import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import type * as THREE from "three";
 import { AdditiveBlending, Vector3 } from "three";
 import type { Agent, Customer, Escalation, Mandate, PolicyRule, Trace } from "@/types/db";
 import { computeLayout, type Vec3 } from "./layout";
 import { AgentBlob } from "./AgentBlobMaterial";
+import { PulseEdges, type PulseEdge } from "./PulseEdges";
 
 /**
  * Frames the whole cluster on first load.
@@ -353,10 +354,6 @@ function TraceNode({
   );
 }
 
-function Edge({ from, to, color, opacity, dashed }: { from: Vec3; to: Vec3; color: string; opacity: number; dashed?: boolean }) {
-  return <Line points={[from, to]} color={color} opacity={opacity} transparent dashed={dashed} lineWidth={1} />;
-}
-
 function HoverPanel({ info }: { info: HoverInfo }) {
   if (!info) return null;
 
@@ -509,6 +506,20 @@ function Scene({
     return edges;
   }, [layout]);
 
+  // Flattened into the one list PulseEdges draws. The resting opacities are
+  // the ones each kind already had, so the scene's existing visual hierarchy
+  // (agent links faintest, mandate and fork links strongest) is unchanged —
+  // the pulse rides on top of it rather than replacing it.
+  const pulseEdges = useMemo<PulseEdge[]>(
+    () => [
+      ...agentEdges.map((e) => ({ from: e.from, to: e.to, color: e.agentColor, opacity: 0.12 })),
+      ...ruleEdges.map((e) => ({ from: e.from, to: e.to, color: e.color, opacity: 0.25 })),
+      ...forkEdges.map((e) => ({ from: e.from, to: e.to, color: ENTITY_COLORS.mandate, opacity: 0.45, dashed: true })),
+      ...mandateEdges.map((e) => ({ from: e.from, to: e.to, color: e.color, opacity: 0.4 })),
+    ],
+    [agentEdges, ruleEdges, forkEdges, mandateEdges]
+  );
+
   return (
     <>
       <ambientLight intensity={0.45} />
@@ -530,22 +541,14 @@ function Scene({
         infiniteGrid
       />
 
-      {agentEdges.map((e, i) => (
-        <Edge key={`ae-${i}`} from={e.from} to={e.to} color={e.agentColor} opacity={0.12} />
-      ))}
-      {ruleEdges.map((e, i) => (
-        <Edge key={`re-${i}`} from={e.from} to={e.to} color={e.color} opacity={0.25} />
-      ))}
-      {/* A parent link means "this action exists because that one did" — which
-          in practice is the agent upselling off a purchase. Coloured as the
-          revenue relationship it is, rather than the neutral white it used to
-          be when the only parent links were forked simulations. */}
-      {forkEdges.map((e, i) => (
-        <Edge key={`fe-${i}`} from={e.from} to={e.to} color={ENTITY_COLORS.mandate} opacity={0.45} dashed />
-      ))}
-      {mandateEdges.map((e, i) => (
-        <Edge key={`me-${i}`} from={e.from} to={e.to} color={e.color} opacity={0.4} />
-      ))}
+      {/* Every edge in one object — see PulseEdges for why they are merged and
+          for the direction the travelling pulse runs. Fork edges keep their
+          dashes: "this action exists because that one did" is a different kind
+          of relationship from a causal edge, and in practice it is the agent
+          upselling off a purchase, so it is coloured as the revenue link it is
+          rather than the neutral white it was when forks only meant forked
+          simulations. */}
+      <PulseEdges edges={pulseEdges} />
       {layout.agents.map((p) => (
         <AgentNode key={p.agent.id} agent={p.agent} position={p.position} onHover={setHover} />
       ))}
