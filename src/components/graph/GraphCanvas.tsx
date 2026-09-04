@@ -370,7 +370,53 @@ function TraceNode({
 }
 
 function HoverPanel({ info }: { info: HoverInfo }) {
+  // Split so HoverCard's hooks are unconditional — the null case never mounts
+  // it rather than returning early past them.
   if (!info) return null;
+  return <HoverCard info={info} />;
+}
+
+function HoverCard({ info }: { info: NonNullable<HoverInfo> }) {
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Keeps the card inside the panel.
+   *
+   * It used to be pinned above the node and horizontally centred, with no
+   * regard for where that landed. Policy rules sit on the scene's top tier, so
+   * their cards were pushed straight through the top of the graph panel and
+   * clipped by its overflow — the title and the type badge were simply gone,
+   * leaving a floating fragment of description. Nodes near the left or right
+   * edge lost their sides the same way.
+   *
+   * Position is written straight to the element from the frame loop rather
+   * than through React state: it depends on the camera, so it has to be
+   * recomputed while someone orbits with a node hovered, and re-rendering the
+   * whole overlay every frame to do that would be absurd.
+   */
+  useFrame(({ camera, size }) => {
+    const el = cardRef.current;
+    if (!el) return;
+
+    const projected = new Vector3(info.position[0], info.position[1], info.position[2]).project(camera);
+    const nodeX = (projected.x * 0.5 + 0.5) * size.width;
+    const nodeY = (-projected.y * 0.5 + 0.5) * size.height;
+
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const MARGIN = 12;
+    const GAP = 14;
+
+    // Prefer sitting above the node; drop below only when there is not room,
+    // so the card never covers the node the pointer is on unless it must.
+    const fitsAbove = nodeY - h - GAP >= MARGIN;
+    const offsetY = fitsAbove ? -(h + GAP) : GAP;
+
+    // Centred on the node, then clamped so neither side leaves the panel.
+    const clampedLeft = Math.max(MARGIN, Math.min(nodeX - w / 2, size.width - w - MARGIN));
+
+    el.style.transform = `translate(${clampedLeft - nodeX}px, ${offsetY}px)`;
+  });
 
   let title = "";
   let badge: { text: string; color: string } | null = null;
@@ -420,7 +466,8 @@ function HoverPanel({ info }: { info: HoverInfo }) {
       {/* Hardcoded dark colors, not the (light-theme) CSS vars — this tooltip
           floats over the graph's own dark canvas, not the light dashboard shell. */}
       <div
-        className="w-72 -translate-x-1/2 -translate-y-[calc(100%+14px)] rounded-xl border px-3.5 py-3 shadow-2xl backdrop-blur-md"
+        ref={cardRef}
+        className="w-72 rounded-xl border px-3.5 py-3 shadow-2xl backdrop-blur-md"
         style={{ background: "rgba(8,8,12,0.97)", borderColor: "rgba(255,255,255,0.14)", color: "#f3f1fb" }}
       >
         <p className="mb-1.5 text-[13px] font-semibold leading-snug">{title}</p>
