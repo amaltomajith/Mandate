@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Grid, Html, OrbitControls, Stars } from "@react-three/drei";
+import { Billboard, Grid, Html, OrbitControls, Stars } from "@react-three/drei";
 import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import type * as THREE from "three";
 import { AdditiveBlending, Vector3 } from "three";
@@ -10,6 +10,7 @@ import type { Agent, Customer, Escalation, Mandate, PolicyRule, Trace } from "@/
 import { computeLayout, type Vec3 } from "./layout";
 import { AgentBlob } from "./AgentBlobMaterial";
 import { PulseEdges, type PulseEdge } from "./PulseEdges";
+import { GlowShellMaterial } from "./GlowShell";
 
 /**
  * Frames the whole cluster on first load.
@@ -167,17 +168,11 @@ function RuleNode({ rule, position, onHover }: { rule: PolicyRule; position: Vec
           metalness={0.2}
         />
       </mesh>
-      {/* An outer facet shell at low additive opacity. Gives the solid an
-          atmosphere so it sits in the scene rather than on top of it. */}
+      {/* A fresnel glow shell rather than a flat translucent copy: the light
+          sits on the rim, so the solid reads as glowing instead of coated. */}
       <mesh>
-        <octahedronGeometry args={[0.54]} />
-        <meshBasicMaterial
-          color={ENTITY_COLORS.rule}
-          transparent
-          opacity={0.12}
-          depthWrite={false}
-          blending={AdditiveBlending}
-        />
+        <octahedronGeometry args={[0.6]} />
+        <GlowShellMaterial color={ENTITY_COLORS.rule} power={2.2} strength={1.15} />
       </mesh>
     </group>
   );
@@ -217,23 +212,29 @@ function MandateNode({
           metalness={0.2}
         />
       </mesh>
-      <mesh scale={0.38}>
+      <mesh scale={0.42}>
         <icosahedronGeometry args={[1, 0]} />
-        <meshBasicMaterial
-          color={ENTITY_COLORS.mandate}
-          transparent
-          opacity={0.12}
-          depthWrite={false}
-          blending={AdditiveBlending}
-        />
+        <GlowShellMaterial color={ENTITY_COLORS.mandate} power={2.2} strength={1.15} />
       </mesh>
       {/* A colored ring keyed to status (active/paused/revoked) — same visual
           grammar as a trace's decision ring, so "this mandate isn't active
           anymore" reads the same way "this action was blocked" does. */}
-      <mesh rotation={[Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.36, 0.42, 24]} />
-        <meshBasicMaterial color={statusColor} transparent opacity={0.85} depthWrite={false} side={2} />
-      </mesh>
+      {/* Billboarded, like the agent's ring. Pinned flat to the XZ plane it
+          collapsed to a bare line whenever the camera came near its own
+          plane, which is exactly when a viewer most needs to read whether a
+          mandate is still active. */}
+      <Billboard>
+        <mesh>
+          <ringGeometry args={[0.36, 0.42, 48]} />
+          <meshBasicMaterial
+            color={statusColor}
+            transparent
+            opacity={0.85}
+            depthWrite={false}
+            blending={AdditiveBlending}
+          />
+        </mesh>
+      </Billboard>
     </group>
   );
 }
@@ -267,9 +268,17 @@ function TraceNode({
   // ref captures each node's OWN start time on its first frame instead.
   const localStartRef = useRef<number | null>(null);
 
-  useFrame(({ clock }) => {
+  useFrame(({ clock, camera }) => {
     if (localStartRef.current === null) localStartRef.current = clock.getElapsedTime();
     const localElapsed = clock.getElapsedTime() - localStartRef.current;
+
+    // The verdict ring faces the camera. Pinned flat to the XZ plane it
+    // collapsed to a bare line from any near-level angle, which is when the
+    // verdict most needs reading. Set here rather than with drei's Billboard
+    // because this node already runs a frame callback and there can be 120 of
+    // them on screen.
+    if (ringRef.current) ringRef.current.quaternion.copy(camera.quaternion);
+    if (shockwaveRef.current) shockwaveRef.current.quaternion.copy(camera.quaternion);
 
     // Materialize-in: every node scales up from nothing on its first ~0.35s,
     // fresh or not — this is what makes new activity read as something
@@ -333,8 +342,8 @@ function TraceNode({
       {/* The ring is the verdict, so it is the part that has to read from
           across the scene. Additive keeps the decision hue saturated instead
           of letting it grey out against the black. */}
-      <mesh ref={ringRef} rotation={[Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.22, 0.3, 32]} />
+      <mesh ref={ringRef}>
+        <ringGeometry args={[0.22, 0.3, 48]} />
         <meshBasicMaterial
           color={decisionColor}
           transparent
@@ -345,9 +354,15 @@ function TraceNode({
         />
       </mesh>
       {isSevere && (
-        <mesh ref={shockwaveRef} rotation={[Math.PI / 2, 0, 0]} visible={false}>
-          <ringGeometry args={[0.32, 0.36, 32]} />
-          <meshBasicMaterial color={decisionColor} transparent opacity={0} depthWrite={false} side={2} />
+        <mesh ref={shockwaveRef} visible={false}>
+          <ringGeometry args={[0.32, 0.36, 48]} />
+          <meshBasicMaterial
+            color={decisionColor}
+            transparent
+            opacity={0}
+            depthWrite={false}
+            blending={AdditiveBlending}
+          />
         </mesh>
       )}
     </group>
