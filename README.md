@@ -214,7 +214,7 @@ from actual history.
 
 Correctness here is not a matter of clicking around the dashboard. Seven suites
 drive the real engine against throwaway merchants and assert what actually
-happened — 121 checks:
+happened — 125 checks:
 
 ```bash
 npx tsx scripts/verify-policy.ts        # every rule type, both directions      24
@@ -223,7 +223,7 @@ npx tsx scripts/verify-agent-control.ts # cooperative pause vs enforced retire  
 npx tsx scripts/verify-mrtr.ts          # counter-offers and the MRTR invariant 17
 npx tsx scripts/verify-graph-colors.ts  # what a node in the graph may mean      8
 npx tsx scripts/verify-replay.ts        # a captured request, resent             6
-npx tsx scripts/verify-settings.ts      # the self-serve reset, and isolation   25
+npx tsx scripts/verify-settings.ts      # the self-serve reset, and isolation   29
 npx tsx scripts/verify-e2e.ts           # end to end, including tenant isolation
 ```
 

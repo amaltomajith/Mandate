@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { applySeedRules } from "@/lib/demo/seedData";
 import { applySeedProducts } from "@/lib/demo/catalog";
+import { computeTrustScore } from "@/lib/trust/score";
 
 /**
  * Clearing a merchant's data, as pure functions over an explicit merchant id.
@@ -75,6 +76,54 @@ async function deleteScoped(db: SupabaseClient, table: string, merchantId: strin
   if (error) throw new Error(`Could not clear ${table}: ${error.message}`);
 }
 
+
+/**
+ * Trust back to baseline for every agent on this merchant.
+ *
+ * `agents.trust_score` and `agents.trust_components` are STORED, written only
+ * by `recomputeTrust` after an enforce decision or an escalation resolution.
+ * Deleting traces therefore does not move them: an agent whose history was
+ * just wiped kept reading "39 allowed, 8 escalated, 3 blocked" with zero
+ * traces behind it, and would have kept reading that indefinitely, because
+ * the only thing that rewrites the row is traffic the agent may never get.
+ *
+ * That is not merely cosmetic. `trust_floor` gates on this same stored value
+ * (getAgentPolicyFacts -> the engine), so leaving it behind means a policy
+ * decision made against a number with no evidence under it.
+ *
+ * The baseline comes from `computeTrustScore` with zero decisions rather than
+ * a hardcoded 50, so this stays correct if the formula moves. With no
+ * decisions the tenure bonus does not apply either, which is the formula's own
+ * choice and not something to second-guess here.
+ *
+ * NOT ATOMIC WITH THE DELETES, and worth being straight about: supabase-js
+ * speaks REST, so there is no way to wrap these statements in one transaction
+ * from here. The deletes above are already sequential and non-transactional
+ * for the same reason. This runs immediately after them, so the window where
+ * traces are gone but trust is stale is milliseconds rather than forever —
+ * closing it properly would mean moving the whole reset into a Postgres
+ * function, which is a bigger change than this fix.
+ */
+export async function resetTrustFor(db: SupabaseClient, merchantId: string): Promise<number> {
+  const { data: agents, error } = await db
+    .from("agents")
+    .select("id, created_at")
+    .eq("merchant_id", merchantId);
+  if (error) throw new Error(`Could not read agents: ${error.message}`);
+
+  for (const agent of agents ?? []) {
+    const accountAgeDays = (Date.now() - new Date(agent.created_at).getTime()) / (1000 * 60 * 60 * 24);
+    const components = computeTrustScore({ approvals: 0, blocks: 0, escalations: 0, accountAgeDays });
+    const { error: updateError } = await db
+      .from("agents")
+      .update({ trust_score: components.score, trust_components: components })
+      .eq("id", agent.id)
+      .eq("merchant_id", merchantId);
+    if (updateError) throw new Error(`Could not reset trust for ${agent.id}: ${updateError.message}`);
+  }
+  return (agents ?? []).length;
+}
+
 /**
  * History only. Agents, rules, catalog, customers and mandates all survive.
  *
@@ -86,6 +135,8 @@ async function deleteScoped(db: SupabaseClient, table: string, merchantId: strin
 export async function resetTransactionsFor(db: SupabaseClient, merchantId: string): Promise<ResetCounts> {
   const before = await countResettableRows(db, merchantId);
   for (const t of TRANSACTION_TABLES) await deleteScoped(db, t, merchantId);
+  // Derived state is part of the history this claims to clear.
+  await resetTrustFor(db, merchantId);
   return before;
 }
 
@@ -131,6 +182,9 @@ export async function resetEverythingFor(db: SupabaseClient, merchantId: string)
 
   await applySeedRules(db, merchantId);
   await applySeedProducts(db, merchantId);
+
+  // After the agent deletion, so the surviving managed identity is covered.
+  await resetTrustFor(db, merchantId);
 
   return before;
 }

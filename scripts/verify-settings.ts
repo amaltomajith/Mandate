@@ -17,7 +17,8 @@
 import "./lib/loadEnv";
 import { readFile } from "node:fs/promises";
 import { createClient } from "@supabase/supabase-js";
-import { countResettableRows, resetTransactionsFor, resetEverythingFor } from "../src/lib/reset";
+import { countResettableRows, resetTransactionsFor, resetEverythingFor, resetTrustFor } from "../src/lib/reset";
+import { computeTrustScore } from "../src/lib/trust/score";
 import { applySeedRules } from "../src/lib/demo/seedData";
 import { applySeedProducts } from "../src/lib/demo/catalog";
 
@@ -101,6 +102,22 @@ async function populate(merchantId: string, tag: string) {
     reasoning: "seeded by verify-settings",
   });
   await ins("escalations", { merchant_id: merchantId, trace_id: trace.id, status: "pending" });
+
+  // Stored trust is written by recomputeTrust after a real decision, which
+  // this script does not drive. Setting it by hand is what makes the reset
+  // assertions below meaningful: without a non-baseline starting value,
+  // "trust is 50 after reset" would pass on an agent that was never anything
+  // else.
+  for (const id of [agent.id, managed.id]) {
+    const { error } = await db
+      .from("agents")
+      .update({
+        trust_score: 73.5,
+        trust_components: { score: 73.5, base: 50, approvals: 39, blocks: 3, escalations: 8, totalDecisions: 50, approvalBlockTerm: 21.6, escalationPenalty: -1.6, tenureBonus: 3.5, accountAgeDays: 10 },
+      })
+      .eq("id", id);
+    if (error) throw new Error(`seed trust: ${error.message}`);
+  }
   await ins("alerts", { merchant_id: merchantId, trace_id: trace.id, severity: "info", message: `${tag} alert` });
 
   const campaign = await ins<{ id: string }>("campaigns", {
@@ -168,9 +185,46 @@ async function main() {
     check("customers survive", aAfter.customers === aBefore.customers, `${aAfter.customers} customer(s)`);
     check("mandates survive", aAfter.mandates === aBefore.mandates, `${aAfter.mandates} mandate(s)`);
 
+    // ---- derived state is part of "history"
+    const { data: aTrust } = await db.from("agents").select("name, trust_score, trust_components").eq("merchant_id", A!.id);
+    const allBaseline = (aTrust ?? []).every((a) => Number(a.trust_score) === 50);
+    check("trust score returns to baseline for every agent", allBaseline, (aTrust ?? []).map((a) => Number(a.trust_score)).join(", "));
+
+    const countsZeroed = (aTrust ?? []).every((a) => {
+      const c = (a.trust_components ?? {}) as Record<string, number>;
+      return c.approvals === 0 && c.blocks === 0 && c.escalations === 0 && c.totalDecisions === 0;
+    });
+    check("allowed / escalated / blocked counts are zeroed", countsZeroed, "0/0/0 on every agent");
+
+    // ---- a fresh decision must move from the CLEAN baseline, not the old number
+    const { data: freshAgent } = await db.from("agents").select("id").eq("merchant_id", A!.id).eq("managed", false).limit(1).single();
+    await ins("traces", {
+      merchant_id: A!.id,
+      agent_id: freshAgent!.id,
+      action_type: "order.create",
+      decision: "allow",
+      mode: "enforce",
+      params: { amount: 5000, currency: "INR" },
+      reasoning: "post-reset decision",
+    });
+    const { data: agentRow } = await db.from("agents").select("created_at").eq("id", freshAgent!.id).single();
+    const ageDays = (Date.now() - new Date(agentRow!.created_at).getTime()) / 86400000;
+    const recomputed = computeTrustScore({ approvals: 1, blocks: 0, escalations: 0, accountAgeDays: ageDays });
+    check(
+      "a post-reset decision scores from one trace, not the stale window",
+      recomputed.totalDecisions === 1 && recomputed.approvals === 1,
+      `${recomputed.totalDecisions} decision -> ${recomputed.score.toFixed(1)}`
+    );
+    await db.from("traces").delete().eq("agent_id", freshAgent!.id);
+    await resetTrustFor(db, A!.id);
+
     // ---- the isolation claim
     const bAfterA = await snapshot(B!.id);
     const isolated = Object.keys(bBefore).every((t) => bBefore[t] === bAfterA[t]);
+    const { data: bTrust } = await db.from("agents").select("trust_score").eq("merchant_id", B!.id);
+    const bTrustIntact = (bTrust ?? []).every((a) => Number(a.trust_score) === 73.5);
+    check("merchant B's stored trust is untouched", bTrustIntact, (bTrust ?? []).map((a) => Number(a.trust_score)).join(", "));
+
     check("MERCHANT B IS COMPLETELY UNTOUCHED", isolated, isolated ? `all 10 tables unchanged (${bAfterA.traces} trace(s) still there)` : `drift: ${Object.keys(bBefore).filter((t) => bBefore[t] !== bAfterA[t]).join(", ")}`);
 
     // ---- reset everything on A

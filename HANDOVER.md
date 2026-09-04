@@ -1497,3 +1497,49 @@ Two things that surprise people afterwards:
 `scripts/regen.ts` paces itself at 10s per tick for a reason documented in its
 own header. In practice a tick costs ~26s once the simulation's own work is
 counted, so size the run by wall-clock time rather than by tick count.
+
+---
+
+## 21. Trust is the one piece of stored derived state
+
+Every other panel in this dashboard derives from `traces` on read. Revenue,
+best sellers, decision volume, catalog sales and the per-agent trust
+*trajectory* all recompute from the rows currently in the table, so clearing
+history clears them by construction. **Trust is the exception**, and anyone
+touching this area should know it before being surprised by it.
+
+`agents.trust_score` and `agents.trust_components` are stored columns. They are
+written by exactly one function — `recomputeTrust` in `mcp/traceHelpers.ts` —
+called from exactly two places: after an enforce decision, and after an
+escalation is resolved. `TrustBreakdown` reads `trust_components` straight off
+the agent row rather than recounting, deliberately, because the dashboard's
+trace list is capped and would undercount a busy agent.
+
+The bug that exposed this: after a transaction reset, agents kept reading
+"39 allowed, 8 escalated, 3 blocked" against zero traces. It was assumed at the
+time that the value would self-heal on the next decision. It does not — it
+self-heals only for an agent that *receives* one. An agent that goes quiet
+keeps fabricated numbers indefinitely.
+
+**And it is not cosmetic.** `trust_floor` gates on this same stored value
+(`getAgentPolicyFacts` → the engine), so stale trust means a policy decision
+made against a number with no evidence under it.
+
+The fix in place is minimal and deliberate: `resetTrustFor` returns every
+agent to the zero-decision baseline as part of both resets, using
+`computeTrustScore` rather than a hardcoded 50 so it stays correct if the
+formula moves. It is NOT atomic with the trace deletion — supabase-js speaks
+REST and cannot open a transaction — so there is a millisecond window where
+traces are gone and trust is stale. The deletes themselves are already
+sequential for the same reason.
+
+**The larger question was deliberately not answered tonight.** Trust could be
+computed live from the last-50-decisions window like everything else, which
+would remove this whole class of bug rather than patch one instance of it. That
+is a real refactor: `recomputeTrust`'s write is what the engine reads
+synchronously during a decision, so making it lazy means either computing it on
+every policy evaluation (a query in the hot path) or introducing a cache with
+its own staleness rules. Worth doing; not worth doing under time pressure. If
+you pick it up, the trap to avoid is that `TrustBreakdown` needs the WINDOW
+counts, not the counts of whatever subset of traces the dashboard happens to
+have loaded.
