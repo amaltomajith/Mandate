@@ -172,18 +172,31 @@ void main() {
   // mass and the cutout this used to render as.
   float mA = smoothstep(0.10, -0.14, dA);
   float mB = smoothstep(0.10, -0.14, dB);
+  float both = mA * mB;
+
+  // The centre gets an EXPLICIT neutral term rather than relying on the two
+  // hues to average out. They don't: three converts both from sRGB into
+  // linear working space, and neither magenta nor cyan carries much green
+  // there, so their sum came out pink rather than white. (An earlier offscreen
+  // check disagreed only because it ran without colour management, where the
+  // same sum does clip to white -- the harness now matches the app's pipeline.)
+  vec3 col = (uColor * mA + uAccent * mB) * 0.68 + vec3(1.0) * pow(both, 1.3) * 0.58;
 
   // A faint halo so the blob sits in its own light instead of ending abruptly
-  // where the field does. Kept deliberately tight and weak: the dark gap
-  // between core and ring is part of the composition, and a generous halo
-  // fills it with grey wash and closes the gap up.
-  float halo = smoothstep(0.30, -0.05, min(dA, dB)) * 0.2;
-
-  vec3 col = uColor * mA + uAccent * mB + (uColor + uAccent) * 0.5 * halo;
+  // where the field does. Deliberately tight and weak: the dark gap between
+  // core and ring is part of the composition, and a generous halo fills it
+  // with a pink wash that closes the gap up.
+  float halo = smoothstep(0.26, -0.05, min(dA, dB)) * 0.07;
+  col += (uColor + uAccent) * 0.5 * halo;
 
   // Additive over black, so the quad's corners contribute nothing and only
   // the field is visible -- no quad edge, no alpha-sorting against the ring.
-  gl_FragColor = vec4(col * 1.35, 1.0);
+  //
+  // Overall level is set LOW on purpose. Bloom plus ACES tone mapping amplify
+  // this considerably; tuned without them it read fine offscreen and blew out
+  // to a flat white mass in the app, which also swallowed the ripple entirely
+  // and made a moving blob look frozen.
+  gl_FragColor = vec4(col, 1.0);
 }
 `;
 
@@ -255,7 +268,7 @@ const RING_SWEEP_ACCENT = "#3ee0ff";
 /** Blob radius as a fraction of the ring radius. The reference sits near a
  *  quarter; going much larger is what made the first attempt read as a sphere
  *  in fog rather than a contained core. */
-const CORE_TO_RING = 0.4;
+const CORE_TO_RING = 0.44;
 /** Ring radius as a multiple of the node's base scale — matches the footprint
  *  the old aura layer occupied, so node spacing in the graph is unchanged. */
 const RING_TO_BASE = 2.0;
@@ -276,8 +289,8 @@ export function AgentBlob({
   // Low trust -> a more agitated core that rolls faster. High trust -> a
   // calmer, rounder one. Both stay slow in absolute terms: the motion should
   // read as something thinking, not something straining.
-  const amplitude = 0.17 - t * 0.07; // 0.17 .. 0.10
-  const rippleSpeed = 0.55 - t * 0.25; // 0.55 .. 0.30
+  const amplitude = 0.22 - t * 0.09; // 0.22 .. 0.13
+  const rippleSpeed = 0.6 - t * 0.25; // 0.60 .. 0.35
   // The ring's gradient drifts rather than spins — fast enough to be alive on
   // a second look, slow enough not to pull the eye off the panels.
   const sweepSpeed = 0.18 - t * 0.08; // 0.18 .. 0.10
