@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Billboard } from "@react-three/drei";
-import { AdditiveBlending, Color } from "three";
+import { AddEquation, AdditiveBlending, Color, CustomBlending, OneFactor, type ShaderMaterial } from "three";
 
 /**
  * The agent node's visual — the look React Bits Pro's "AI Blob"
@@ -189,14 +189,16 @@ void main() {
   float halo = smoothstep(0.26, -0.05, min(dA, dB)) * 0.07;
   col += (uColor + uAccent) * 0.5 * halo;
 
-  // Additive over black, so the quad's corners contribute nothing and only
-  // the field is visible -- no quad edge, no alpha-sorting against the ring.
-  //
+  // Alpha carries COVERAGE, not a constant 1. The material blends One/One so
+  // this alpha never scales the colour; it exists so the quad leaves the
+  // canvas transparent everywhere the blob is not, instead of stamping an
+  // opaque black square over whatever is behind the node.
+  float coverage = clamp(max(mA, mB) + halo, 0.0, 1.0);
+
   // Overall level is set LOW on purpose. Bloom plus ACES tone mapping amplify
   // this considerably; tuned without them it read fine offscreen and blew out
-  // to a flat white mass in the app, which also swallowed the ripple entirely
-  // and made a moving blob look frozen.
-  gl_FragColor = vec4(col, 1.0);
+  // to a flat white mass in the app.
+  gl_FragColor = vec4(col, coverage);
 }
 `;
 
@@ -305,15 +307,10 @@ export function AgentBlob({
   const ringInner = ringR * 0.8;
   const ringOuter = ringR * 1.2;
 
-  // useState's lazy initializer, not useMemo and not a ref read during render.
-  // Three constraints hold at once: the object must exist at RENDER time (it
-  // is handed to <shaderMaterial uniforms={}>, which R3F reads once to build
-  // the material), it must be MUTATED every frame afterward (replacing it
-  // would make R3F treat it as a changed prop and recompile the shader
-  // program instead of updating a float), and the setter is never called, so
-  // React never re-renders because of it. A ref satisfies the second but not
-  // the first — reading `.current` during render is what the refs lint rule
-  // catches, and did catch on the GradientWaves fallback layer earlier.
+  // These objects seed the material's uniform SET and its initial values.
+  // They are NOT what gets animated — see the useFrame below. R3F does not
+  // hand the material this exact object, so mutating it here changes nothing
+  // on screen; the uniform values must be written through the material itself.
   const [coreUniforms] = useState(() => ({
     uTime: { value: 0 },
     uAmplitude: { value: amplitude },
@@ -331,30 +328,47 @@ export function AgentBlob({
     uAccent: { value: new Color(RING_SWEEP_ACCENT) },
   }));
 
-  useEffect(() => {
-    coreUniforms.uColor.value.set(color);
-    ringUniforms.uColor.value.set(color);
-  }, [color, coreUniforms, ringUniforms]);
+  // ANIMATION IS DRIVEN THROUGH THE MATERIAL, NOT THROUGH THE PROP OBJECT.
+  //
+  // This is the difference between the node rippling and sitting frozen, and
+  // it cost a while to find because everything about the earlier version
+  // looked right: useFrame ran, the uniform objects were stable across
+  // renders, and the values written to them were correct. They just never
+  // reached the GPU. React Three Fiber does not keep the object passed to
+  // <shaderMaterial uniforms={...}> as the material's own `uniforms` — the
+  // material ends up with a separate copy, seeded from ours. Mutating ours
+  // therefore updates nothing.
+  //
+  // Confirmed rather than assumed: rendering this component through a real
+  // R3F Canvas and reading the live scene graph showed useFrame ticking
+  // (frame count and clock both advancing) while the material's own
+  // uniforms.uTime sat at 0 forever, with uSpeed correctly carrying the value
+  // it was seeded with. Writing through a ref to the material fixes it.
+  const coreMat = useRef<ShaderMaterial>(null);
+  const ringMat = useRef<ShaderMaterial>(null);
 
-  // Mutating an existing uniform's `.value` per frame is three.js's own
-  // documented contract for driving a shader (what drei's `shaderMaterial`
-  // helper and the official R3F examples do), not accidental state mutation.
-  // The rule below is tuned for React state/memo semantics and has no
-  // exception for it; the restructuring it would accept — a fresh object each
-  // frame — forces a shader rebuild every frame and is strictly worse. Block
-  // disable rather than next-line: the directive has to bracket the mutating
-  // statements themselves, not sit above `useFrame(`, or it silences nothing.
+  useEffect(() => {
+    coreMat.current?.uniforms.uColor.value.set(color);
+    ringMat.current?.uniforms.uColor.value.set(color);
+  }, [color]);
+
   useFrame(({ clock }) => {
     const elapsed = clock.getElapsedTime();
-    /* eslint-disable react-hooks/immutability */
-    coreUniforms.uTime.value = elapsed;
-    coreUniforms.uAmplitude.value = amplitude;
-    coreUniforms.uSpeed.value = rippleSpeed;
-    ringUniforms.uTime.value = elapsed;
-    ringUniforms.uInner.value = ringInner;
-    ringUniforms.uOuter.value = ringOuter;
-    ringUniforms.uSpeed.value = sweepSpeed;
-    /* eslint-enable react-hooks/immutability */
+
+    const cm = coreMat.current;
+    if (cm) {
+      cm.uniforms.uTime.value = elapsed;
+      cm.uniforms.uAmplitude.value = amplitude;
+      cm.uniforms.uSpeed.value = rippleSpeed;
+    }
+
+    const rm = ringMat.current;
+    if (rm) {
+      rm.uniforms.uTime.value = elapsed;
+      rm.uniforms.uInner.value = ringInner;
+      rm.uniforms.uOuter.value = ringOuter;
+      rm.uniforms.uSpeed.value = sweepSpeed;
+    }
   });
 
   return (
@@ -377,6 +391,7 @@ export function AgentBlob({
         <mesh>
           <ringGeometry args={[ringInner, ringOuter, 128]} />
           <shaderMaterial
+            ref={ringMat}
             uniforms={ringUniforms}
             vertexShader={ringVertexShader}
             fragmentShader={ringFragmentShader}
@@ -386,15 +401,30 @@ export function AgentBlob({
           />
         </mesh>
 
+        {/* Additive via CustomBlending rather than AdditiveBlending, because
+            the two differ in how they treat the alpha channel and that
+            difference is visible. AdditiveBlending scales the fragment's
+            colour by its alpha, so this quad had to output alpha 1 to stay
+            bright — which forced the (transparent) canvas opaque across the
+            whole quad and painted a black square over the starfield behind
+            every agent. One/One adds the colour outright, leaving alpha free
+            to carry actual coverage, so the quad only darkens where the blob
+            really is. */}
         <mesh>
           <planeGeometry args={[coreQuad, coreQuad]} />
           <shaderMaterial
+            ref={coreMat}
             uniforms={coreUniforms}
             vertexShader={coreVertexShader}
             fragmentShader={coreFragmentShader}
             transparent
             depthWrite={false}
-            blending={AdditiveBlending}
+            blending={CustomBlending}
+            blendEquation={AddEquation}
+            blendSrc={OneFactor}
+            blendDst={OneFactor}
+            blendSrcAlpha={OneFactor}
+            blendDstAlpha={OneFactor}
           />
         </mesh>
       </Billboard>
