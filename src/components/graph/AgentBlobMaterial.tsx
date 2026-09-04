@@ -204,17 +204,34 @@ void main() {
   // off into. A hard-edged thin annulus would alias badly at this scale.
   float band = pow(max(1.0 - abs(t - 0.5) * 2.0, 0.0), 3.0);
 
-  // A slow sweep around the circumference, so the ring shifts between the
-  // entity colour and a lighter tint rather than sitting as a flat circle.
-  // Speed is tied to trust (see uSpeed); the tint itself is atmosphere.
   float angle = atan(vLocal.y, vLocal.x);
-  float sweep = 0.5 + 0.5 * sin(angle - uTime * uSpeed);
 
-  vec3 tint = mix(uColor, uAccent, 0.45 * sweep);
-  float alpha = band * (0.35 + 0.65 * sweep);
-  gl_FragColor = vec4(tint * (0.85 + 1.7 * sweep), alpha);
+  // HUE and BRIGHTNESS sweep on DIFFERENT phases, and that separation is the
+  // point. Driving both from one value tied the ring's brightest arc to its
+  // most-accented arc, and since the bright end ran well past 1.0 it clipped
+  // to flat white -- so the ring showed magenta fading to white rather than
+  // magenta to cyan. Same failure as the core's, in a different place.
+  float hueSweep = 0.5 + 0.5 * sin(angle - uTime * uSpeed);
+  float lum = 0.75 + 0.5 * (0.5 + 0.5 * sin(angle - uTime * uSpeed + 1.2));
+
+  // Full-range mix, so each side of the ring reaches its actual colour
+  // instead of a washed blend of the two.
+  vec3 tint = mix(uColor, uAccent, hueSweep);
+  float alpha = band * (0.45 + 0.55 * lum);
+  gl_FragColor = vec4(tint * lum, alpha);
 }
 `;
+
+/**
+ * The colour the ring's sweep travels toward, away from the agent hue — the
+ * reference's ring runs cyan on one side to magenta on the other, and that
+ * two-tone shift is most of what stops it reading as a flat drawn circle.
+ *
+ * Nudged off the escalation palette's "approved" cyan (#22d3ee) rather than
+ * reusing it: that hue carries a meaning elsewhere in this same scene, and a
+ * gradient stop on an agent's ring is not that meaning.
+ */
+const RING_SWEEP_ACCENT = "#3ee0ff";
 
 /** Blob radius as a fraction of the ring radius. The reference sits near a
  *  quarter; going much larger is what made the first attempt read as a sphere
@@ -274,10 +291,7 @@ export function AgentBlob({
     uOuter: { value: ringOuter },
     uSpeed: { value: sweepSpeed },
     uColor: { value: new Color(color) },
-    // A lighter, cooler tint for the sweep to travel toward. Kept close to the
-    // entity hue so the ring still reads as "agent" at a glance rather than
-    // introducing a colour the legend doesn't explain.
-    uAccent: { value: new Color("#bfe6ff") },
+    uAccent: { value: new Color(RING_SWEEP_ACCENT) },
   }));
 
   useEffect(() => {

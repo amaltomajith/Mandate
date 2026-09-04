@@ -21,7 +21,21 @@ import type { Escalation, Trace } from "@/types/db";
  * saturated harder than the originals so they hold up against bloom.
  */
 export const ENTITY_COLORS = {
-  agent: "#4d9fff",
+  // The one entry that deliberately does NOT mirror its CSS variable.
+  // `--entity-agent` is the dashboard's general accent -- it paints panel
+  // borders, buttons, badges and chart lines across a dozen components -- so
+  // repointing it would repaint half the app. This value is the agent's hue
+  // INSIDE THE GRAPH only: node, legend swatch, hover badge and the edges
+  // running out to its actions, which all have to agree with each other or the
+  // legend starts lying about what a colour means.
+  //
+  // Worth knowing if this is ever revisited: the note above about the palette
+  // going monochrome is about folding EVERY entity into violet-and-pink. This
+  // is one entity moving to a hot magenta that stays well clear of the two
+  // lavenders it shares the scene with (mandate #a78bfa, protocol_reject
+  // #c084fc) on both saturation and pinkness, and the shapes differ anyway --
+  // agents are a ring-and-core, mandates a small icosahedron.
+  agent: "#ff35d5",
   mandate: "#a78bfa",
   // Bright: this is the node body, and the decision ring around it is what
   // carries the verdict. A dark body left the ring nothing to sit against.
