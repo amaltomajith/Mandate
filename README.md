@@ -16,15 +16,18 @@ Live: <https://mandate-amaltomajiths-projects.vercel.app>
 
 ## How it works
 
-An agent calls one endpoint — `POST /api/mcp` — and every request is
-Ed25519-signed (Web Bot Auth). The decision path is:
+An agent calls one endpoint — `POST /api/m/<merchant-slug>/mcp` — and every
+request is Ed25519-signed (Web Bot Auth). The slug is in the path because
+Mandate is multi-tenant: one deployment serves many merchants, each with its
+own agents, catalog, rules and history, and an agent registered with one can
+never see or act on another's. The decision path is:
 
 ```
 signed request
   → verify signature          invalid → protocol_reject, never reaches policy
   → check mandate status      revoked/paused → block
   → evaluate the active rules
-       category_block → cap → velocity → trust_floor → step_up
+       category_block → catalog_scope → cap → velocity → trust_floor → step_up
        (first match wins)
   → allow | escalate | block
   → real Razorpay call, but only on allow
@@ -48,11 +51,12 @@ There are exactly four, and they are the same four for every agent. A new
 agent needs no new tools and no new endpoint — it registers, gets credentials,
 and signs.
 
-### Five rule types
+### Six rule types
 
 | Type | Does |
 | --- | --- |
 | `category_block` | Refuses a category outright, at any amount |
+| `catalog_scope` | Confines an agent to the part of the catalog it was hired for |
 | `cap` | A ceiling, per transaction or per day |
 | `velocity` | A rate limit — amount-blind, it's the pace that's suspicious |
 | `trust_floor` | Holds an agent whose trust score has fallen, regardless of amount |
@@ -152,15 +156,34 @@ The speed control matters. Calm and Busy stay inside the agent's velocity
 limit; **Stress deliberately outruns it**, so the rate limiter can be watched
 engaging rather than only described.
 
-**Onboarding another agent** is a row with a public key — there is no UI for it
-while this deployment runs a single agent. See *Mapping a transaction to an
-agent* in the architecture walkthrough for how an external one would connect.
+**A real external agent** lives in `buyer/` — a separate process that holds
+only its own keypair and talks to Mandate over signed MCP. It is the honest
+test of the whole design: it shares no code with the engine and gets no special
+treatment. One process is one agent, and `--profile` lets several run at once,
+each with its own keypair, persona, budget and pace:
 
-**Dashboard tabs:** Overview (3D entity graph, escalations, agent trust with a
-per-term score breakdown) · Transactions (every decision, with the rule that
-decided it) · Policies (rule management, conflict detection, plain-language
-drafting) · Mandates (pause, revoke — a revoked mandate blocks the agent's very
-next action).
+```bash
+npm --prefix buyer run keygen -- --profile ergonomic   # mint a keypair
+# register the public half from the Agents tab, put the private half in the profile
+npm --prefix buyer start -- --profile ergonomic
+```
+
+Three profiles ship as `.env.example` files, chosen to diverge rather than to be
+copies: `ergonomic` (₹15,000, deliberate, takes sensible complements), `budget`
+(₹6,000, never over ₹2,000 an item, declines most offers) and `bulk` (₹60,000,
+routine orders that cross the step-up line). Run them together and the trust
+scores separate on their own, because the records genuinely differ.
+
+**Dashboard tabs:** Overview (3D entity graph, revenue impact, escalations,
+agent trust with a per-term breakdown) · Buy (a storefront an agent can be
+watched shopping) · Catalog (products, per-agent scope, best sellers) ·
+Campaigns (outbound offers an agent negotiates) · Agents (register, pause,
+retire, per-agent trust history) · Transactions (every decision, with the rule
+that decided it) · Policies (rule management, conflict detection,
+plain-language drafting, and a threshold tuner that backtests a proposed
+step-up level against this merchant's own traffic before anything is applied) ·
+Mandates (pause, revoke — a revoked mandate blocks the agent's very next
+action).
 
 ---
 
@@ -179,6 +202,39 @@ from actual history.
   the drafting pipeline behind it is real, the polling isn't built.
 - RazorpayX payouts were removed rather than stubbed: they need a registered
   business that Razorpay itself gates, so they could never execute here.
+
+## Verifying it yourself
+
+Correctness here is not a matter of clicking around the dashboard. Six suites
+drive the real engine against a throwaway merchant and assert what actually
+happened — 96 checks:
+
+```bash
+npx tsx scripts/verify-policy.ts        # every rule type, both directions      24
+npx tsx scripts/verify-catalog.ts       # catalog, per-agent scope, headroom    20
+npx tsx scripts/verify-agent-control.ts # cooperative pause vs enforced retire  21
+npx tsx scripts/verify-mrtr.ts          # counter-offers and the MRTR invariant 17
+npx tsx scripts/verify-graph-colors.ts  # what a node in the graph may mean      8
+npx tsx scripts/verify-replay.ts        # a captured request, resent             6
+npx tsx scripts/verify-e2e.ts           # end to end, including tenant isolation
+```
+
+`verify-e2e` is the one to run if you only run one: it proves tenant isolation,
+which is the claim that would matter most in production and the one that is
+worthless if merely asserted.
+
+To rebuild a demo history at a pace the velocity rule considers ordinary:
+
+```bash
+MANDATE_MERCHANT_SLUG=<your-slug> npx tsx scripts/regen.ts 100
+```
+
+It deliberately paces itself. Running ticks back to back trips the rate limiter
+on every subsequent action and collapses the trust scores — the resulting
+history then reads as a system being throttled rather than one behaving
+normally.
+
+---
 
 ## Stack
 

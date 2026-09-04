@@ -1361,3 +1361,139 @@ beginning and `draft_policy` offered it to the model as a rule it could
 generate, but the count only ever filtered by agent. No active rule used it, so
 nothing was wrong in practice — but it is *the* guardrail on a campaign, and it
 was the one that silently did nothing.
+
+---
+
+## 19. The graph and the analytics layer
+
+Two rounds of work sit on top of everything above: the dashboard learned to
+show quantities over time, and the 3D scene was rebuilt to read as a designed
+system rather than a pile of glowing shapes. Both produced findings worth
+keeping, because in each case the thing that looked broken was not the thing
+that was broken.
+
+### Charts are hand-rolled, and every label is HTML
+
+There is no charting library. `StackedAreaChart` and `AnimatedLineChart` are
+plain SVG, matching the house style already set by `GradientWaves`. Two bugs in
+them are worth knowing about, because both are easy to reintroduce:
+
+**Series order is load-bearing.** In a stacked area chart each series' stroke
+traces the cumulative total of everything beneath it. Drawing `refused` last
+put its line at the top of the stack, so a large `approvedThroughGate` bucket
+rendered as a huge *refusal* — the chart said the opposite of the truth.
+Refusals are drawn first, at the bottom, deliberately.
+
+**No SVG `<text>` survives a stretched viewBox.** These charts use
+`preserveAspectRatio="none"` with `width="100%"`, which stretches everything
+horizontally. Shape strokes are protected with `vectorEffect="non-scaling-
+stroke"`; plain `<text>` has no equivalent and its glyphs come out visibly
+widened. Every label — axis, dates, threshold, clip markers — is therefore an
+HTML element in an absolutely-positioned overlay, outside the transform. Adding
+one `<text>` back reintroduces the bug.
+
+A single outlier used to flatten every other bucket, so the stacked chart caps
+render height at the 90th percentile and marks the clipped bucket with its real
+figure. The cap is visual only: the underlying data and the tooltip always read
+the true value.
+
+### The agent node: three wrong models before the right one
+
+The agent node is a thin billboarded ring with a small, rippling core, and
+getting there took three attempts that each failed for an instructive reason.
+
+**A lit sphere cannot be a glow.** Two versions built the core as a shaded,
+noise-displaced sphere. On screen it rendered as a flat, hard-edged opaque
+polygon, because a solid mesh ends at its silhouette. The reference has no
+silhouette at all. The core is now a signed-distance field on a billboarded
+quad, additive over black, so it fades into the dark instead of stopping.
+
+**Saturated colour cannot be brightened past its strongest channel.** Driving a
+colour far above 1.0 pins one channel and the others catch up, sliding the hue
+to cyan and then to flat white. Body brightness sits near 1.0 on purpose;
+bloom's threshold is 0.22, so it still glows without losing its hue.
+
+**Magenta + cyan is pink, not white.** Three converts both from sRGB into a
+linear working space where neither carries much green, so their sum is pink.
+The white centre is an explicit neutral term, not an accident of addition.
+
+**R3F does not give a material the uniforms object you pass it.** This one cost
+the most. `useFrame` was faithfully mutating the object handed to
+`<shaderMaterial uniforms={...}>` while the material held a separate copy — so
+the node sat frozen with every line of code looking correct. Animated uniforms
+must be written through a ref to the material. `AgentBlobMaterial` and
+`PulseEdges` both do this, and the comment there explains why.
+
+**Verify shaders through a real R3F Canvas.** A hand-rolled three.js harness
+cannot catch a bug in how the component drives its uniforms, because the
+harness drives them itself. It also lied about colour and brightness until it
+was rebuilt to use the project's own three and `postprocessing` builds with the
+app's bloom parameters and ACES tone mapping. Both remaining defects — the
+frozen uniform and an alpha bug that stamped a black square over the starfield
+behind every agent — were found by bundling the real component into a real
+Canvas and reading the live scene graph.
+
+### Colour is a hierarchy, not a set of labels
+
+The scene is cool and quiet by default; warmth and brightness are reserved for
+what wants a human. Structure recedes, identity anchors, exceptions pop. Two
+real bugs fell out of stating that rule:
+
+- **Rules wore a status colour.** `rule` was byte-identical to `escalate`, and
+  since rule edges are coloured by the decision that fired them, amber
+  escalation edges terminated in amber rule nodes and fused into one gold mass.
+  Rules are structure, not status — they are cool steel now, and amber means
+  exactly one thing.
+- **Mandate status borrowed decision colours**, so an active mandate's ring was
+  the exact green of an allowed action's, and changing one silently moved the
+  other. It has its own values in `colors.ts`.
+
+`tracePresence` sits beside `traceColor` so colour and weight are answered in
+one place. Weight is inverted against frequency on purpose: allows are most of
+the traffic, and giving each a full-strength ring made the least eventful thing
+the loudest on screen.
+
+### Node positions must not depend on a live value
+
+`computeLayout` assigned each agent's angle from its index in the `agents`
+array — which `dashboardData` orders by `trust_score`. Trust moves on nearly
+every decision, so two agents a point apart swapping rank swapped their
+positions on the ring at the next poll, and the graph appeared to drift. Angles
+now come from a separately stable ordering. Anything positional must key off
+something that does not move.
+
+---
+
+## 20. Wiping and regenerating a tenant
+
+Occasionally the working tenant's history needs to be cleared without losing
+its agents, rules, catalog or mandates. The order matters and the scoping
+matters more.
+
+**Back up first — code savepoints do not cover the database.** Export
+`traces`, `escalations`, `alerts`, `campaigns` and `campaign_targets` for the
+merchant before deleting anything, paginating the read (Supabase returns 1000
+rows by default, and this tenant alone exceeds that) and cross-checking the
+exported count against the server's own count so a silent truncation can never
+pass for a complete backup. Write it outside the repo.
+
+**Delete children before parents**, every statement scoped by `merchant_id`:
+escalations → alerts → campaign_targets → campaigns → traces. This database
+holds more than one merchant; an unscoped delete would take the other one with
+it.
+
+Two things that surprise people afterwards:
+
+- **`agents.trust_score` is a stored column, not a derived one.** Wiping traces
+  does not move it. It goes stale until the next decision triggers
+  `recomputeTrust`, which recalculates from the window rather than incrementing
+   — so it self-heals on the first new action and needs no manual correction.
+- **A retired product cannot regain sales.** `fetchCatalog` filters
+  `active = true`, and that is the only discovery path an agent has. Once its
+  history is wiped, a retired product becomes deletable again and stays that
+  way, because nothing can buy it. The `deleteProduct` guard fires on traces
+  referencing the SKU, and there are none.
+
+`scripts/regen.ts` paces itself at 10s per tick for a reason documented in its
+own header. In practice a tick costs ~26s once the simulation's own work is
+counted, so size the run by wall-clock time rather than by tick count.
