@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { applySeedRules } from "@/lib/demo/seedData";
-import { applySeedProducts } from "@/lib/demo/catalog";
+import { applySeedRules } from "@/lib/policy/seed";
+import { applySeedProducts } from "@/lib/catalog";
 import { computeTrustScore } from "@/lib/trust/score";
 
 /**
@@ -27,10 +27,10 @@ import { computeTrustScore } from "@/lib/trust/score";
  */
 
 /** FK-safe, children first. `escalations.trace_id` and `alerts.trace_id`
- *  cascade from traces and `campaign_targets.campaign_id` from campaigns, but
+ *  cascade from traces, but
  *  deleting explicitly in this order means the counts are honest and a partial
  *  failure stops somewhere predictable rather than half-cascading. */
-const TRANSACTION_TABLES = ["escalations", "alerts", "campaign_targets", "campaigns", "traces"] as const;
+const TRANSACTION_TABLES = ["escalations", "alerts", "traces"] as const;
 
 /** What the account keeps across a transaction reset. Named so the preview and
  *  the tests read from one list rather than two that can drift. */

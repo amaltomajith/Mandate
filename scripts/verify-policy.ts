@@ -24,8 +24,8 @@
 import "./lib/loadEnv";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { generateKeyPair } from "../src/lib/webBotAuth/keys";
-import { MandateClient } from "../src/lib/demo/mandateClient";
-import { applySeedProducts } from "../src/lib/demo/catalog";
+import { MandateClient } from "./lib/mandateClient";
+import { applySeedProducts } from "../src/lib/catalog";
 import type { Json } from "../src/types/db";
 
 const db: SupabaseClient = createClient(

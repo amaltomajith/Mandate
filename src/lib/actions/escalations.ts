@@ -56,13 +56,34 @@ export async function approveEscalation(escalationId: string) {
   };
   const parsed = ActionInput.parse(candidate);
 
-  const razorpayResponse = await executeRealAction(parsed);
-
-  await db.from("traces").update({ razorpay_response: razorpayResponse as Json }).eq("id", trace.id);
-  await db
+  // Claim before executing. The conditional update only succeeds for the one
+  // caller that flips `pending` -> `approved`, so two concurrent approvals
+  // cannot both reach Razorpay. If the real call then fails, the claim is
+  // released so the human can retry rather than being stuck on an approved
+  // escalation that never executed.
+  const { data: claimed, error: claimError } = await db
     .from("escalations")
     .update({ status: "approved", resolved_by: user.email ?? user.id, resolved_at: new Date().toISOString() })
-    .eq("id", escalationId);
+    .eq("id", escalationId)
+    .eq("merchant_id", merchant.id)
+    .eq("status", "pending")
+    .select("id");
+  if (claimError) throw claimError;
+  if (!claimed || claimed.length === 0) return;
+
+  let razorpayResponse: Json;
+  try {
+    razorpayResponse = await executeRealAction(parsed);
+  } catch (err) {
+    await db
+      .from("escalations")
+      .update({ status: "pending", resolved_by: null, resolved_at: null })
+      .eq("id", escalationId)
+      .eq("merchant_id", merchant.id);
+    throw err;
+  }
+
+  await db.from("traces").update({ razorpay_response: razorpayResponse as Json }).eq("id", trace.id);
   await db
     .from("alerts")
     .insert({ merchant_id: merchant.id, trace_id: trace.id, severity: "info", message: `Escalation approved by ${user.email ?? user.id} — action executed.` });

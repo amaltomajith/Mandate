@@ -15,8 +15,7 @@ import {
   type ProductInput,
   type ProductRow,
 } from "@/lib/actions/products";
-import { getSellableCatalog, type SellableSnapshot } from "@/lib/actions/sellable";
-import { PRODUCT_CATEGORIES } from "@/lib/demo/catalog";
+import { PRODUCT_CATEGORIES } from "@/lib/catalog";
 import { formatMoney } from "@/lib/format";
 import { EmptyState, GhostButton, Icons, Panel, PrimaryButton, Spinner, decisionColor } from "./ui";
 import { AnimatedLineChart } from "./charts/AnimatedLineChart";
@@ -42,7 +41,6 @@ const EMPTY: ProductInput = { sku: "", name: "", description: "", pricePaise: 0,
 export function CatalogPanel() {
   const [products, setProducts] = useState<ProductRow[] | null>(null);
   const [health, setHealth] = useState<CatalogHealthIssue[]>([]);
-  const [sellable, setSellable] = useState<SellableSnapshot | null>(null);
   const [scopes, setScopes] = useState<{ category: string; agents: { id: string; name: string }[] }[]>([]);
   const [sales, setSales] = useState<CatalogSalesPoint[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -74,22 +72,6 @@ export function CatalogPanel() {
     refresh();
   }, [refresh]);
 
-  // Probed separately and lazily. Each verdict is a real round trip through the
-  // engine, so the table renders immediately on catalog data and fills the
-  // verdict column when the answers arrive -- rather than showing nothing at
-  // all for the six seconds those probes take.
-  useEffect(() => {
-    let cancelled = false;
-    getSellableCatalog()
-      .then((s) => !cancelled && setSellable(s))
-      .catch(() => {
-        /* the column simply stays quiet; the catalog itself is still usable */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [products?.length]);
-
   function run(fn: () => Promise<unknown>) {
     setError(null);
     startTransition(async () => {
@@ -110,8 +92,6 @@ export function CatalogPanel() {
       }
     });
   }
-
-  const verdictFor = (sku: string) => sellable?.items.find((i) => i.sku === sku);
 
   return (
     <div className="flex flex-col gap-5">
@@ -207,9 +187,9 @@ export function CatalogPanel() {
                   key={p.id}
                   product={p}
                   buyers={scopes.find((x) => x.category === p.category)?.agents ?? []}
-                  verdict={verdictFor(p.sku)}
-                  verdictAgent={sellable?.agent?.name ?? null}
-                  verdictPending={!sellable}
+                  verdict={undefined}
+                  verdictAgent={null}
+                  verdictPending={false}
                   busy={isPending}
                   onEdit={() => {
                     setEditing(p.id);

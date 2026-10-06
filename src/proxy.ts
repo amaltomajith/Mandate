@@ -8,9 +8,7 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
  * and the key directory). Discovery has to come before the signature: an agent
  * that cannot read the catalog until it holds credentials is one that can
  * never become a buyer.
- * `/architecture.html` is public documentation — gating it behind
- * a sign-in would defeat the point of linking it from the sign-in page, and
- * `/` is the landing page for the same reason: someone evaluating this should
+ * `/` is the landing page: someone evaluating this should
  * be able to read what it is without first creating an account.
  *
  * Named `proxy.ts` per Next.js 16 (the file used to be `middleware.ts` —
@@ -30,7 +28,6 @@ const isPublicRoute = createRouteMatcher([
   // routes when they moved -- every one of them started redirecting to a
   // sign-in page that an AI buyer has no way to complete.
   "/api/m/(.*)",
-  "/architecture.html",
 ]);
 
 export default clerkMiddleware(async (auth, req) => {

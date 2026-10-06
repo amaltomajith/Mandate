@@ -4,9 +4,8 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireDashboardUser } from "./authGuard";
 import { getCurrentMerchant } from "@/lib/merchant";
-import { buildAgentSpec, type AgentSpec } from "@/lib/agentSpec";
 import type { Agent } from "@/types/db";
-import { PRODUCT_CATEGORIES } from "@/lib/demo/catalog";
+import { PRODUCT_CATEGORIES } from "@/lib/catalog";
 import { computeTrustTrajectory, type TrustTrajectoryPoint } from "@/lib/trust/score";
 
 /**
@@ -274,12 +273,6 @@ export async function exportAgent(agentId: string): Promise<Record<string, unkno
       "No key material is included, by design. Generate a fresh keypair on the " +
       "importing side and register its public half with the new merchant.",
   };
-}
-
-/** The compatibility contract for this merchant, with real URLs. */
-export async function agentSpec(): Promise<AgentSpec> {
-  const { merchant } = await merchantScope();
-  return buildAgentSpec(merchant, process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000");
 }
 
 export interface AgentActivity {

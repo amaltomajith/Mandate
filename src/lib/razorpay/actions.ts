@@ -111,7 +111,6 @@ async function dispatch(input: ActionInput): Promise<Json> {
         notes: {
           ...(p.notes ?? {}),
           discount_paise: String(p.discountPaise),
-          ...(p.campaignId ? { campaign_id: p.campaignId } : {}),
         },
       });
       return link as unknown as Json;

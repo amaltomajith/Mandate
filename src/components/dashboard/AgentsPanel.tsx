@@ -5,7 +5,6 @@ import type { Agent, Mandate, PolicyRule } from "@/types/db";
 import type { TrustComponents, TrustTrajectoryPoint } from "@/lib/trust/score";
 import {
   agentActivity,
-  agentSpec,
   agentTrustTrajectory,
   deleteAgent,
   exportAgent,
@@ -15,10 +14,9 @@ import {
   setAgentPace,
   setAgentStatus,
   type AgentActivity } from "@/lib/actions/agents";
-import type { AgentSpec } from "@/lib/agentSpec";
 import { pauseMandate, revokeMandate, reactivateMandate } from "@/lib/actions/mandates";
 import { formatMoney } from "@/lib/format";
-import { PRODUCT_CATEGORIES } from "@/lib/demo/catalog";
+import { PRODUCT_CATEGORIES } from "@/lib/catalog";
 import { TrustBreakdown } from "./TrustBreakdown";
 import { EmptyState, GhostButton, Icons, Panel, PrimaryButton, Spinner } from "./ui";
 import { TimeAgo } from "./TimeAgo";
@@ -55,7 +53,6 @@ interface Props {
  */
 export function AgentsPanel({ agents, rules, mandates }: Props) {
   const [activity, setActivity] = useState<AgentActivity[]>([]);
-  const [spec, setSpec] = useState<AgentSpec | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -81,9 +78,7 @@ export function AgentsPanel({ agents, rules, mandates }: Props) {
   const refresh = useCallback(() => {
     startTransition(async () => {
       try {
-        const [act, sp] = await Promise.all([agentActivity(), agentSpec()]);
-        setActivity(act);
-        setSpec(sp);
+        setActivity(await agentActivity());
       } catch (err) {
         setError(err instanceof Error ? err.message : "Couldn't load agent activity.");
       }
@@ -187,11 +182,6 @@ export function AgentsPanel({ agents, rules, mandates }: Props) {
         <RegisterAgent onError={setError} onRegistered={refresh} />
       </div>
 
-      {/* Full width, not a sidebar rail. This is the most distinctive artifact
-          in the product -- the thing that says what it takes to talk to this
-          merchant -- and it was set at ten pixels in a 420px column, which is
-          unreadable across a room. */}
-      <CompatibilityContract spec={spec} />
     </div>
   );
 }
@@ -645,98 +635,6 @@ function RegisterAgent({
     </Panel>
   );
 }
-
-function CompatibilityContract({ spec }: { spec: AgentSpec | null }) {
-  const [copied, setCopied] = useState(false);
-
-  if (!spec) {
-    return (
-      <Panel title="What an agent must do" icon={<Icons.Shield />} accent="var(--muted)">
-        <EmptyState text="Loading the contract…" />
-      </Panel>
-    );
-  }
-
-  const asText = [
-    `Talking to ${spec.merchant.name}`,
-    ``,
-    `MCP        ${spec.endpoints.mcp}`,
-    `Catalog    ${spec.endpoints.catalog}`,
-    `Keys       ${spec.endpoints.keyDirectory}`,
-    `Control    ${spec.endpoints.agentControl}`,
-    ``,
-    `Protocol   ${spec.protocol.revision} · ${spec.protocol.transport}`,
-    `Signing    ${spec.protocol.signing}`,
-    ``,
-    ...spec.rules.map((r, i) => `${i + 1}. ${r.must}\n   ${r.why}`),
-    ``,
-    spec.keygen,
-  ].join("\n");
-
-  return (
-    <Panel
-      title="What an agent must do"
-      icon={<Icons.Shield />}
-      accent="var(--muted)"
-      action={
-        <GhostButton
-          onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(asText);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 2000);
-            } catch {
-              // Clipboard can fail on permissions or a non-HTTPS origin; the
-              // text is still selectable, so this is not a dead end.
-            }
-          }}
-          className="py-1! px-2.5! text-[10px]!"
-        >
-          {copied ? "Copied" : "Copy"}
-        </GhostButton>
-      }
-    >
-      <p className="mb-3 text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
-        Hand this to whoever is building an agent for you. The URLs are yours, and it contains no key —
-        it tells them to generate their own.
-      </p>
-
-      <div className="space-y-1 rounded-lg p-2.5" style={{ background: "var(--panel-2)" }}>
-        {Object.entries(spec.endpoints).map(([k, v]) => (
-          <div key={k} className="flex items-baseline gap-2">
-            <span className="w-16 shrink-0 text-[9.5px] uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
-              {k.replace(/([A-Z])/g, " $1")}
-            </span>
-            <code className="min-w-0 flex-1 break-all text-[11px]" style={{ color: "var(--muted)" }}>
-              {v}
-            </code>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2.5 md:grid-cols-2">
-        {spec.rules.map((r, i) => (
-          <div key={r.id}>
-            <p className="text-[12px] font-medium leading-snug">
-              <span className="tabular-nums" style={{ color: "var(--muted-2)" }}>
-                {i + 1}.{" "}
-              </span>
-              {r.must}
-            </p>
-            <p className="mt-0.5 pl-4 text-[11px] leading-snug" style={{ color: "var(--muted-2)" }}>
-              {r.why}
-            </p>
-          </div>
-        ))}
-      </div>
-
-      <p className="mt-3 border-t pt-2 text-[10px] leading-snug" style={{ borderColor: "var(--panel-border)", color: "var(--muted-2)" }}>
-        {spec.keygen}
-      </p>
-    </Panel>
-  );
-}
-
 
 /**
  * Which parts of the catalog this agent may transact.

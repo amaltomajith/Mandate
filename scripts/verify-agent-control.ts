@@ -20,8 +20,8 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import * as ed from "@noble/ed25519";
 import { sha256, sha512 } from "@noble/hashes/sha2.js";
 import { generateKeyPair } from "../src/lib/webBotAuth/keys";
-import { MandateClient } from "../src/lib/demo/mandateClient";
-import { applySeedProducts, fetchCatalog } from "../src/lib/demo/catalog";
+import { MandateClient } from "./lib/mandateClient";
+import { applySeedProducts, fetchCatalog } from "../src/lib/catalog";
 
 ed.hashes.sha512 = sha512;
 

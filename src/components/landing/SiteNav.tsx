@@ -21,7 +21,6 @@ const LINKS = [
   { label: "How it works", href: "#how" },
   { label: "Policy", href: "#rules" },
   { label: "Protocol", href: "#protocol" },
-  { label: "Architecture", href: "/architecture.html", external: true },
 ];
 
 export function SiteNav({ signedIn }: { signedIn: boolean }) {
@@ -71,7 +70,6 @@ export function SiteNav({ signedIn }: { signedIn: boolean }) {
             <a
               key={l.label}
               href={l.href}
-              {...(l.external ? { target: "_blank", rel: "noopener" } : {})}
               className="text-[13.5px] transition-colors hover:text-[var(--foreground)]"
               style={{ color: "var(--muted)" }}
             >
@@ -121,7 +119,6 @@ export function SiteNav({ signedIn }: { signedIn: boolean }) {
               <a
                 key={l.label}
                 href={l.href}
-                {...(l.external ? { target: "_blank", rel: "noopener" } : {})}
                 onClick={() => setOpen(false)}
                 tabIndex={open ? 0 : -1}
                 className="rounded-lg py-2.5 text-[15px] transition-colors hover:text-[var(--foreground)]"

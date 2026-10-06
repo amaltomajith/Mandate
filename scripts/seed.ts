@@ -5,14 +5,14 @@
  *
  * Shares its rule/customer definitions and upsert logic with
  * src/lib/demo/runDemo.ts (the dashboard's one-click "Run demo" button) via
- * src/lib/demo/seedData.ts, so the CLI and the button can't drift into
+ * src/lib/policy/seed.ts, so the CLI and the button can't drift into
  * seeding different data.
  *
  * Usage: npx tsx scripts/seed.ts
  */
 import "./lib/loadEnv";
 import { createClient } from "@supabase/supabase-js";
-import { applySeedRules } from "../src/lib/demo/seedData";
+import { applySeedRules } from "../src/lib/policy/seed";
 import { merchantForScript } from "./lib/merchant";
 
 // Builds its own service-role client rather than importing

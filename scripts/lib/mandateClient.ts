@@ -1,4 +1,4 @@
-import { signRequest } from "../webBotAuth/sign";
+import { signRequest } from "../../src/lib/webBotAuth/sign";
 
 // Relative import, not the `@/` alias, on purpose — this module is loaded
 // both by Next's bundler (server actions) and directly by tsx (the CLI

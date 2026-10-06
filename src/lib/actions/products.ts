@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireDashboardUser } from "./authGuard";
 import { getCurrentMerchant } from "@/lib/merchant";
-import { PRODUCT_CATEGORIES, type ProductCategory } from "@/lib/demo/catalog";
+import { PRODUCT_CATEGORIES, type ProductCategory } from "@/lib/catalog";
 import { buildTimeBuckets, bucketKeyFor } from "@/lib/timeBuckets";
 
 /**

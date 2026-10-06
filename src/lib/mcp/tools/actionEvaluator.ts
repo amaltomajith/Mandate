@@ -32,23 +32,6 @@ export interface EvaluationOutcome {
  * {@link executeRealAction} and only when the policy engine says "allow".
  */
 /**
- * Server-side annotations stamped onto the trace, out of reach of the caller.
- *
- * These are applied AFTER the caller's params, so a buyer agent cannot forge
- * one by putting it in its own request. That matters most for `offerId`, which
- * the re-entry guard's unique index is built on: if a caller could set it, a
- * caller could also collide it deliberately and block someone else's purchase.
- */
-export interface TraceStamp {
-  /** Consumed exactly once. See migration 0011. */
-  offerId?: string;
-  /** Which MRTR beat this trace records: the offer, or a declined offer. */
-  mrtr?: "input_required" | "counter_declined";
-  /** The complement that was offered, for a trace that records an offer. */
-  offeredSku?: string;
-}
-
-/**
  * The agent's own words, made safe to keep and to show.
  *
  * A buying agent may send a one-line reason with its purchase. That text is
@@ -68,8 +51,7 @@ function safeAgentReason(raw: unknown): string | undefined {
 export async function runActionEvaluation(
   agentId: string,
   input: ActionInput,
-  mode: "simulate" | "enforce",
-  stamp?: TraceStamp
+  mode: "simulate" | "enforce"
 ): Promise<EvaluationOutcome> {
   // The tenant, resolved from the agent the Ed25519 signature already proved --
   // never from the request body. An agent has no way to name a merchant, so it
@@ -142,7 +124,7 @@ export async function runActionEvaluation(
 
   const trace = await insertTrace({
     merchantId,
-    parentTraceId: input.forkFrom ?? null,
+    parentTraceId: null,
     mode,
     actionType: input.actionType,
     // Caller params first, authoritative fields last. `amount` here is what
@@ -170,10 +152,6 @@ export async function runActionEvaluation(
       currency: input.currency,
       category: input.category,
       customerId: input.customerId ?? null,
-      // Server-stamped, last, so nothing a caller sent can impersonate them.
-      ...(stamp?.offerId ? { offer_id: stamp.offerId } : {}),
-      ...(stamp?.mrtr ? { mrtr: stamp.mrtr } : {}),
-      ...(stamp?.offeredSku ? { offered_sku: stamp.offeredSku } : {}),
     } as unknown as Json,
     agentId,
     decision,

@@ -15,7 +15,7 @@
  */
 import "./lib/loadEnv";
 import { createClient } from "@supabase/supabase-js";
-import { fetchCatalog, applySeedProducts, PRODUCT_CATEGORIES } from "../src/lib/demo/catalog";
+import { fetchCatalog, applySeedProducts, PRODUCT_CATEGORIES } from "../src/lib/catalog";
 import { generateKeyPair } from "../src/lib/webBotAuth/keys";
 import { signRequest } from "../src/lib/webBotAuth/sign";
 import { computeContentDigest } from "../src/lib/webBotAuth/canonical";

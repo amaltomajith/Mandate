@@ -19,8 +19,8 @@ import { readFile } from "node:fs/promises";
 import { createClient } from "@supabase/supabase-js";
 import { countResettableRows, resetTransactionsFor, resetEverythingFor, resetTrustFor } from "../src/lib/reset";
 import { computeTrustScore } from "../src/lib/trust/score";
-import { applySeedRules } from "../src/lib/demo/seedData";
-import { applySeedProducts } from "../src/lib/demo/catalog";
+import { applySeedRules } from "../src/lib/policy/seed";
+import { applySeedProducts } from "../src/lib/catalog";
 
 const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
   auth: { autoRefreshToken: false, persistSession: false },

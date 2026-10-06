@@ -37,7 +37,6 @@ export const PaymentLinkCreateParams = z.object({
   customerEmail: z.string().email().optional(),
   customerContact: z.string().optional(),
   discountPaise: z.number().int().nonnegative().default(0),
-  campaignId: z.string().uuid().optional(),
   notify: z.boolean().default(false),
   expiresInHours: z.number().int().positive().max(720).optional(),
   notes: z.record(z.string(), z.string()).optional(),
@@ -58,7 +57,6 @@ export const ActionInput = z.discriminatedUnion("actionType", [
     currency: z.string().length(3).default("INR"),
     category: z.string().optional(),
     customerId: z.string().uuid().optional(),
-    forkFrom: z.string().uuid().optional(),
     params: OrderCreateParams,
   }),
   z.object({
@@ -67,7 +65,6 @@ export const ActionInput = z.discriminatedUnion("actionType", [
     currency: z.string().length(3).default("INR"),
     category: z.string().optional(),
     customerId: z.string().uuid().optional(),
-    forkFrom: z.string().uuid().optional(),
     params: RefundCreateParams,
   }),
   z.object({
@@ -76,7 +73,6 @@ export const ActionInput = z.discriminatedUnion("actionType", [
     currency: z.string().length(3).default("INR"),
     category: z.string().optional(),
     customerId: z.string().uuid().optional(),
-    forkFrom: z.string().uuid().optional(),
     params: PaymentLinkCreateParams,
   }),
   z.object({
@@ -85,7 +81,6 @@ export const ActionInput = z.discriminatedUnion("actionType", [
     currency: z.string().length(3).default("INR"),
     category: z.string().optional(),
     customerId: z.string().uuid().optional(),
-    forkFrom: z.string().uuid().optional(),
     params: SubscriptionCreateParams,
   }),
 ]);

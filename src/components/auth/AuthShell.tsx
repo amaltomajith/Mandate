@@ -69,13 +69,6 @@ export function AuthShell({ children }: { children: ReactNode }) {
               layout.tsx — one real box, not two. */}
           {children}
 
-          {/* Reachable before signing in on purpose: someone evaluating this
-              should be able to read how it works without needing an account. */}
-          <p className="mt-6 text-center text-xs" style={{ color: "var(--muted-2)" }}>
-            <a href="/architecture.html" target="_blank" rel="noopener" className="underline-offset-2 hover:underline">
-              How it works — architecture &amp; decision flow
-            </a>
-          </p>
         </div>
       </div>
     </div>

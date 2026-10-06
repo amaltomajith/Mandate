@@ -8,29 +8,18 @@ import { EscalationsPanel } from "./EscalationsPanel";
 import { AgentTrustPanel } from "./AgentTrustPanel";
 import { PolicyRulesPanel } from "./PolicyRulesPanel";
 import { PolicyHealthPanel } from "./PolicyHealthPanel";
-import { HorizonPanel } from "./HorizonPanel";
 import { ThresholdTuner } from "./ThresholdTuner";
-import { SimulationPanel } from "./SimulationPanel";
-import { ConversationalCheckout } from "./ConversationalCheckout";
-import { SellableCatalog } from "./SellableCatalog";
-import { StorefrontCard } from "./StorefrontCard";
-import { BuyingActivity } from "./BuyingActivity";
-import { CampaignsPanel } from "./CampaignsPanel";
 import { CatalogPanel } from "./CatalogPanel";
 import { AgentsPanel } from "./AgentsPanel";
 import { RevenueImpactPanel } from "./RevenueImpactPanel";
 import { TransactionsView } from "./TransactionsView";
 import { MandatesPanel } from "./MandatesPanel";
-import { GraphCanvas } from "@/components/graph/GraphCanvas";
-import { GraphLegend } from "@/components/graph/GraphLegend";
 
-type Tab = "overview" | "buy" | "catalog" | "campaigns" | "agents" | "transactions" | "policies" | "mandates";
+type Tab = "overview" | "catalog" | "agents" | "transactions" | "policies" | "mandates";
 
 const TABS: { key: Tab; label: string; badge?: (props: Props) => number }[] = [
   { key: "overview", label: "Overview" },
-  { key: "buy", label: "Buy" },
   { key: "catalog", label: "Catalog" },
-  { key: "campaigns", label: "Campaigns" },
   { key: "agents", label: "Agents", badge: (p) => p.agents.filter((a) => a.status === "paused").length },
   { key: "transactions", label: "Transactions", badge: (p) => p.traces.length },
   { key: "policies", label: "Policies", badge: (p) => p.pendingCount + p.deterministicIssues.length },
@@ -64,7 +53,7 @@ interface Props {
  * instead of stacking everything into one increasingly long scroll.
  */
 export function DashboardTabs(props: Props) {
-  const { agents, allAgents, rules, traces, escalations, tracesById, deterministicIssues, mandates, customers, products, merchant } = props;
+  const { agents, allAgents, rules, traces, escalations, tracesById, deterministicIssues, mandates, customers } = props;
   const [tab, setTab] = useState<Tab>("overview");
 
   const [highlightRuleId, setHighlightRuleId] = useState<string | null>(null);
@@ -126,38 +115,9 @@ export function DashboardTabs(props: Props) {
 
       {tab === "overview" && (
         <div className="flex flex-1 flex-col gap-5">
-          {/* Simulation leads: it's the control that makes everything below it
-              move, so it reads better as the first thing on the tab than as an
-              afterthought under the graph. */}
-          <SimulationPanel />
-
-          {/* Height is pinned rather than content-driven. Previously the row
-              grew with the sidebar, so every new escalation made the graph
-              taller and pushed the page down — the graph became unusable to
-              orbit precisely because the system was busy. Now the column
-              scrolls internally and the graph keeps a stable viewport. */}
-          <div className="grid grid-cols-1 gap-5 lg:h-[calc(100vh-13rem)] lg:min-h-[600px] lg:grid-cols-[1fr_400px]">
-            <div className="relative min-h-[560px] overflow-hidden rounded-2xl panel-card-lg lg:min-h-0">
-              <div
-                className="pointer-events-none absolute inset-x-0 top-0 z-10 h-24"
-                style={{ background: "linear-gradient(to bottom, rgba(5,6,10,0.6), transparent)" }}
-              />
-              <div className="pointer-events-none absolute left-5 top-4 z-10">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-white/70">Entity graph</p>
-                <p className="mt-0.5 text-xs text-white/50">a live map of every agent, rule, and action</p>
-              </div>
-              {/* Retired agents are dropped from the SCENE but not from the
-                  traces it draws. Their past actions keep their edges and their
-                  hover names -- what disappears is the agent node itself, which
-                  is a thing that can still act, and a retired one cannot. */}
-              <GraphCanvas agents={agents} rules={rules} traces={traces} mandates={mandates} customers={customers} escalations={escalations} />
-              <GraphLegend />
-            </div>
-
-            <div className="flex min-h-0 flex-col gap-5">
-              <EscalationsPanel escalations={escalations} tracesById={tracesById} />
-              <AgentTrustPanel agents={agents} rules={rules} />
-            </div>
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+            <EscalationsPanel escalations={escalations} tracesById={tracesById} />
+            <AgentTrustPanel agents={agents} rules={rules} />
           </div>
 
           {/* Revenue impact closes the tab: the payoff, read after watching
@@ -166,29 +126,7 @@ export function DashboardTabs(props: Props) {
         </div>
       )}
 
-      {tab === "buy" && (
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-          {/* Left is the shop as it stands: buy something, and what the agent
-              could sell next. Right is the record of what it has already sold.
-              The earlier layout was forward-looking on both sides, so the tab
-              could not answer the first question anyone asks about a shop. */}
-          <div className="flex flex-col gap-5">
-            <ConversationalCheckout />
-            <SellableCatalog />
-            <StorefrontCard slug={merchant.slug} />
-          </div>
-          <BuyingActivity
-            traces={traces}
-            escalations={escalations}
-            products={products}
-            customers={customers}
-          />
-        </div>
-      )}
-
       {tab === "catalog" && <CatalogPanel />}
-
-      {tab === "campaigns" && <CampaignsPanel />}
 
       {tab === "agents" && <AgentsPanel agents={allAgents} rules={rules} mandates={mandates} />}
 
@@ -200,7 +138,6 @@ export function DashboardTabs(props: Props) {
           <div className="space-y-5">
             <ThresholdTuner />
             <PolicyHealthPanel deterministicIssues={deterministicIssues} />
-            <HorizonPanel />
           </div>
         </div>
       )}

@@ -21,9 +21,9 @@
 import "./lib/loadEnv";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { generateKeyPair } from "../src/lib/webBotAuth/keys";
-import { MandateClient } from "../src/lib/demo/mandateClient";
-import { applySeedRules } from "../src/lib/demo/seedData";
-import { applySeedProducts, fetchCatalog } from "../src/lib/demo/catalog";
+import { MandateClient } from "./lib/mandateClient";
+import { applySeedRules } from "../src/lib/policy/seed";
+import { applySeedProducts, fetchCatalog } from "../src/lib/catalog";
 
 const db: SupabaseClient = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,

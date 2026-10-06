@@ -22,7 +22,7 @@ import { MandateMark } from "@/components/brand/MandateMark";
  * real page would make the thing it is meant to speed up slower.
  */
 
-const TABS = ["Overview", "Buy", "Catalog", "Campaigns", "Agents", "Transactions", "Policies", "Mandates"];
+const TABS = ["Overview", "Catalog", "Agents", "Transactions", "Policies", "Mandates"];
 
 function Shimmer({ className, style }: { className?: string; style?: React.CSSProperties }) {
   return <div className={`skeleton-shimmer rounded-md ${className ?? ""}`} style={style} />;

@@ -70,7 +70,7 @@ export function RevenueImpactPanel({
   // action type. "payment_link.create" is our vocabulary, not theirs.
   const ACTION_LABELS: Record<string, string> = {
     "order.create": "orders",
-    "payment_link.create": "campaign links",
+    "payment_link.create": "payment links",
     "refund.create": "refunds",
     "subscription.create": "subscriptions",
   };

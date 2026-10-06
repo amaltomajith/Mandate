@@ -2,8 +2,8 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireDashboardUser } from "@/lib/actions/authGuard";
-import { applySeedRules } from "@/lib/demo/seedData";
-import { applySeedProducts } from "@/lib/demo/catalog";
+import { applySeedRules } from "@/lib/policy/seed";
+import { applySeedProducts } from "@/lib/catalog";
 import type { Merchant } from "@/types/db";
 
 /**

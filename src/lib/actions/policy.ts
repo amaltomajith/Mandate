@@ -6,6 +6,7 @@ import { requireDashboardUser } from "./authGuard";
 import { getCurrentMerchant } from "@/lib/merchant";
 import { runSemanticPolicyAudit, type SemanticIssue } from "@/lib/policy/semanticAudit";
 import { suggestPolicyFix, type FixSuggestion } from "@/lib/policy/suggestFix";
+import { RuleParamsByType } from "@/lib/policy/types";
 import type { Json } from "@/types/db";
 import { sweepThresholds, type ReplayAction, type ThresholdOutcome } from "@/lib/policy/thresholdSweep";
 
@@ -25,6 +26,7 @@ export async function approvePolicyRule(ruleId: string, supersedeRuleIds: string
     const { error: supersedeError } = await db
       .from("policy_rules")
       .update({ status: "superseded", superseded_by: ruleId })
+      .eq("merchant_id", merchant.id)
       .in("id", supersedeRuleIds);
     if (supersedeError) throw supersedeError;
   }
@@ -125,7 +127,19 @@ export async function applyPolicyFix(ruleId: string, proposedParams: Record<stri
   await requireDashboardUser();
   const merchant = await getCurrentMerchant();
   const db = createAdminClient();
-  const { error } = await db.from("policy_rules").update({ params: proposedParams as unknown as Json }).eq("id", ruleId).eq("merchant_id", merchant.id);
+  // Params are validated against the rule's own schema before they are written:
+  // the engine trusts stored params, so a malformed one (a model-suggested fix is
+  // still model output) must never reach the table.
+  const { data: existing, error: readError } = await db
+    .from("policy_rules")
+    .select("type")
+    .eq("id", ruleId)
+    .eq("merchant_id", merchant.id)
+    .single();
+  if (readError || !existing) throw new Error("Rule not found.");
+  const checked = RuleParamsByType[existing.type].safeParse(proposedParams);
+  if (!checked.success) throw new Error(`Invalid params for ${existing.type}: ${checked.error.issues[0]?.message ?? "rejected"}`);
+  const { error } = await db.from("policy_rules").update({ params: checked.data as unknown as Json }).eq("id", ruleId).eq("merchant_id", merchant.id);
   if (error) throw error;
   revalidatePath("/dashboard");
 }
@@ -154,6 +168,7 @@ export async function replayStepUpThresholds(): Promise<{
   const { data: rules, error: rulesError } = await db
     .from("policy_rules")
     .select("id, type, params, status")
+    .eq("merchant_id", merchant.id)
     .eq("status", "active");
   if (rulesError) throw rulesError;
 

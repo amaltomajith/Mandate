@@ -14,7 +14,7 @@ import "./lib/loadEnv";
 import { createClient } from "@supabase/supabase-js";
 import { generateKeyPair } from "../src/lib/webBotAuth/keys";
 import { signRequest } from "../src/lib/webBotAuth/sign";
-import { applySeedProducts } from "../src/lib/demo/catalog";
+import { applySeedProducts } from "../src/lib/catalog";
 
 const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { autoRefreshToken: false, persistSession: false } });
 const BASE = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";

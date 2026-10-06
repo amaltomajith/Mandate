@@ -21,8 +21,6 @@ export type AlertSeverity = "info" | "notable" | "high";
 export type MandateType = "upi_autopay" | "ap2_style";
 export type MandateStatus = "active" | "paused" | "revoked" | "expired";
 export type AgentStatus = "active" | "paused";
-export type CampaignStatus = "draft" | "running" | "paused" | "done";
-export type CampaignTargetStatus = "pending" | "offered" | "paid" | "expired" | "refused" | "held";
 
 export interface Database {
   public: {
@@ -258,62 +256,6 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["alerts"]["Insert"]>;
         Relationships: [];
       };
-      campaigns: {
-        Row: {
-          merchant_id: string;
-          id: string;
-          name: string;
-          goal: string;
-          plan: Json;
-          budget_paise: number;
-          status: CampaignStatus;
-          agent_id: string | null;
-          created_at: string;
-        };
-        Insert: {
-          merchant_id: string;
-          id?: string;
-          name: string;
-          goal: string;
-          plan?: Json;
-          budget_paise: number;
-          status?: CampaignStatus;
-          agent_id?: string | null;
-          created_at?: string;
-        };
-        Update: Partial<Database["public"]["Tables"]["campaigns"]["Insert"]>;
-        Relationships: [];
-      };
-      campaign_targets: {
-        Row: {
-          merchant_id: string;
-          id: string;
-          campaign_id: string;
-          customer_id: string | null;
-          trace_id: string | null;
-          payment_link_id: string | null;
-          payment_link_url: string | null;
-          status: CampaignTargetStatus;
-          amount_paise: number;
-          discount_paise: number;
-          created_at: string;
-        };
-        Insert: {
-          merchant_id: string;
-          id?: string;
-          campaign_id: string;
-          customer_id?: string | null;
-          trace_id?: string | null;
-          payment_link_id?: string | null;
-          payment_link_url?: string | null;
-          status?: CampaignTargetStatus;
-          amount_paise: number;
-          discount_paise?: number;
-          created_at?: string;
-        };
-        Update: Partial<Database["public"]["Tables"]["campaign_targets"]["Insert"]>;
-        Relationships: [];
-      };
       seen_nonces: {
         Row: {
           nonce: string;
@@ -373,5 +315,3 @@ export type Customer = Database["public"]["Tables"]["customers"]["Row"];
 export type Mandate = Database["public"]["Tables"]["mandates"]["Row"];
 export type Product = Database["public"]["Tables"]["products"]["Row"];
 export type Merchant = Database["public"]["Tables"]["merchants"]["Row"];
-export type Campaign = Database["public"]["Tables"]["campaigns"]["Row"];
-export type CampaignTarget = Database["public"]["Tables"]["campaign_targets"]["Row"];

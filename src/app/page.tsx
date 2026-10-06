@@ -2,8 +2,6 @@ import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import GradientWaves from "@/components/landing/GradientWaves";
 import { SiteNav } from "@/components/landing/SiteNav";
-import CurvedLoop from "@/components/landing/CurvedLoop";
-import { DecisionFlow } from "@/components/landing/DecisionFlow";
 import { MandateMark } from "@/components/brand/MandateMark";
 
 /**
@@ -232,7 +230,7 @@ export default async function LandingPage() {
         eyebrow="The decision path"
         title="Four gates, in order, on every request."
       >
-        <DecisionFlow />
+        <p className="text-[14px]" style={{ color: "var(--muted)" }}>Signature, mandate, rules, then Razorpay — in that order, on every request.</p>
       </Section>
 
       {/* --------------------------------------------------------------- rules */}
@@ -282,16 +280,6 @@ export default async function LandingPage() {
         className="relative w-full select-none overflow-hidden py-6"
         style={{ color: "rgba(234,238,250,0.13)" }}
       >
-        {/* A shallow arc, not the component default. At 260 the curve swings
-            far enough to read as a diagonal slash across the page rather than
-            a band, and the asymmetry of the underlying quadratic (its control
-            point sits left of centre) becomes obvious at that depth. */}
-        <CurvedLoop
-          marqueeText="Bounded ✦ Gated ✦ Explainable ✦"
-          speed={0.55}
-          curveAmount={130}
-          className="font-semibold uppercase tracking-tight"
-        />
       </div>
 
       {/* ------------------------------------------------------------ protocol */}
@@ -382,22 +370,12 @@ export default async function LandingPage() {
                 >
                   {signedIn ? "Open the dashboard" : "Get started"}
                 </Link>
-                <a
-                  href="/architecture.html"
-                  target="_blank"
-                  rel="noopener"
-                  className="rounded-xl border px-5 py-2.5 text-[13.5px] font-semibold transition-colors hover:bg-white/[0.04]"
-                  style={{ borderColor: "var(--panel-border-strong)" }}
-                >
-                  Read the architecture
-                </a>
               </div>
             </div>
 
             <div className="flex flex-col gap-2.5 font-mono text-[12px]">
               {[
                 { label: "Source on GitHub", href: "https://github.com/amaltomajith/Mandate" },
-                { label: "Architecture, end to end", href: "/architecture.html" },
                 { label: "Sign in", href: "/login" },
               ].map((l) => (
                 <a
