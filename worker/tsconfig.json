@@ -1,0 +1,13 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "..",
+    "paths": {
+      "@/*": ["./src/*"],
+      "server-only": ["./worker/src/shims/server-only.ts"]
+    },
+    "noEmit": true,
+    "plugins": []
+  },
+  "include": ["src/**/*.ts", "../src/types/**/*.ts", "../next-env.d.ts"]
+}

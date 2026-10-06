@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "seed": "tsx scripts/seed.ts"
+    "seed": "tsx scripts/seed.ts",
+    "worker": "tsx --tsconfig worker/tsconfig.json worker/src/index.ts",
+    "worker:dry": "cross-env MANDATE_DRY_RUN=1 tsx --tsconfig worker/tsconfig.json worker/src/index.ts",
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p worker"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.8.1",
@@ -31,6 +34,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "cross-env": "^10.1.0",
     "dotenv": "^17.4.2",
     "eslint": "^9",
     "eslint-config-next": "16.3.2",
