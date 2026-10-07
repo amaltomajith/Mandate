@@ -89,8 +89,8 @@ export function SettingsPanel({ initial, initialError }: { initial: ResetPreview
       await run();
       setDone(
         kind === "transactions"
-          ? `Cleared ${fresh.transactionsTotal.toLocaleString()} rows. Agents, rules, catalog and mandates are untouched.`
-          : "Account reset. Default rules and catalog restored."
+          ? `Cleared ${fresh.transactionsTotal.toLocaleString()} rows. Products, suppliers, customers, guardrails, agents and connections are untouched.`
+          : "Account reset. Starting rules, catalog and guardrails restored."
       );
       setTypedSlug("");
       await load();
@@ -190,10 +190,11 @@ export function SettingsPanel({ initial, initialError }: { initial: ResetPreview
 
         {/* ---- Reset transactions ---- */}
         <div className="rounded-xl border p-4" style={{ borderColor: "var(--panel-border-strong)", background: "var(--panel)" }}>
-          <h3 className="text-[13px] font-semibold">Reset transactions</h3>
+          <h3 className="text-[13px] font-semibold">Clear history</h3>
           <p className="mt-1 text-[11.5px]" style={{ color: "var(--muted-2)" }}>
-            Clears this account&apos;s history. Registered agents keep their keys, so nothing has to be
-            re-registered afterwards.
+            Clears what has happened: conversations, agent runs, quotes, purchase orders, payouts, sales, the
+            wallet and the audit trail. Your products, suppliers and their approved payment details,
+            customers, guardrails, agents and connections stay, so nothing has to be set up again.
           </p>
 
           <div className="mt-3 grid gap-x-8 gap-y-0 sm:grid-cols-2">
@@ -250,10 +251,10 @@ export function SettingsPanel({ initial, initialError }: { initial: ResetPreview
             Reset everything
           </h3>
           <p className="mt-1 text-[11.5px]" style={{ color: "var(--muted-2)" }}>
-            Everything above, plus mandates and every registered agent — their keypairs included, so each
-            external buyer has to be registered again. The default catalog and the five starting policy
-            rules are restored, exactly as a new sign-up gets them. The built-in simulation identity is
-            kept so its history survives.
+            Everything above, plus your products, suppliers (and their payment details), customers and rules.
+            The starting catalog, rules and guardrails are restored, exactly as a new sign-up gets them.
+            Your Gmail, WhatsApp and Razorpay connections and your two agents are kept, because linking
+            them again is the slow part.
           </p>
 
           <label className="mt-3 block text-[11.5px]" style={{ color: "var(--muted-2)" }}>
@@ -279,11 +280,10 @@ export function SettingsPanel({ initial, initialError }: { initial: ResetPreview
                 () => resetEverything(typedSlug),
                 (p) =>
                   `RESET EVERYTHING for ${p.merchantName} (${p.merchantSlug})?\n\n` +
-                  `Deletes all ${p.transactionsTotal.toLocaleString()} history rows, plus ` +
-                  `${p.preserved.mandates} mandate(s) and every registered agent except the built-in ` +
-                  `simulation identity.\n\n` +
-                  `Agent keypairs are destroyed — every external buyer will need registering again.\n\n` +
-                  `The default catalog and five starting rules are restored. This cannot be undone.`
+                  `Deletes all ${p.transactionsTotal.toLocaleString()} history rows, plus your ` +
+                  `${p.preserved.products} product(s), ${p.preserved.vendors} supplier(s) with ${p.preserved.payees} payee(s), ` +
+                  `${p.preserved.customers} customer(s) and every rule.\n\n` +
+                  `The starting catalog and guardrails are restored. Connections and your two agents are kept. This cannot be undone.`
               )
             }
           >
