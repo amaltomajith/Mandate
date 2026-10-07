@@ -80,3 +80,66 @@ export async function resolveActionFacts(merchantId: string, input: ActionInput)
 
   return {};
 }
+
+/**
+ * Checks that are about the world rather than a policy, run before any rule.
+ * Each returns the reason the action cannot proceed, or null.
+ *
+ *  - A refund must be of a payment this business actually received. Otherwise a
+ *    deployment where tenants share one Razorpay account could refund another
+ *    tenant's customer, and an agent could be pointed at any payment id.
+ *  - A payout must be against a purchase order that exists, belongs to the payee's
+ *    supplier, is still open, and has at least this much advance left unpaid.
+ *    Without it, an agent could pay an approved payee any amount under the caps,
+ *    again and again, against one order or none. Paying an order down to zero also
+ *    makes a second payment against it impossible, which is what stops a retried
+ *    or duplicated request from paying twice.
+ */
+const OPEN_PO = ["draft", "quoting", "awaiting_approval", "approved"];
+
+export async function hardChecks(merchantId: string, input: ActionInput): Promise<string | null> {
+  const db = createAdminClient();
+
+  if (input.actionType === "refund.create") {
+    const { data, error } = await db
+      .from("sales")
+      .select("id")
+      .eq("merchant_id", merchantId)
+      .or(`razorpay_payment_id.eq.${input.params.paymentId},razorpay_payment_id.like.${input.params.paymentId}#%`)
+      .limit(1);
+    if (error) throw new Error(error.message);
+    if ((data ?? []).length === 0) return "That payment is not one of this business's recorded sales, so it cannot be refunded here.";
+    return null;
+  }
+
+  if (input.actionType === "payout.create") {
+    const { data: payee, error } = await db.from("payees").select("vendor_id").eq("id", input.params.payeeId).eq("merchant_id", merchantId).maybeSingle();
+    if (error) throw new Error(error.message);
+    // An unknown payee is the payee rule's to refuse, with its own explanation.
+    if (!payee) return null;
+
+    const { data: po, error: poError } = await db
+      .from("purchase_orders")
+      .select("id, vendor_id, status, advance_paise")
+      .eq("id", input.params.poId)
+      .eq("merchant_id", merchantId)
+      .maybeSingle();
+    if (poError) throw new Error(poError.message);
+    if (!po) return "This payout names a purchase order that does not exist.";
+    if (po.vendor_id !== payee.vendor_id) return "This payout's purchase order is for a different supplier than the payee.";
+    if (!OPEN_PO.includes(po.status)) return `This purchase order is ${po.status.replace("_", " ")}, so it cannot take another payout.`;
+
+    const { data: paid, error: paidError } = await db
+      .from("payouts")
+      .select("amount_paise")
+      .eq("merchant_id", merchantId)
+      .eq("po_id", po.id)
+      .in("status", ["queued", "processing", "processed"]);
+    if (paidError) throw new Error(paidError.message);
+    const remaining = Number(po.advance_paise) - (paid ?? []).reduce((n, p) => n + Number(p.amount_paise), 0);
+    if (input.amount > remaining) {
+      return `This payout is ₹${(input.amount / 100).toLocaleString("en-IN")} but the order has only ₹${(Math.max(remaining, 0) / 100).toLocaleString("en-IN")} of advance left to pay.`;
+    }
+  }
+  return null;
+}

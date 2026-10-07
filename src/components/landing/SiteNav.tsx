@@ -19,8 +19,8 @@ import { MandateMark } from "@/components/brand/MandateMark";
 
 const LINKS = [
   { label: "How it works", href: "#how" },
-  { label: "Policy", href: "#rules" },
-  { label: "Protocol", href: "#protocol" },
+  { label: "Payment Wall", href: "#rules" },
+  { label: "Why trust it", href: "#trust" },
 ];
 
 export function SiteNav({ signedIn }: { signedIn: boolean }) {

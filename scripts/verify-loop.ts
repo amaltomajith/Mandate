@@ -78,7 +78,7 @@ async function main() {
     const { data: pos2 } = await db.from("purchase_orders").select("*").eq("merchant_id", m.id);
     check("it now places the order", (pos2 ?? []).length === 1, `${(pos2 ?? []).length} orders`);
     const po = pos2?.[0];
-    const { data: payoutTrace } = await db.from("traces").select("id").eq("merchant_id", m.id).eq("action_type", "payout.create").eq("decision", "escalate").limit(1).single();
+    const { data: payoutTrace } = await db.from("traces").select("id").eq("merchant_id", m.id).eq("action_type", "payout.create").eq("decision", "escalate").eq("mode", "enforce").limit(1).single();
     const { data: esc } = await db.from("escalations").select("*").eq("merchant_id", m.id).eq("status", "pending").eq("trace_id", payoutTrace!.id);
     check("the advance is large, so it waits for the merchant", po?.status === "awaiting_approval" && (esc ?? []).length === 1, `${po?.status}, ${(esc ?? []).length} pending for the payout`);
     check("and the advance fits inside what sales have earned plus the float", Number(po?.advance_paise ?? 0) <= 2_000_000 + 0.7 * wallet, String(po?.advance_paise));

@@ -7,6 +7,7 @@ import { requireDashboardUser } from "./authGuard";
 import { getCurrentMerchant } from "@/lib/merchant";
 import { decryptJson, encryptJson } from "@/lib/secrets";
 import type { ConnectionKind } from "@/types/db";
+import { isOperator } from "@/lib/operator";
 
 /**
  * The merchant's connections: Razorpay, RazorpayX, web search. (Gmail and
@@ -18,8 +19,8 @@ import type { ConnectionKind } from "@/types/db";
  */
 
 async function scope() {
-  await requireDashboardUser();
-  return { merchant: await getCurrentMerchant(), db: createAdminClient() };
+  const user = await requireDashboardUser();
+  return { user, merchant: await getCurrentMerchant(), db: createAdminClient() };
 }
 
 async function put(
@@ -79,7 +80,8 @@ export async function connectRazorpay(input: z.infer<typeof RazorpayInput>): Pro
  * "use the server's".
  */
 export async function connectServerRazorpayKeys(): Promise<void> {
-  const { merchant } = await scope();
+  const { user, merchant } = await scope();
+  if (!isOperator(user.email)) throw new Error("Only the operator of this deployment can use the server's keys. Connect your own Razorpay account instead.");
   if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) throw new Error("This server has no Razorpay keys configured.");
   await put(merchant.id, "razorpay", { status: "connected", account_label: `${process.env.RAZORPAY_KEY_ID} (server keys)`, meta: { source: "env" } });
   revalidatePath("/dashboard");
@@ -89,14 +91,17 @@ const RazorpayXInput = z.object({ accountNumber: z.string().regex(/^\d{6,20}$/, 
 
 /** RazorpayX reuses the Razorpay key pair; this adds the account payouts are drawn from. */
 export async function connectRazorpayX(input: z.infer<typeof RazorpayXInput>): Promise<void> {
-  const { merchant, db } = await scope();
+  const { user, merchant, db } = await scope();
   const v = RazorpayXInput.parse(input);
   const { data: base } = await db.from("connections").select("secret_enc, status, meta").eq("merchant_id", merchant.id).eq("kind", "razorpay").maybeSingle();
   if (!base || base.status !== "connected") throw new Error("Connect Razorpay first; RazorpayX uses the same keys.");
-  const keys =
-    (base.meta as { source?: string } | null)?.source === "env"
-      ? { key_id: process.env.RAZORPAY_KEY_ID!, key_secret: process.env.RAZORPAY_KEY_SECRET! }
-      : decryptJson<{ key_id: string; key_secret: string }>(base.secret_enc!);
+  const borrowing = (base.meta as { source?: string } | null)?.source === "env";
+  // Borrowed keys are the operator's, and RazorpayX would pay out of the operator's
+  // account: so this too is the operator's alone, even if the connection exists.
+  if (borrowing && !isOperator(user.email)) throw new Error("RazorpayX needs your own Razorpay keys. Reconnect Razorpay with your own key pair first.");
+  const keys = borrowing
+    ? { key_id: process.env.RAZORPAY_KEY_ID!, key_secret: process.env.RAZORPAY_KEY_SECRET! }
+    : decryptJson<{ key_id: string; key_secret: string }>(base.secret_enc!);
   await put(merchant.id, "razorpayx", {
     status: "connected",
     account_label: `Account ending ${v.accountNumber.slice(-4)}`,

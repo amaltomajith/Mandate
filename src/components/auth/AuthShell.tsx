@@ -3,16 +3,16 @@ import { MandateMark } from "@/components/brand/MandateMark";
 
 const PILLARS = [
   {
-    title: "Bounded",
-    body: "Every order, refund, or mandate an agent proposes is checked against caps, velocity limits, and category rules before a paisa moves.",
+    title: "Sells what is stuck",
+    body: "Your selling agent marks slow stock down a step at a time, never below your margin, and haggles with buyers inside limits it never sees.",
   },
   {
-    title: "Gated",
-    body: "Cross a threshold and the action escalates to a human instead of firing blind — nothing above the line executes without sign-off.",
+    title: "Restocks what is selling",
+    body: "Your buying agent gets quotes from suppliers over email and WhatsApp, picks the best, and pays, sized to what sales have earned.",
   },
   {
-    title: "Explainable",
-    body: "Every allow, block, and escalation traces back to the exact rule that fired, in plain language, on a live graph you can inspect.",
+    title: "Guarded in code",
+    body: "Every price drop and payout passes a Payment Wall that checks your own records. No message or prompt can talk it into paying the wrong person.",
   },
 ];
 
@@ -29,11 +29,11 @@ export function AuthShell({ children }: { children: ReactNode }) {
 
         <div className="relative z-10 max-w-md">
           <h1 className="text-3xl font-semibold leading-tight tracking-tight text-white">
-            A control plane for money your agents move.
+            An autonomous manager for your store.
           </h1>
           <p className="mt-3 text-[15px] leading-relaxed text-white/70">
-            Mandate sits between any AI agent — a third-party shopping agent, or your own
-            automation — and Razorpay. It decides, explains, and remembers.
+            Agents that sell your slow stock to fund restocking your bestsellers, with a payment
+            guardrail between them and your money.
           </p>
 
           <div className="mt-8 space-y-5">
@@ -50,7 +50,7 @@ export function AuthShell({ children }: { children: ReactNode }) {
         </div>
 
         <p className="relative z-10 text-xs text-white/40">
-          Built for Razorpay Track 01 — AI Growth &amp; Agentic Commerce.
+          Built on Razorpay.
         </p>
       </div>
 

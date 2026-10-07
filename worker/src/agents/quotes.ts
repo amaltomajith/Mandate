@@ -34,14 +34,16 @@ function toPaise(rupees: string): number {
   return Math.round(parseFloat(rupees.replace(/,/g, "")) * 100);
 }
 
-/** Whether `rupees` appears, in any usual formatting, in the supplier's text. */
+/**
+ * Whether `rupees` appears, in any usual formatting, as a whole number in the
+ * supplier's text. A figure only counts if it is not part of a longer number, so
+ * "5" is not found inside "2,500" or "₹5,00,000". Without that, nearly any price
+ * is "grounded" by a message containing the right digits anywhere.
+ */
 export function groundedIn(text: string, rupees: number): boolean {
   const whole = Math.round(rupees);
-  const plain = String(whole);
-  const withCommas = whole.toLocaleString("en-IN");
-  const intl = whole.toLocaleString("en-US");
-  const hay = text.replace(/\s/g, "");
-  return [plain, withCommas, intl].some((f) => hay.includes(f));
+  const forms = [String(whole), whole.toLocaleString("en-IN"), whole.toLocaleString("en-US")];
+  return forms.some((f) => new RegExp(`(?<!\\d)(?<!\\d[.,])${f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\d]|,\\d)`).test(text));
 }
 
 export function parseQuoteRegex(text: string): ParsedQuote | null {

@@ -116,6 +116,8 @@ async function dispatch(input: ActionInput, ctx: ExecutionContext): Promise<Json
       if (!rzp) return sandboxRefund(ctx.traceId, input.amount, input.currency);
       const refund = await rzp.payments.refund(input.params.paymentId, {
         amount: input.amount,
+        // Ties the refund to the wall's decision, so a duplicate is visible at Razorpay.
+        receipt: ctx.traceId.slice(0, 40),
       });
       return refund as unknown as Json;
     }

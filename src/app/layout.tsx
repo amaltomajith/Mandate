@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Mandate",
-  description: "A merchant-owned control plane for agent-initiated money actions.",
+  description: "An autonomous store manager with a deterministic payment guardrail.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

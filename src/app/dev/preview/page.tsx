@@ -51,7 +51,7 @@ export default async function Preview({ searchParams }: { searchParams: Promise<
           coo={coo}
           slug={merchant.slug}
           appUrl={process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}
-          serverHasRazorpayKeys={Boolean(process.env.RAZORPAY_KEY_ID)}
+          serverHasRazorpayKeys={false}
           googleConfigured={Boolean(process.env.GOOGLE_CLIENT_ID)}
           map={<OperationsMap key="map" coo={coo} agents={agents} rules={rules} traces={traces} escalations={escalations} />}
         />

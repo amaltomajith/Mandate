@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createAlert, insertTrace } from "@/lib/mcp/traceHelpers";
 import { getMerchantBySlug } from "@/lib/merchant";
 import { recordNonce } from "@/lib/webBotAuth/nonceStore";
+import { allow, clientIp } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
@@ -51,6 +52,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ slug: stri
     return NextResponse.json({ error: "unknown_merchant", slug }, { status: 404 });
   }
 
+  // A brake, not a quota: far above what a worker doing its job sends, low
+  // enough that flooding this unauthenticated endpoint is not free.
+  if (!allow(`mcp:${merchant.id}:${clientIp(req.headers)}`, 600, 60_000)) {
+    return NextResponse.json({ error: "rate_limited" }, { status: 429, headers: { "retry-after": "30" } });
+  }
+
   const bodyText = await req.text();
   const url = new URL(req.url);
 
@@ -83,6 +90,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ slug: stri
     // let anyone flood a competitor's audit trail by signing garbage with that
     // competitor's agent id, the same attack that keeps protocol rejects out of
     // the trust score.
+    // Recording is capped per merchant per minute. Every rejection is still
+    // refused with a 401; only the audit row and the alert are limited, so a
+    // flood of garbage cannot be used to fill a merchant's trail and bury the
+    // one real forgery in it.
+    if (!allow(`mcp-reject:${merchant.id}`, 20, 60_000)) {
+      return NextResponse.json({ error: "signature_verification_failed", reason: verification.reason }, { status: 401 });
+    }
     const trace = await insertTrace({
       merchantId: merchant.id,
       mode: "enforce",

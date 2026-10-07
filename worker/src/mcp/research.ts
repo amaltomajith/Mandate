@@ -1,4 +1,6 @@
-import { lookup } from "node:dns/promises";
+import dns from "node:dns";
+import http from "node:http";
+import https from "node:https";
 import net from "node:net";
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
@@ -21,54 +23,114 @@ const MAX_REDIRECTS = 3;
 
 function isPrivateAddress(ip: string): boolean {
   if (net.isIPv4(ip)) {
-    const [a, b] = ip.split(".").map(Number);
+    const [a, b, c] = ip.split(".").map(Number);
     return (
-      a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224
+      a === 10 || a === 127 || a === 0 ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 192 && b === 0 && (c === 0 || c === 2)) ||
+      (a === 198 && (b === 18 || b === 19)) ||
+      (a === 198 && b === 51 && c === 100) ||
+      (a === 203 && b === 0 && c === 113) ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      a >= 224
     );
   }
   const v6 = ip.toLowerCase();
-  return v6 === "::1" || v6 === "::" || v6.startsWith("fc") || v6.startsWith("fd") || v6.startsWith("fe80") || v6.startsWith("::ffff:");
+  return (
+    v6 === "::1" || v6 === "::" ||
+    v6.startsWith("fc") || v6.startsWith("fd") || v6.startsWith("fe8") || v6.startsWith("fe9") || v6.startsWith("fea") || v6.startsWith("feb") || v6.startsWith("fec") ||
+    v6.startsWith("::ffff:") || v6.startsWith("64:ff9b:") || v6.startsWith("2001:db8") || v6.startsWith("ff")
+  );
 }
 
-/** Throws unless the URL is public http(s). Resolves DNS so a hostname that
- *  points at an internal address is caught as well as a literal IP. */
+/**
+ * Throws unless the URL is public http(s) on its face: right scheme, not an
+ * internal-looking name, not a literal private IP. DNS names are NOT trusted on
+ * this check alone; see {@link guardedLookup}, which re-checks at connect time.
+ */
 export async function assertPublicUrl(raw: string): Promise<URL> {
   const url = new URL(raw);
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Only http and https pages can be fetched.");
   const host = url.hostname.replace(/^\[|\]$/g, "");
-  if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) throw new Error("That address is not public.");
-  const addrs = net.isIP(host) ? [{ address: host }] : await lookup(host, { all: true });
-  if (addrs.length === 0 || addrs.some((a) => isPrivateAddress(a.address))) throw new Error("That address is not public.");
+  if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal") || host.endsWith(".localhost")) throw new Error("That address is not public.");
+  if (net.isIP(host) && isPrivateAddress(host)) throw new Error("That address is not public.");
+  // A hostname must also resolve to public addresses now, for a clear early error.
+  if (!net.isIP(host)) {
+    const addrs = await dns.promises.lookup(host, { all: true });
+    if (addrs.length === 0 || addrs.some((a) => isPrivateAddress(a.address))) throw new Error("That address is not public.");
+  }
   return url;
+}
+
+/**
+ * The DNS lookup the connection itself uses. This is the check that matters: a
+ * hostname that resolves to a public address when first checked can resolve to an
+ * internal one a moment later (DNS rebinding). Validating the address the socket
+ * is actually about to connect to, rather than one looked up earlier, closes that.
+ */
+function guardedLookup(hostname: string, options: dns.LookupOptions, callback: (err: NodeJS.ErrnoException | null, address: string | dns.LookupAddress[], family?: number) => void) {
+  dns.lookup(hostname, { ...options, all: true }, (err, addresses) => {
+    if (err) return callback(err, "", 0);
+    const list = addresses as dns.LookupAddress[];
+    if (list.length === 0 || list.some((a) => isPrivateAddress(a.address))) {
+      return callback(Object.assign(new Error("That address is not public."), { code: "EACCES" }) as NodeJS.ErrnoException, "", 0);
+    }
+    if (options.all) return callback(null, list);
+    callback(null, list[0].address, list[0].family);
+  });
+}
+
+function requestOnce(url: URL): Promise<{ status: number; location: string | null; contentType: string; body: Buffer }> {
+  return new Promise((resolve, reject) => {
+    const mod = url.protocol === "https:" ? https : http;
+    const req = mod.request(
+      url,
+      {
+        method: "GET",
+        lookup: guardedLookup as never,
+        timeout: TIMEOUT_MS,
+        headers: { "user-agent": "Mozilla/5.0 (compatible; MandateResearch/0.3)", accept: "text/html,text/plain;q=0.9,*/*;q=0.1" },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        let size = 0;
+        res.on("data", (c: Buffer) => {
+          size += c.length;
+          if (size > MAX_BYTES) {
+            res.destroy();
+            return;
+          }
+          chunks.push(c);
+        });
+        const done = () =>
+          resolve({
+            status: res.statusCode ?? 0,
+            location: (res.headers.location as string | undefined) ?? null,
+            contentType: String(res.headers["content-type"] ?? ""),
+            body: Buffer.concat(chunks),
+          });
+        res.on("end", done);
+        res.on("close", done);
+        res.on("error", reject);
+      }
+    );
+    req.on("timeout", () => req.destroy(new Error("The page took too long to respond.")));
+    req.on("error", reject);
+    req.end();
+  });
 }
 
 async function safeFetch(raw: string): Promise<{ finalUrl: string; contentType: string; text: string }> {
   let url = await assertPublicUrl(raw);
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    const res = await fetch(url, {
-      redirect: "manual",
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-      headers: { "user-agent": "Mozilla/5.0 (compatible; MandateResearch/0.3)", accept: "text/html,text/plain;q=0.9,*/*;q=0.1" },
-    });
-    if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
-      url = await assertPublicUrl(new URL(res.headers.get("location")!, url).toString());
+    const res = await requestOnce(url);
+    if (res.status >= 300 && res.status < 400 && res.location) {
+      url = await assertPublicUrl(new URL(res.location, url).toString());
       continue;
     }
-    const reader = res.body?.getReader();
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    while (reader) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > MAX_BYTES) {
-        await reader.cancel();
-        break;
-      }
-      chunks.push(value);
-    }
-    return { finalUrl: url.toString(), contentType: res.headers.get("content-type") ?? "", text: Buffer.concat(chunks).toString("utf8") };
+    return { finalUrl: url.toString(), contentType: res.contentType, text: res.body.toString("utf8") };
   }
   throw new Error("Too many redirects.");
 }

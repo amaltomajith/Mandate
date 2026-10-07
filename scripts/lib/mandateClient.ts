@@ -121,6 +121,7 @@ export class MandateClient {
     const headers: Record<string, string> = {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
+      "mcp-protocol-version": "2026-07-28",
       ...(method ? { "mcp-method": method } : {}),
       ...(name ? { "mcp-name": name } : {}),
       ...signed,

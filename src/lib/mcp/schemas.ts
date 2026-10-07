@@ -18,6 +18,13 @@ export const LineItem = z.object({
 });
 export type LineItem = z.infer<typeof LineItem>;
 
+/**
+ * Every amount in this system is rupees. Currency is a literal rather than a free
+ * three-letter code because every limit (caps, approval threshold, budget) is
+ * written in rupees: an action in another currency would sail past all of them,
+ * and the refund API does not take a currency at all, so it would execute in
+ * whatever currency the original payment was in.
+ */
 export const OrderCreateParams = z.object({
   receipt: z.string().optional(),
   notes: z.record(z.string(), z.string()).optional(),
@@ -25,7 +32,8 @@ export const OrderCreateParams = z.object({
 });
 
 export const RefundCreateParams = z.object({
-  paymentId: z.string(),
+  // A plain token, never free text: it is looked up in the database.
+  paymentId: z.string().regex(/^[A-Za-z0-9_]{3,64}$/, "A payment id is letters, digits and underscores."),
 });
 
 /**
@@ -62,7 +70,10 @@ export const PaymentLinkCreateParams = z.object({
  */
 export const PayoutCreateParams = z.object({
   payeeId: z.string().uuid(),
-  poId: z.string().uuid().optional(),
+  /** Required: a payout is always an advance or payment against a purchase order,
+   *  and the wall checks the order exists, belongs to this supplier, and still
+   *  has that much unpaid. */
+  poId: z.string().uuid(),
   purpose: z.enum(["vendor_advance", "vendor_payment", "refund_to_vendor"]).default("vendor_advance"),
   note: z.string().max(200).optional(),
 });
@@ -78,7 +89,7 @@ export const ActionInput = z.discriminatedUnion("actionType", [
   z.object({
     actionType: z.literal("order.create"),
     amount: z.number().int().positive(),
-    currency: z.string().length(3).default("INR"),
+    currency: z.literal("INR").default("INR"),
     category: z.string().optional(),
     customerId: z.string().uuid().optional(),
     params: OrderCreateParams,
@@ -86,7 +97,7 @@ export const ActionInput = z.discriminatedUnion("actionType", [
   z.object({
     actionType: z.literal("refund.create"),
     amount: z.number().int().positive(),
-    currency: z.string().length(3).default("INR"),
+    currency: z.literal("INR").default("INR"),
     category: z.string().optional(),
     customerId: z.string().uuid().optional(),
     params: RefundCreateParams,
@@ -94,7 +105,7 @@ export const ActionInput = z.discriminatedUnion("actionType", [
   z.object({
     actionType: z.literal("payment_link.create"),
     amount: z.number().int().positive(),
-    currency: z.string().length(3).default("INR"),
+    currency: z.literal("INR").default("INR"),
     category: z.string().optional(),
     customerId: z.string().uuid().optional(),
     params: PaymentLinkCreateParams,
@@ -102,7 +113,7 @@ export const ActionInput = z.discriminatedUnion("actionType", [
   z.object({
     actionType: z.literal("payout.create"),
     amount: z.number().int().positive(),
-    currency: z.string().length(3).default("INR"),
+    currency: z.literal("INR").default("INR"),
     category: z.string().optional(),
     customerId: z.string().uuid().optional(),
     params: PayoutCreateParams,
@@ -110,7 +121,7 @@ export const ActionInput = z.discriminatedUnion("actionType", [
   z.object({
     actionType: z.literal("price.change"),
     amount: z.number().int().positive(),
-    currency: z.string().length(3).default("INR"),
+    currency: z.literal("INR").default("INR"),
     category: z.string().optional(),
     customerId: z.string().uuid().optional(),
     params: PriceChangeParams,

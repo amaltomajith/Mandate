@@ -72,6 +72,7 @@ async function main() {
     const buyer = new MandateClient(BASE, A.slug, buying.agentId, buying.secretKey);
     const seller = new MandateClient(BASE, A.slug, selling.agentId, selling.secretKey);
 
+    const poFor = new Map<string, string>();
     const mkPayee = async (merchantId: string, label: string, opts: { payee?: "active" | "pending"; vendor?: "approved" | "candidate" } = {}) => {
       const { data: vendor, error } = await db
         .from("vendors")
@@ -96,10 +97,23 @@ async function main() {
         .select("*")
         .single();
       if (pe) throw new Error(pe.message);
+      // A payout is always against an order. This one has plenty of advance left.
+      const { data: po, error: poe } = await db
+        .from("purchase_orders")
+        .insert({ merchant_id: merchantId, vendor_id: vendor.id, status: "quoting", total_paise: 200_000_00, advance_paise: 100_000_00 })
+        .select("id")
+        .single();
+      if (poe) throw new Error(poe.message);
+      poFor.set(payee.id, po.id);
       return payee;
     };
 
-    const payoutArgs = (payeeId: string, rs: number) => ({ actionType: "payout.create", amount: rupees(rs), currency: "INR", params: { payeeId, purpose: "vendor_advance" } });
+    const payoutArgs = (payeeId: string, rs: number, poId?: string) => ({
+      actionType: "payout.create",
+      amount: rupees(rs),
+      currency: "INR",
+      params: { payeeId, poId: poId ?? poFor.get(payeeId) ?? [...poFor.values()][0], purpose: "vendor_advance" },
+    });
 
     const good = await mkPayee(A.id, "Good Supplier");
     const pending = await mkPayee(A.id, "Pending Supplier", { payee: "pending" });
@@ -175,7 +189,7 @@ async function main() {
     {
       const traceId = randomUUID();
       // Executed directly, twice, with the same trace id: what a retried approval does.
-      const input = { actionType: "payout.create" as const, amount: rupees(100), currency: "INR", params: { payeeId: good.id, purpose: "vendor_advance" as const } };
+      const input = { actionType: "payout.create" as const, amount: rupees(100), currency: "INR" as const, params: { payeeId: good.id, poId: poFor.get(good.id)!, purpose: "vendor_advance" as const } };
       // The ledger row references the trace, so give it a real one.
       await db.from("traces").insert({ id: traceId, merchant_id: A.id, mode: "enforce", action_type: "payout.create", params: {}, agent_id: buying.agentId, decision: "allow" });
       await executeRealAction(input, { merchantId: A.id, traceId, agentId: buying.agentId });
@@ -215,6 +229,46 @@ async function main() {
       check("a price drop that keeps the margin is allowed", ok.decision === "allow", `${ok.decision}: ${ok.reasoning}`);
       const { data: now } = await db.from("products").select("price_paise").eq("merchant_id", A.id).eq("sku", "keyboard-01").single();
       check("and the price changed", now?.price_paise === rupees(4200), String(now?.price_paise));
+    }
+
+    console.log("the wall checks the world, not just the rules");
+    {
+      let usdRefused = false;
+      try {
+        await call(buyer, "enforce_action", { actionType: "payout.create", amount: rupees(100), currency: "USD", params: { payeeId: good.id, poId: poFor.get(good.id), purpose: "vendor_advance" } });
+      } catch {
+        usdRefused = true;
+      }
+      check("an action in another currency is refused outright (it would sail past every rupee limit)", usdRefused);
+
+      const noPo = await call(buyer, "enforce_action", { actionType: "payout.create", amount: rupees(100), currency: "INR", params: { payeeId: good.id, poId: randomUUID(), purpose: "vendor_advance" } }).catch((e) => ({ decision: "block", reasoning: String(e) }) as unknown as Outcome);
+      check("a payout against an order that does not exist is blocked", noPo.decision === "block" && /does not exist/.test(noPo.reasoning), `${noPo.decision}: ${noPo.reasoning}`);
+
+      const otherVendorPo = poFor.get(candidateVendor.id)!;
+      const wrongSupplier = await call(buyer, "enforce_action", payoutArgs(good.id, 100, otherVendorPo));
+      check("a payout whose order belongs to a different supplier is blocked", wrongSupplier.decision === "block" && /different supplier/.test(wrongSupplier.reasoning), `${wrongSupplier.decision}: ${wrongSupplier.reasoning}`);
+
+      const { data: tiny } = await db
+        .from("purchase_orders")
+        .insert({ merchant_id: A.id, vendor_id: good.vendor_id, status: "quoting", total_paise: 2000_00, advance_paise: 1000_00 })
+        .select("id")
+        .single();
+      const tooMuch = await call(buyer, "enforce_action", payoutArgs(good.id, 2000, tiny!.id));
+      check("a payout larger than the advance left on its order is blocked", tooMuch.decision === "block" && /advance left/.test(tooMuch.reasoning), `${tooMuch.decision}: ${tooMuch.reasoning}`);
+      const exact = await call(buyer, "enforce_action", payoutArgs(good.id, 1000, tiny!.id));
+      check("paying the advance exactly is allowed", exact.decision === "allow", `${exact.decision}: ${exact.reasoning}`);
+      const again = await call(buyer, "enforce_action", payoutArgs(good.id, 1000, tiny!.id));
+      check("paying the SAME order a second time is blocked, so a repeated request cannot pay twice", again.decision === "block", `${again.decision}: ${again.reasoning}`);
+
+      const refund = await call(seller, "enforce_action", { actionType: "refund.create", amount: rupees(100), currency: "INR", params: { paymentId: "pay_someone_elses_payment" } });
+      check("a refund of a payment this business never received is blocked", refund.decision === "block" && /not one of this business/.test(refund.reasoning), `${refund.decision}: ${refund.reasoning}`);
+      let badId = false;
+      try {
+        await call(seller, "enforce_action", { actionType: "refund.create", amount: 100, currency: "INR", params: { paymentId: "x,razorpay_payment_id.neq.0" } });
+      } catch {
+        badId = true;
+      }
+      check("a payment id that is not a plain token is refused (it is used in a database filter)", badId);
     }
 
     console.log("kill switches");

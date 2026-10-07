@@ -103,6 +103,10 @@ async function main() {
     check("the merchant is alerted", (alerts ?? []).some((a) => a.severity === "high" && /payout/i.test(a.message)));
     const repeat = await post(m.slug, { event: "payout.failed", payload: { payout: { entity: { id: "pout_live_1", status: "failed" } } } });
     check("a repeat of the failure does not credit twice", repeat.status === 200 && (await walletBalancePaise(m.id)) === balanceBefore + 50000);
+    const late = await post(m.slug, { event: "payout.processed", payload: { payout: { entity: { id: "pout_live_1", status: "processed" } } } });
+    const { data: still } = await db.from("payouts").select("status").eq("merchant_id", m.id).eq("razorpay_payout_id", "pout_live_1").single();
+    check("a late 'processed' cannot undo a payout that already failed", late.status === 200 && still?.status === "failed", String(still?.status));
+    check("and the wallet is unchanged by it", (await walletBalancePaise(m.id)) === balanceBefore + 50000);
   } finally {
     await db.from("merchants").delete().eq("id", m.id);
   }

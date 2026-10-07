@@ -211,7 +211,11 @@ export async function getAgentPolicyFacts(agentId: string): Promise<{
     .select("trust_score, catalog_scope, status, retired, kind")
     .eq("id", agentId)
     .maybeSingle();
-  if (error || !data) return {};
+  // Fail closed. Without this row the paused flag, the in-house role limits and
+  // dry-run would all read as "not set" and every protection keyed on them would
+  // quietly switch off. A request that cannot establish who is asking is refused.
+  if (error) throw new Error(`Could not read the acting agent: ${error.message}`);
+  if (!data) throw new Error("Unknown agent.");
   return { trustScore: data.trust_score, catalogScope: data.catalog_scope, status: data.status, retired: data.retired, kind: data.kind };
 }
 

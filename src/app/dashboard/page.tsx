@@ -11,6 +11,8 @@ import { SignOutButton } from "@/components/dashboard/SignOutButton";
 import { DashboardTabs } from "@/components/dashboard/DashboardTabs";
 import { MandateMark } from "@/components/brand/MandateMark";
 import { OperationsMap } from "@/components/graph/OperationsMap";
+import { currentUser } from "@clerk/nextjs/server";
+import { isOperator } from "@/lib/operator";
 import GradientWaves from "@/components/landing/GradientWaves";
 import type { Trace } from "@/types/db";
 
@@ -137,7 +139,7 @@ export default async function DashboardPage() {
           coo={coo}
           slug={merchant.slug}
           appUrl={process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}
-          serverHasRazorpayKeys={Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET)}
+          serverHasRazorpayKeys={Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) && isOperator((await currentUser())?.emailAddresses[0]?.emailAddress)}
           googleConfigured={Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)}
           map={<OperationsMap key="map" coo={coo} agents={agents} rules={rules} traces={traces} escalations={escalations} />}
         />

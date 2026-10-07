@@ -1,254 +1,175 @@
 # Mandate
 
-**A merchant-owned control plane for money that AI agents move.**
+**An autonomous store manager that can never spend what it shouldn't.**
 
-Built for the Razorpay AI Buildathon — Track 01, AI Growth & Agentic Commerce.
-
-An AI agent asks Mandate for permission before it moves money. Mandate checks
-that the agent still holds a valid standing authorization, evaluates the
-merchant's spending rules, and either lets the real Razorpay call through,
-escalates it to a human, or blocks it — then records exactly why, permanently,
-so the decision can be explained later.
-
-Live: <https://mandate-amaltomajiths-projects.vercel.app>
-
----
-
-## How it works
-
-An agent calls one endpoint — `POST /api/m/<merchant-slug>/mcp` — and every
-request is Ed25519-signed (Web Bot Auth). The slug is in the path because
-Mandate is multi-tenant: one deployment serves many merchants, each with its
-own agents, catalog, rules and history, and an agent registered with one can
-never see or act on another's. The decision path is:
+Mandate sells your slow-moving stock to fund restocking your bestsellers. Two in-house agents do the
+work: a **Selling agent** that clears dead stock and haggles with buyers, and a **Buying agent** that
+finds suppliers, gets quotes, orders and pays. They talk to real suppliers and customers over **Gmail
+and WhatsApp**, and every price drop and every payout passes through a **Payment Wall**: a
+deterministic guardrail, written in code, that no message, mistake or clever prompt can talk its way
+past.
 
 ```
-signed request
-  → verify signature          invalid → protocol_reject, never reaches policy
-  → check mandate status      revoked/paused → block
-  → evaluate the active rules
-       category_block → catalog_scope → cap → velocity → trust_floor → step_up
-       (first match wins)
-  → allow | escalate | block
-  → real Razorpay call, but only on allow
-  → write trace, recompute agent trust
+        Selling agent                    Payment Wall                      Buying agent
+   find dead stock, mark it     checks every rupee against your      spot a bestseller running out,
+   down within your margin,  ─►  own records, in code:           ◄─  get quotes, pick the best,
+   haggle, send a pay link       approved payee? margin? budget?      draft the order, propose the
+          │                      cap? needs a human?                  advance (sized to what sales
+          ▼                              │                           have actually funded)
+   sales ─► wallet ─► restock budget ◄───┘
 ```
 
-Nothing is faked at the edges: signatures are real Ed25519, allowed actions are
-real Razorpay API calls, and every decision is a row in Postgres that the
-dashboard reads live.
+## What a merchant gets
 
-### Four MCP tools, reused everywhere
+- **Today**: cash, runway, what is stuck, what your team did, and everything waiting for your approval,
+  plus a live 3D map of the business with the Payment Wall at its centre.
+- **Inventory**: stock, sales pace, days of stock left, unit cost and margin, with CSV import.
+- **Suppliers**: researched candidates to approve, payment details (approved by a person only),
+  quotes, purchase orders.
+- **Sales**: sales, supplier payouts and the wallet.
+- **Guardrails**: six limits in rupees and percent. No rule types, no JSON.
+- **Activity**: every action and the rule that decided it, and every message sent in your name.
+- **Team**: pause one agent or switch the whole team off (enforced at the wall), or run in **dry-run**.
+- **Connections**: Gmail, WhatsApp, Razorpay, RazorpayX, web search, and the sandbox/live switch.
 
-| Tool | Does | Side effect |
-| --- | --- | --- |
-| `simulate_action` | Full decision path, returns what *would* happen | None |
-| `enforce_action` | Same path; on `allow`, actually executes | Real Razorpay call |
-| `explain` | Plain-language account of a past decision | None |
-| `draft_policy` | Turns plain language into a structured, backtested rule | Inserts as `pending_review` — never auto-activates |
+## How it is built
 
-There are exactly four, and they are the same four for every agent. A new
-agent needs no new tools and no new endpoint — it registers, gets credentials,
-and signs.
+| Part | What it is |
+|---|---|
+| **Dashboard + Payment Wall** | Next.js 16 (App Router), Clerk, Supabase (Postgres). The wall is an MCP server at `/api/m/<slug>/mcp`: requests are Ed25519-signed (RFC 9421 style), nonce-protected, and every decision leaves a trace. |
+| **Worker** (`worker/`) | A long-running Node process that lets each merchant's agents act on a timer. Not for serverless: it holds connections (WhatsApp keeps a socket open). |
+| **MCP servers** (`worker/src/mcp/`) | `store`, `purchasing`, `channels`, `research`, mounted behind one tool hub with per-agent allow-lists. The wall is reached with the official MCP client and a signing `fetch`. |
+| **Agents** (`worker/src/agents/`) | Deterministic workflows over those tools. The language model **writes and reads text**; it never chooses an amount, a quantity or a supplier. |
+| **Channels** (`worker/src/channels/`) | Sandbox (simulated counterparties), Gmail (REST + OAuth), WhatsApp (Baileys). Real channels exist only in live mode with a connection. |
 
-### Six rule types
+More in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-| Type | Does |
-| --- | --- |
-| `category_block` | Refuses a category outright, at any amount |
-| `catalog_scope` | Confines an agent to the part of the catalog it was hired for |
-| `cap` | A ceiling, per transaction or per day |
-| `velocity` | A rate limit — amount-blind, it's the pace that's suspicious |
-| `trust_floor` | Holds an agent whose trust score has fallen, regardless of amount |
-| `step_up` | Sends anything above a threshold to a human |
+## Quick start
 
-Priority is fixed and documented in `src/lib/policy/engine.ts`; first match
-wins. `trust_floor` sits above `step_up` because "this agent hasn't earned the
-benefit of the doubt" is a stronger reason to involve a human than "this amount
-is large" — so the merchant reads the real cause.
-
-### Trust, and why it isn't decoration
-
-Every agent starts at a neutral 50 and moves with its own record, computed over
-its most recent decisions rather than all history — a score that can't recover
-is one no gate can meaningfully act on. `trust_floor` is what makes it
-consequential: below the threshold, an agent's actions are held for a human at
-any amount, because at that point the problem is the caller, not the
-transaction.
-
-Forged requests are deliberately **not** counted against anyone's score. A
-request whose signature doesn't verify carries no proven identity, so
-attributing it by the *claimed* agent id would let anyone destroy a
-competitor's reputation with forgeries in their name.
-
----
-
-## Setup
-
-**Requires:** a Supabase project, Razorpay test-mode keys, a Groq API key, and
-a Clerk application.
+You need Node 20+, a Supabase project, a Clerk application, and (optionally) Ollama or a Groq key.
 
 ```bash
 npm install
+cp .env.example .env.local        # fill in Supabase, Clerk, and MANDATE_SECRET_KEY
 ```
 
-Create `.env.local`:
+1. **Database.** Apply `supabase/migrations/*.sql` in order in the Supabase SQL editor (the
+   sequence has no `0003`; that is expected). Or use the Supabase CLI.
+2. **Secrets key.** `MANDATE_SECRET_KEY` encrypts everything sensitive at rest. Generate one with
+   `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`. Losing it makes
+   stored secrets unrecoverable, by design.
+3. **Run the app:** `npm run dev` (uses `scripts/dev.mjs`, which adds your corporate CA from
+   `MANDATE_CA_CERT` if you are behind a TLS-inspecting proxy).
+4. **Sign up.** Your account is provisioned on first sign-in: starting rules, a catalog, the two
+   agents with generated keys, settings and guardrails.
+5. **Load the sample store** from the Today tab (or `npm run provision -- --slug <yours> --sample`).
+6. **Run the worker** in a second terminal: `npm run worker` (`-- --once` for a single pass).
+
+Out of the box everything is a **sandbox**: simulated suppliers and buyers, sandbox payment links and
+a sandbox payout executor. Nothing real is contacted or paid, and everything simulated says so.
+
+### Language model
+
+Agents use the model for wording and for reading messy replies. Set `LLM_PROVIDER=groq` with
+`GROQ_API_KEY`, or run Ollama locally (`LOCAL_LLM_MODEL`, default `granite4`). With none reachable
+the agents still run on plain templates.
+
+## Going live
+
+Connect things under **Connections**, then press **Go live**. Until then nothing real is contacted.
+
+- **Razorpay**: paste a key pair (it is verified before it is kept), and point Razorpay's webhook at
+  `<APP_URL>/api/webhooks/razorpay/<your-slug>`. Captured payments then book the sale, stock and
+  wallet; payout failures return the money to the wallet.
+- **RazorpayX**: add your account number. Supplier bank/UPI details are sent to Razorpay and only the
+  last digits are kept here. Without RazorpayX, payouts use the labelled sandbox executor.
+- **Gmail**: set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (redirect URI
+  `<APP_URL>/api/connections/gmail/callback`), then connect. Scopes: read and send only.
+- **WhatsApp**: enable it, run the worker, and scan the QR shown under Connections with a
+  **dedicated number**. WhatsApp can restrict numbers that automate messaging; see the notes below.
+- **Search**: works with no key (a free search); a Brave or Tavily key gives better results.
+
+## What the Payment Wall enforces
+
+All of this is in code, evaluated from the merchant's own records. See `src/lib/policy/engine.ts`.
+
+| Guardrail | Behaviour |
+|---|---|
+| Approved payees only | A payout to an unapproved, pending, revoked or unknown payee is **blocked** (fails closed). |
+| Margin floor | A sale or price drop under the floor is blocked; an **unknown cost escalates**, it is never skipped. |
+| Self-funded budget | Payouts per week ≤ starting float + a share of real sales, and ≤ a hard ceiling. |
+| Single-payout and per-payee daily caps | Absolute. |
+| Approval threshold | At or above it, the payout waits for a person, who sees who, what for, and why. |
+| Least privilege | The Selling agent cannot even propose a payout; the Buying agent cannot change a price. |
+| Kill switches | Pausing an agent or the team, and dry-run, are enforced at the wall. |
+| Approval re-check | Approving an escalation re-runs the *limit* rules, so a payee revoked since still blocks it. |
+| Payouts need an order | A payout must name a purchase order that exists, belongs to that supplier, is still open, and has at least that much advance unpaid. A second payment against a settled order is refused. |
+| Refunds need a sale | A refund must be of a payment this business actually recorded. |
+| Rupees only | Any other currency is rejected at the schema, since every limit is written in rupees. |
+
+Agents never see cost prices, bank details, or the merchant's floor. Negotiation goes through an
+oracle (`evaluate_offer`) that returns accept, counter or decline without revealing the number behind it.
+
+## Verification
 
 ```bash
-NEXT_PUBLIC_SUPABASE_URL=
-SUPABASE_SERVICE_ROLE_KEY=
-RAZORPAY_KEY_ID=
-RAZORPAY_KEY_SECRET=
-GROQ_API_KEY=
-NEXT_PUBLIC_APP_URL=http://localhost:3000
-
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
-CLERK_SECRET_KEY=
-NEXT_PUBLIC_CLERK_SIGN_IN_URL=/login
-NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
-NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/dashboard
-NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/dashboard
+npm run verify:offline    # engine, inventory maths, channels, reset  (database only)
+npm run verify:online     # wall, buying, selling, webhook, closed loop  (needs `npm run dev`)
+npm run verify            # typecheck + lint + everything
 ```
 
-Apply the migrations in `supabase/migrations/` in order, via the Supabase SQL
-Editor. Then seed the rules, catalog, and sample customer:
+| Suite | Checks |
+|---|---|
+| `verify-engine` | 30: every rule, including fail-closed cases and priority |
+| `verify-hardening` | 36: findings from the independent security review (mutex, operator gate, rate limit, sender authentication, price grounding, SSRF ranges, input contract) |
+| `verify-inventory` | 15: velocity, runway, dead stock, floor price |
+| `verify-channels` | 36: Gmail parsing and header-injection safety, phone matching, who may be contacted, SSRF refusals |
+| `verify-reset` | 31: clears exactly one tenant, keeps what it promises |
+| `verify-wall` | 43: signatures, replay, payee/margin/budget/caps, purchase-order and refund ownership checks, currency, kill switches, dry-run, idempotency |
+| `verify-buying` | 35: quote → order → approval → payout → confirmation; hostile and unprofitable suppliers |
+| `verify-selling` | 28: clearance ladder, opt-in only, haggling, payment links, a buyer trying to talk the price to ₹1 |
+| `verify-webhook` | 18: signature, idempotency, sales, payout failures, out-of-order events |
+| `verify-loop` | 13: slow stock funds the restock, end to end |
 
-```bash
-npm run seed
+**Total: 285 checks.** The online suites make real model calls and take several minutes.
+
+## Honest notes
+
+- **Baileys is unofficial.** It speaks WhatsApp Web's protocol. Use a dedicated number, expect that
+  WhatsApp may restrict it, and treat email as the dependable channel. Pairing was verified against
+  WhatsApp's servers (a QR is issued); a full scan, send and receive needs a real phone and number
+  and has not been exercised.
+- **Gmail and RazorpayX are implemented but unexercised against live accounts** (no credentials were
+  available during development). Their parsing, safety and consent rules are tested; the network
+  calls follow the providers' documented APIs. RazorpayX also needs a registered business account.
+- **The sandbox is not a stub.** It exercises the same code paths, but its suppliers and buyers are
+  simulated, and its payment links go nowhere. Everything it produces is labelled.
+- **Free-tier Supabase pauses after a week idle.** If the dashboard reports "fetch failed", restore the
+  project. The worker's polling keeps an active account awake.
+- **Single worker, single app instance.** The run lock is per agent in the database, and enforce
+  calls are serialised per merchant *within one server process*, which closes the window where two
+  concurrent requests read the same "spent so far". A deployment with several app instances and
+  external agents calling in parallel would need a Postgres advisory lock to make that guarantee
+  across instances. The in-house agents are serialised regardless.
+- **Server keys are the operator's.** "Use this server's Razorpay keys" is offered only to emails in
+  `MANDATE_OPERATOR_EMAILS`. Leave it empty on a deployment with more than one merchant.
+- **Supplier email must be authenticated.** A message is only filed as a supplier's if Gmail reports
+  DKIM or DMARC pass for it; a forged "from" header is ignored.
+
+## Layout
+
+```
+src/app/                 dashboard, landing, auth, MCP route, webhooks, OAuth routes
+src/lib/policy/          the rule engine (pure), guardrails, audit, seed
+src/lib/mcp/             the Payment Wall's MCP server and evaluator
+src/lib/razorpay/        Razorpay client, payouts (RazorpayX), sandbox objects, payee registration
+src/lib/                 inventory maths, ledger, sales, approvals, settings, secrets, sample store
+src/components/          dashboard tabs; graph/ is the 3D map
+worker/src/              runner, tick loop, session; mcp/, agents/, channels/, sandbox/
+supabase/migrations/     schema, applied in order
+scripts/                 verification suites, provisioning, preview seeding
+docs/                    ARCHITECTURE.md; archive/ holds the original buildathon docs
 ```
 
-```bash
-npm run dev
-```
-
-Sign in at `/login`, then use **Run demo** on the dashboard.
-
-> **Behind a TLS-inspecting proxy** (Sophos, Zscaler, most corporate or campus
-> networks)? The certificate your *server* sees for Supabase is signed by the
-> interceptor, not by Supabase. Your browser accepts it because the OS trusts
-> that root; Node ships its own CA bundle that doesn't, so every server-side
-> query fails with `fetch failed` / `UNABLE_TO_VERIFY_LEAF_SIGNATURE` while the
-> site looks fine in a browser.
->
-> Export the interceptor's root certificate from your OS trust store and point
-> `.env.local` at it:
->
-> ```bash
-> MANDATE_CA_CERT=/absolute/path/to/interceptor-root.pem
-> ```
->
-> `npm run dev` goes through `scripts/dev.mjs`, which sets
-> `NODE_EXTRA_CA_CERTS` from that before starting Next — Node only reads it at
-> process start, so it can't be set from inside the app. A complete no-op if
-> the variable is absent, which is the normal case.
-
----
-
-## Trying it
-
-**Simulated agent** (Overview) runs an AI buyer continuously — real, signed MCP
-calls through the same policy engine any external agent would hit. Most go
-through; some cross the approval threshold, some touch a banned category, and
-some are forged requests rejected before the engine ever sees them. Nothing is
-staged: each action is weighted by scenario and then the real engine decides.
-
-The speed control matters. Calm and Busy stay inside the agent's velocity
-limit; **Stress deliberately outruns it**, so the rate limiter can be watched
-engaging rather than only described.
-
-**A real external agent** lives in `buyer/` — a separate process that holds
-only its own keypair and talks to Mandate over signed MCP. It is the honest
-test of the whole design: it shares no code with the engine and gets no special
-treatment. One process is one agent, and `--profile` lets several run at once,
-each with its own keypair, persona, budget and pace:
-
-```bash
-npm --prefix buyer run keygen -- --profile ergonomic   # mint a keypair
-# register the public half from the Agents tab, put the private half in the profile
-npm --prefix buyer start -- --profile ergonomic
-```
-
-Three profiles ship as `.env.example` files, chosen to diverge rather than to be
-copies: `ergonomic` (₹15,000, deliberate, takes sensible complements), `budget`
-(₹6,000, never over ₹2,000 an item, declines most offers) and `bulk` (₹60,000,
-routine orders that cross the step-up line). Run them together and the trust
-scores separate on their own, because the records genuinely differ.
-
-**Dashboard tabs:** Overview (3D entity graph, revenue impact, escalations,
-agent trust with a per-term breakdown) · Buy (a storefront an agent can be
-watched shopping) · Catalog (products, per-agent scope, best sellers) ·
-Campaigns (outbound offers an agent negotiates) · Agents (register, pause,
-retire, per-agent trust history) · Transactions (every decision, with the rule
-that decided it) · Policies (rule management, conflict detection,
-plain-language drafting, and a threshold tuner that backtests a proposed
-step-up level against this merchant's own traffic before anything is applied) ·
-Mandates (pause, revoke — a revoked mandate blocks the agent's very next
-action) · Settings (account, and a self-serve reset).
-
-**Starting over** is a button rather than a support ticket. Settings offers two
-resets, both scoped to the signed-in account and both showing exact row counts
-before you confirm: *Reset transactions* clears history but keeps every
-registered agent and its keypair, which is the slow part of starting again;
-*Reset everything* returns the account to what a new sign-up gets, and asks you
-to type the account slug rather than trusting a single click.
-
----
-
-## What's real, and what isn't
-
-**Real:** Ed25519 signature verification. `order.create` and `refund.create` as
-genuine Razorpay API calls. Trust scores, traces, and mandate state computed
-from actual history.
-
-**Labeled, not hidden:**
-
-- `subscription.create` falls back to a clearly-flagged simplified mandate
-  object when Razorpay Subscriptions isn't activated on the account.
-- Clerk runs on a development instance; the badge it renders is accurate.
-- The policy-draft example button stands in for an automated compliance feed —
-  the drafting pipeline behind it is real, the polling isn't built.
-- RazorpayX payouts were removed rather than stubbed: they need a registered
-  business that Razorpay itself gates, so they could never execute here.
-
-## Verifying it yourself
-
-Correctness here is not a matter of clicking around the dashboard. Seven suites
-drive the real engine against throwaway merchants and assert what actually
-happened — 125 checks:
-
-```bash
-npx tsx scripts/verify-policy.ts        # every rule type, both directions      24
-npx tsx scripts/verify-catalog.ts       # catalog, per-agent scope, headroom    20
-npx tsx scripts/verify-agent-control.ts # cooperative pause vs enforced retire  21
-npx tsx scripts/verify-mrtr.ts          # counter-offers and the MRTR invariant 17
-npx tsx scripts/verify-graph-colors.ts  # what a node in the graph may mean      8
-npx tsx scripts/verify-replay.ts        # a captured request, resent             6
-npx tsx scripts/verify-settings.ts      # the self-serve reset, and isolation   29
-npx tsx scripts/verify-e2e.ts           # end to end, including tenant isolation
-```
-
-`verify-e2e` is the one to run if you only run one: it proves tenant isolation,
-which is the claim that would matter most in production and the one that is
-worthless if merely asserted.
-
-To rebuild a demo history at a pace the velocity rule considers ordinary:
-
-```bash
-MANDATE_MERCHANT_SLUG=<your-slug> npx tsx scripts/regen.ts 100
-```
-
-It deliberately paces itself. Running ticks back to back trips the rate limiter
-on every subsequent action and collapses the trust scores — the resulting
-history then reads as a system being throttled rather than one behaving
-normally.
-
----
-
-## Stack
-
-Next.js 16 (App Router, Turbopack) · TypeScript · Tailwind v4 ·
-Supabase Postgres · Razorpay · Clerk · Groq · `@modelcontextprotocol/sdk` ·
-react-three-fiber
-
-Engineering history, architectural decisions, and the reasoning behind them
-live in [HANDOVER.md](./HANDOVER.md).
+`/dev/preview?slug=<slug>` renders the dashboard without signing in, for inspecting the UI. It is a
+404 in production and unless `MANDATE_DEV_PREVIEW=1` is set.

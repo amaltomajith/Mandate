@@ -33,7 +33,6 @@ export async function loadGmailCredentials(db: SupabaseClient, merchantId: strin
 
 /** RFC 2047 encoded-word for a header value that may contain non-ASCII text. */
 export function encodeHeader(value: string): string {
-  // eslint-disable-next-line no-control-regex
   return /^[\x00-\x7f]*$/.test(value) ? value : `=?UTF-8?B?${Buffer.from(value, "utf8").toString("base64")}?=`;
 }
 
@@ -100,6 +99,16 @@ export function stripQuoted(text: string): string {
   return out.join("\n").trim();
 }
 
+/**
+ * Whether Gmail itself verified the sender. A From header is just text anyone
+ * can write; a message only counts as coming from a supplier if the receiving
+ * server authenticated it (DKIM or DMARC pass). Without this, a forged email
+ * "from" an approved supplier would be filed as that supplier's quote.
+ */
+export function senderAuthenticated(authenticationResults: string): boolean {
+  return /\b(?:dmarc|dkim)=pass\b/i.test(authenticationResults);
+}
+
 export function parseFrom(header: string): string {
   const m = /<([^>]+)>/.exec(header);
   return (m ? m[1] : header).trim().toLowerCase();
@@ -164,6 +173,10 @@ export class GmailDriver implements ChannelDriver {
       const h = (name: string) => headers.find((x) => x.name.toLowerCase() === name)?.value ?? "";
       const from = parseFrom(h("from"));
       if (!from || from === this.creds.email.toLowerCase()) continue; // our own sent mail
+      if (!senderAuthenticated(h("authentication-results"))) {
+        console.warn(`[gmail] ignoring a message claiming to be from ${from}: the sender could not be authenticated`);
+        continue;
+      }
       const body = stripQuoted(extractPlainText(m.payload));
       if (!body) continue;
       out.push({

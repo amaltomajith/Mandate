@@ -6,7 +6,8 @@ import type { ActionInput } from "@/lib/mcp/schemas";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getMerchantIdForAgent } from "@/lib/merchant";
 import { getSettings } from "@/lib/settings";
-import { resolveActionFacts } from "@/lib/mcp/facts";
+import { hardChecks, resolveActionFacts } from "@/lib/mcp/facts";
+import { withLock } from "@/lib/mutex";
 import {
   createAlert,
   createEscalationForTrace,
@@ -85,8 +86,20 @@ export async function runActionEvaluation(
   input: ActionInput,
   mode: "simulate" | "enforce"
 ): Promise<EvaluationOutcome> {
+  const merchantId = await getMerchantIdForAgent(createAdminClient(), agentId);
+  // Enforce calls for one merchant run one at a time, so two of them cannot both
+  // read the same "spent so far" and together exceed a cap. See mutex.ts.
+  if (mode === "enforce") return withLock(merchantId, () => evaluate(agentId, merchantId, input, mode));
+  return evaluate(agentId, merchantId, input, mode);
+}
+
+async function evaluate(
+  agentId: string,
+  merchantId: string,
+  input: ActionInput,
+  mode: "simulate" | "enforce"
+): Promise<EvaluationOutcome> {
   const db = createAdminClient();
-  const merchantId = await getMerchantIdForAgent(db, agentId);
   const agentFacts = await getAgentPolicyFacts(agentId);
   if (agentFacts.retired) throw new Error("This agent has been retired and cannot act.");
 
@@ -97,6 +110,7 @@ export async function runActionEvaluation(
   const dryRun = mode === "enforce" && inhouse && settings.dry_run;
   const effectiveMode: "simulate" | "enforce" = dryRun ? "simulate" : mode;
 
+  let hardReason: string | null = null;
   let match: ReturnType<typeof evaluatePolicy> = null;
   let decision: "allow" | "block" | "escalate";
   let reasoning: string;
@@ -110,6 +124,9 @@ export async function runActionEvaluation(
   } else if (inhouse && !settings.agents_enabled) {
     decision = "block";
     reasoning = "The merchant has switched the autonomous team off, so no agent action is allowed.";
+  } else if (await hardChecks(merchantId, input).then((r) => (hardReason = r))) {
+    decision = "block";
+    reasoning = hardReason!;
   } else {
     const facts = await resolveActionFacts(merchantId, input);
     const rules = await getActiveRules(merchantId);
@@ -232,6 +249,9 @@ export async function recheckBeforeApproval(
 ): Promise<{ ok: true } | { ok: false; reasoning: string }> {
   const agentFacts = await getAgentPolicyFacts(agentId);
   if (agentFacts.retired) return { ok: false, reasoning: "The agent that proposed this has since been retired." };
+
+  const hard = await hardChecks(merchantId, input);
+  if (hard) return { ok: false, reasoning: hard };
 
   const facts = await resolveActionFacts(merchantId, input);
   const rules = (await getActiveRules(merchantId)).filter((r) => LIMIT_RULES.has(r.type));

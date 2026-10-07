@@ -57,11 +57,16 @@ async function main() {
     .insert({ merchant_id: m.id, vendor_id: vendor!.id, kind: "upi", display_name: "Bharat Office (new UPI)", masked_identifier: "ba••@okbank", status: "pending", simulated: true })
     .select("id")
     .single();
-  const refused = await buyer.callTool("enforce_action", { actionType: "payout.create", amount: 800000, currency: "INR", params: { payeeId: pending!.id, purpose: "vendor_advance" } });
+  const { data: bharatPo } = await db
+    .from("purchase_orders")
+    .insert({ merchant_id: m.id, vendor_id: vendor!.id, status: "quoting", total_paise: 400_00_00, advance_paise: 200_00_00 })
+    .select("id")
+    .single();
+  const refused = await buyer.callTool("enforce_action", { actionType: "payout.create", amount: 800000, currency: "INR", params: { payeeId: pending!.id, poId: bharatPo!.id, purpose: "vendor_advance" } });
   console.log("unapproved payee:", JSON.stringify(refused).slice(0, 160));
   // An over-limit payout.
-  const { data: payee } = await db.from("payees").select("id").eq("merchant_id", m.id).eq("status", "active").limit(1).single();
-  const big = await buyer.callTool("enforce_action", { actionType: "payout.create", amount: 90_00_000, currency: "INR", params: { payeeId: payee!.id, purpose: "vendor_advance" } });
+  const { data: payee } = await db.from("payees").select("id, vendor_id").eq("merchant_id", m.id).eq("status", "active").eq("vendor_id", vendor!.id).limit(1).single();
+  const big = await buyer.callTool("enforce_action", { actionType: "payout.create", amount: 90_00_000, currency: "INR", params: { payeeId: payee!.id, poId: bharatPo!.id, purpose: "vendor_advance" } });
   console.log("over the cap:", JSON.stringify(big).slice(0, 160));
   // A forged request.
   const forged = await buyer.sendTamperedRequest();

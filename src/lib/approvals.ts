@@ -55,6 +55,12 @@ export async function approveEscalationCore(
   });
   if (!trace.agent_id) throw new Error("This action has no agent behind it, so it cannot be approved.");
 
+  // An action whose trace already records a successful execution is done. Without
+  // this, a failure to write the approval after the money moved would let a retry
+  // execute it a second time.
+  const prior = trace.razorpay_response as { error?: string } | null;
+  if (prior && !prior.error) return { status: "already_approved" };
+
   // Limits are re-checked at approval time; see recheckBeforeApproval.
   const recheck = await recheckBeforeApproval(merchantId, trace.agent_id, parsed);
   if (!recheck.ok) throw new Error(`Can't approve this any more: ${recheck.reasoning}`);

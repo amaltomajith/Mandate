@@ -89,6 +89,16 @@ export function ActivityTab({
         )}
       </Panel>
 
+      <div className="flex justify-end">
+        <a
+          href="/api/export/audit"
+          className="rounded-lg border px-3 py-2 text-xs font-medium transition-colors hover:bg-[var(--panel-2)]"
+          style={{ borderColor: "var(--panel-border-strong)" }}
+        >
+          Download the audit trail (CSV)
+        </a>
+      </div>
+
       <TransactionsView traces={traces} agents={agents} customers={customers} rules={rules} onJumpToRule={onJumpToRule} />
     </div>
   );

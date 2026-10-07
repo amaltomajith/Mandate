@@ -66,12 +66,21 @@ export async function recordPayout(input: {
   if (walletError) throw new Error(walletError.message);
 
   if (input.poId) {
-    const { error: poError } = await db
-      .from("purchase_orders")
-      .update({ status: "paid" })
-      .eq("id", input.poId)
-      .eq("merchant_id", input.merchantId)
-      .in("status", ["draft", "quoting", "awaiting_approval", "approved"]);
-    if (poError) throw new Error(poError.message);
+    // An order is only "paid" once its advance is fully covered. Marking it paid
+    // on the first payout would shut out a legitimate follow-up for the rest.
+    const [{ data: po }, { data: paid }] = await Promise.all([
+      db.from("purchase_orders").select("advance_paise").eq("id", input.poId).eq("merchant_id", input.merchantId).maybeSingle(),
+      db.from("payouts").select("amount_paise").eq("merchant_id", input.merchantId).eq("po_id", input.poId).in("status", ["queued", "processing", "processed"]),
+    ]);
+    const covered = (paid ?? []).reduce((n, p) => n + Number(p.amount_paise), 0);
+    if (po && covered >= Number(po.advance_paise)) {
+      const { error: poError } = await db
+        .from("purchase_orders")
+        .update({ status: "paid" })
+        .eq("id", input.poId)
+        .eq("merchant_id", input.merchantId)
+        .in("status", ["draft", "quoting", "awaiting_approval", "approved"]);
+      if (poError) throw new Error(poError.message);
+    }
   }
 }

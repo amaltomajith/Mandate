@@ -183,7 +183,10 @@ export async function loadDashboardData(merchant: Merchant) {
     }
   }
 
-  const allAgents = agents.data ?? [];
+  // The in-house agents' signing keys are stored encrypted on this row. They are
+  // useless without the server's key, but they have no business in a page payload
+  // either, so they are blanked before anything leaves the server.
+  const allAgents = (agents.data ?? []).map((a) => ({ ...a, secret_key_enc: null }));
 
   return {
     /**
