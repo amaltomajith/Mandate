@@ -3,6 +3,7 @@ import type { ActionInput } from "@/lib/mcp/schemas";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { recordPayout } from "@/lib/ledger";
 import { getRazorpayForMerchant } from "./client";
+import { sandboxLink, sandboxOrder, sandboxRefund } from "./sandbox";
 import { executePayout } from "./payouts";
 import type { Json } from "@/types/db";
 
@@ -66,6 +67,7 @@ async function dispatch(input: ActionInput, ctx: ExecutionContext): Promise<Json
   switch (input.actionType) {
     case "order.create": {
       const rzp = await getRazorpayForMerchant(ctx.merchantId);
+      if (!rzp) return sandboxOrder(ctx.traceId, input.amount, input.currency);
       const order = await rzp.orders.create({
         amount: input.amount,
         currency: input.currency,
@@ -81,6 +83,7 @@ async function dispatch(input: ActionInput, ctx: ExecutionContext): Promise<Json
     case "payment_link.create": {
       const rzp = await getRazorpayForMerchant(ctx.merchantId);
       const p = input.params;
+      if (!rzp) return sandboxLink(ctx.traceId, input.amount, input.currency, p.description);
       const link = await rzp.paymentLink.create({
         amount: input.amount,
         currency: input.currency,
@@ -110,6 +113,7 @@ async function dispatch(input: ActionInput, ctx: ExecutionContext): Promise<Json
 
     case "refund.create": {
       const rzp = await getRazorpayForMerchant(ctx.merchantId);
+      if (!rzp) return sandboxRefund(ctx.traceId, input.amount, input.currency);
       const refund = await rzp.payments.refund(input.params.paymentId, {
         amount: input.amount,
       });

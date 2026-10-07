@@ -58,7 +58,9 @@ export function simulateReplies(ctx: SandboxContext): string[] {
       if (ctx.round >= 3 || (ctx.counterpartyOfferPaise ?? 0) >= ctx.askPaise * 0.9) {
         return ["Okay, that works for me. Please send me the payment link."];
       }
-      const next = Math.round(((ctx.counterpartyOfferPaise ?? ctx.askPaise) * 0.97) / 100) * 100;
+      // Moves a good part of the way toward the asking price.
+      const offer = ctx.counterpartyOfferPaise ?? ctx.askPaise;
+      const next = Math.round((offer + (ctx.askPaise - offer) * 0.5) / 100) * 100;
       return [`Hmm, a bit more flexibility? ${rupees(next)} and I will pay right away.`];
     }
     case "other":
