@@ -28,6 +28,8 @@ const isPublicRoute = createRouteMatcher([
   // routes when they moved -- every one of them started redirecting to a
   // sign-in page that an AI buyer has no way to complete.
   "/api/m/(.*)",
+  // Razorpay cannot sign in; the route verifies Razorpay's own HMAC signature.
+  "/api/webhooks/(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, req) => {

@@ -90,7 +90,7 @@ async function main() {
     check("opted-in customers were told", (threads ?? []).length >= 2);
     const { data: ghostThreads } = await db.from("threads").select("id, customer_id").eq("merchant_id", A.id).eq("kind", "buyer");
     const { data: ghost } = await db.from("customers").select("id").eq("merchant_id", A.id).eq("email", "ghost@buyer.sandbox.test").single();
-    check("a customer who did NOT opt in was not messaged", !(ghostThreads ?? []).some((t) => t.customer_id === ghost.id));
+    check("a customer who did NOT opt in was not messaged", !(ghostThreads ?? []).some((t) => t.customer_id === ghost?.id));
 
     // Another run straight away: the cooldown stops a second price drop.
     await sell(A);
