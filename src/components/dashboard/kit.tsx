@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition, type ReactNode } from "react";
+import { Sparkline } from "./motion";
 
 /**
  * Small shared pieces for the dashboard tabs: a runner for server actions that
@@ -33,7 +34,7 @@ export function ErrorLine({ error }: { error: string | null }) {
   return (
     <p
       role="alert"
-      className="mb-3 rounded-lg px-3 py-2 text-xs"
+      className="mb-4 rounded-[12px] px-4 py-3 text-[14px] leading-5"
       style={{ background: "color-mix(in srgb, var(--decision-block) 14%, transparent)", color: "var(--decision-block)" }}
     >
       {error}
@@ -41,21 +42,52 @@ export function ErrorLine({ error }: { error: string | null }) {
   );
 }
 
-export function Stat({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: ReactNode; tone?: string }) {
-  return (
-    <div className="panel-card rounded-2xl p-4">
-      <p className="text-[11px] font-medium uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
+/**
+ * A headline number. `spark` draws a trend under it; `onClick` makes the whole
+ * tile a button (e.g. jump to the tab the number belongs to).
+ */
+export function Stat({
+  label,
+  value,
+  sub,
+  tone,
+  spark,
+  onClick,
+}: {
+  label: string;
+  value: ReactNode;
+  sub?: ReactNode;
+  tone?: string;
+  spark?: number[];
+  onClick?: () => void;
+}) {
+  const body = (
+    <>
+      <p className="text-[13px] font-medium" style={{ color: "var(--muted)" }}>
         {label}
       </p>
-      <p className="mt-1.5 text-[22px] font-semibold tabular-nums tracking-tight" style={{ color: tone ?? "var(--foreground)" }}>
+      <p className="num mt-2 text-[34px] font-semibold leading-[40px]" style={{ color: tone ?? "var(--foreground)" }}>
         {value}
       </p>
       {sub && (
-        <p className="mt-0.5 text-xs" style={{ color: "var(--muted)" }}>
+        <p className="mt-1.5 text-[13px] leading-5" style={{ color: "var(--muted)" }}>
           {sub}
         </p>
       )}
-    </div>
+      {spark && spark.length > 1 && (
+        <div className="mt-4 -mb-1">
+          <Sparkline points={spark} color={tone ?? "var(--brand-violet)"} />
+        </div>
+      )}
+    </>
+  );
+  const cls = "surface block w-full p-6 text-left";
+  return onClick ? (
+    <button type="button" onClick={onClick} className={`${cls} surface-interactive focus-ring`}>
+      {body}
+    </button>
+  ) : (
+    <div className={cls}>{body}</div>
   );
 }
 
@@ -63,7 +95,7 @@ export function Pill({ children, color }: { children: ReactNode; color?: string 
   const c = color ?? "var(--muted)";
   return (
     <span
-      className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+      className="inline-flex min-h-[26px] items-center rounded-full px-3 text-[12px] font-medium"
       style={{ background: `color-mix(in srgb, ${c} 16%, transparent)`, color: c }}
     >
       {children}
@@ -71,19 +103,18 @@ export function Pill({ children, color }: { children: ReactNode; color?: string 
   );
 }
 
-export const inputClass =
-  "w-full rounded-lg border bg-transparent px-3 py-2 text-[13px] outline-none transition-colors focus:border-[var(--brand-violet)] disabled:opacity-50";
-export const inputStyle = { borderColor: "var(--panel-border-strong)", color: "var(--foreground)" } as const;
+export const inputClass = "studio-input";
+export const inputStyle = {} as const;
 
 export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[11px] font-medium" style={{ color: "var(--muted)" }}>
+      <span className="mb-2 block text-[13px] font-medium" style={{ color: "var(--muted)" }}>
         {label}
       </span>
       {children}
       {hint && (
-        <span className="mt-1 block text-[11px]" style={{ color: "var(--muted-2)" }}>
+        <span className="mt-2 block text-[13px] leading-5" style={{ color: "var(--muted-2)" }}>
           {hint}
         </span>
       )}
@@ -93,20 +124,16 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
 
 export function Table({ head, children }: { head: string[]; children: ReactNode }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[520px] text-left text-[12.5px]">
+    <div className="-mx-2 overflow-x-auto">
+      <table className="studio-table w-full min-w-[560px] text-left">
         <thead>
-          <tr style={{ color: "var(--muted-2)" }}>
+          <tr>
             {head.map((h) => (
-              <th key={h} className="whitespace-nowrap px-2 py-2 text-[10.5px] font-semibold uppercase tracking-wider">
-                {h}
-              </th>
+              <th key={h}>{h}</th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y" style={{ borderColor: "var(--panel-border)" }}>
-          {children}
-        </tbody>
+        <tbody>{children}</tbody>
       </table>
     </div>
   );
