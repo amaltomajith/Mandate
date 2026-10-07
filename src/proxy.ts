@@ -30,6 +30,9 @@ const isPublicRoute = createRouteMatcher([
   "/api/m/(.*)",
   // Razorpay cannot sign in; the route verifies Razorpay's own HMAC signature.
   "/api/webhooks/(.*)",
+  // Development preview. The page itself is a 404 unless explicitly enabled and
+  // never in production; it is public here only so it can be reached at all.
+  "/dev/(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, req) => {

@@ -31,6 +31,27 @@ function money(paise: number, currency: string): string {
   return currency === "INR" ? `₹${formatted}` : `${formatted} ${currency}`;
 }
 
+/** The actions a rule with no `action_types` applies to: every money action, but
+ *  not a price change (see appliesTo in engine.ts). */
+const ALL_MONEY_ACTIONS = ["order.create", "payment_link.create", "refund.create", "payout.create"];
+
+function actionSet(rule: PolicyRule): Set<string> {
+  const scope = (rule.params as { action_types?: unknown } | null)?.action_types;
+  return new Set(Array.isArray(scope) && scope.length > 0 ? (scope as string[]) : ALL_MONEY_ACTIONS);
+}
+
+/**
+ * Whether two rules can ever apply to the same action. Two rules about
+ * different things (a cap on customer sales and a cap on supplier payouts) do
+ * not interact, and comparing them produced false alarms like calling a payout
+ * ceiling "unreachable" because of a limit on sales.
+ */
+function interact(a: PolicyRule, b: PolicyRule): boolean {
+  const left = actionSet(a);
+  for (const x of actionSet(b)) if (left.has(x)) return true;
+  return false;
+}
+
 /** Deterministic checks over the active rule set. */
 export function auditPolicySet(rules: PolicyRule[]): PolicyIssue[] {
   const active = rules.filter((r) => r.status === "active");
@@ -51,6 +72,7 @@ export function auditPolicySet(rules: PolicyRule[]): PolicyIssue[] {
       const capParams = cap.params as unknown as CapParams;
       if (capParams.currency !== suParams.currency) continue;
       if (capParams.scope !== "per_transaction") continue;
+      if (!interact(stepUp, cap)) continue;
       if (capParams.max_amount <= suParams.threshold_amount) {
         issues.push({
           id: `dead-stepup-${stepUp.id}-${cap.id}`,
@@ -73,6 +95,7 @@ export function auditPolicySet(rules: PolicyRule[]): PolicyIssue[] {
       const aParams = a.params as unknown as CapParams;
       const bParams = b.params as unknown as CapParams;
       if (aParams.currency !== bParams.currency || aParams.scope !== bParams.scope) continue;
+      if (!interact(a, b)) continue;
 
       if (aParams.max_amount === bParams.max_amount) {
         issues.push({

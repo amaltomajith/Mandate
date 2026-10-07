@@ -13,6 +13,7 @@ import { GuardrailsTab } from "./GuardrailsTab";
 import { ActivityTab } from "./ActivityTab";
 import { TeamTab } from "./TeamTab";
 import { ConnectionsTab } from "./ConnectionsTab";
+import { ActiveTabContext } from "./tabContext";
 
 type Tab = "today" | "inventory" | "suppliers" | "sales" | "guardrails" | "activity" | "team" | "connections";
 
@@ -70,6 +71,7 @@ export function DashboardTabs(props: Props) {
   }
 
   return (
+    <ActiveTabContext.Provider value={tab}>
     <div className="flex flex-1 flex-col gap-5">
       <nav className="flex max-w-full gap-1 overflow-x-auto rounded-xl p-1" style={{ background: "var(--panel-2)", width: "fit-content" }}>
         {TABS.map((t) => (
@@ -97,7 +99,10 @@ export function DashboardTabs(props: Props) {
         </Link>
       </nav>
 
-      {tab === "today" && <TodayTab coo={coo} escalations={escalations} tracesById={props.tracesById} alerts={props.alerts} map={props.map} />}
+      {/* Kept mounted and hidden rather than removed: see tabContext.ts. */}
+      <div hidden={tab !== "today"}>
+        <TodayTab coo={coo} escalations={escalations} tracesById={props.tracesById} alerts={props.alerts} map={props.map} />
+      </div>
       {tab === "inventory" && <InventoryTab insights={coo.insights} />}
       {tab === "suppliers" && <SuppliersTab coo={coo} />}
       {tab === "sales" && <SalesTab coo={coo} traces={props.traces} />}
@@ -108,5 +113,6 @@ export function DashboardTabs(props: Props) {
         <ConnectionsTab coo={coo} slug={props.slug} appUrl={props.appUrl} serverHasRazorpayKeys={props.serverHasRazorpayKeys} googleConfigured={props.googleConfigured} />
       )}
     </div>
+    </ActiveTabContext.Provider>
   );
 }

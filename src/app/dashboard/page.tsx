@@ -10,6 +10,7 @@ import { AlertsBell } from "@/components/dashboard/AlertsBell";
 import { SignOutButton } from "@/components/dashboard/SignOutButton";
 import { DashboardTabs } from "@/components/dashboard/DashboardTabs";
 import { MandateMark } from "@/components/brand/MandateMark";
+import { OperationsMap } from "@/components/graph/OperationsMap";
 import GradientWaves from "@/components/landing/GradientWaves";
 import type { Trace } from "@/types/db";
 
@@ -138,7 +139,7 @@ export default async function DashboardPage() {
           appUrl={process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}
           serverHasRazorpayKeys={Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET)}
           googleConfigured={Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)}
-          map={null}
+          map={<OperationsMap key="map" coo={coo} agents={agents} rules={rules} traces={traces} escalations={escalations} />}
         />
       </div>
     </div>

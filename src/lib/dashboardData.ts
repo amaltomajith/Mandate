@@ -1,6 +1,7 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentMerchant } from "@/lib/merchant";
+import type { Merchant } from "@/types/db";
 import { ensureWorkspace } from "@/lib/workspace";
 
 /**
@@ -82,13 +83,23 @@ async function withRetry<T>(query: () => PromiseLike<SupabaseResult<T>>, attempt
   return result;
 }
 
+/** The signed-in merchant's dashboard data. */
 export async function getDashboardData() {
+  return loadDashboardData(await getCurrentMerchant());
+}
+
+/**
+ * Dashboard data for a merchant that has already been resolved. Split from
+ * {@link getDashboardData} so the development-only preview can load a named
+ * merchant without a Clerk session; it takes a merchant, never an id from a
+ * request, and nothing in production calls it any other way.
+ */
+export async function loadDashboardData(merchant: Merchant) {
   const supabase = createAdminClient();
   // Every query below is scoped to this merchant. An unscoped read compiles
   // perfectly and returns other tenants' rows, which is why the filter is
   // applied here at the single place all dashboard reads funnel through rather
   // than trusted to be remembered at each call site.
-  const merchant = await getCurrentMerchant();
   // Accounts created before the COO existed get their agents, settings and
   // guardrails the first time they open the dashboard.
   await ensureWorkspace(supabase, merchant.id);
