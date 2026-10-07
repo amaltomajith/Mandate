@@ -98,8 +98,19 @@ export async function applySeedRules(
   migrated = (retired?.length ?? 0) > 0;
 
   for (const rule of SEED_RULES) {
-    const { data: existing } = await db.from("policy_rules").select("id").eq("merchant_id", merchantId).eq("name", rule.name).maybeSingle();
-    if (existing) continue;
+    const { data: existing } = await db.from("policy_rules").select("id, params").eq("merchant_id", merchantId).eq("name", rule.name).maybeSingle();
+    if (existing) {
+      // Accounts older than the supplier-payout rules have these seed rules
+      // unscoped, so they would also govern payouts. Add the scope, and ONLY the
+      // scope: anything the merchant has edited is left exactly as they set it.
+      const scope = (rule.params as { action_types?: string[] }).action_types;
+      const current = existing.params as Record<string, unknown> | null;
+      if (scope && current && !current.action_types) {
+        const { error } = await db.from("policy_rules").update({ params: { ...current, action_types: scope } }).eq("id", existing.id).eq("merchant_id", merchantId);
+        if (error) throw error;
+      }
+      continue;
+    }
     const { error } = await db.from("policy_rules").insert({
       merchant_id: merchantId,
       type: rule.type,
