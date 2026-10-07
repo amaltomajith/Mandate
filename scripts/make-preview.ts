@@ -10,6 +10,7 @@ import { createAdminClient } from "../src/lib/supabase/admin";
 import { ensureWorkspace } from "../src/lib/workspace";
 import { loadSampleStore } from "../src/lib/sample";
 import { loadAgentIdentity } from "../src/lib/agents/inhouse";
+import { encryptJson } from "../src/lib/secrets";
 import { MandateClient } from "./lib/mandateClient";
 import { runAgent } from "../worker/src/runner";
 import { runBuyingAgent } from "../worker/src/agents/buying";
@@ -68,6 +69,23 @@ async function main() {
   const { data: payee } = await db.from("payees").select("id, vendor_id").eq("merchant_id", m.id).eq("status", "active").eq("vendor_id", vendor!.id).limit(1).single();
   const big = await buyer.callTool("enforce_action", { actionType: "payout.create", amount: 90_00_000, currency: "INR", params: { payeeId: payee!.id, poId: bharatPo!.id, purpose: "vendor_advance" } });
   console.log("over the cap:", JSON.stringify(big).slice(0, 160));
+  // A payment waiting for the merchant to make by hand.
+  await db.from("merchant_settings").update({ payout_mode: "manual" }).eq("merchant_id", m.id);
+  const { data: handVendor } = await db
+    .from("vendors")
+    .insert({ merchant_id: m.id, name: "Kumar Traders", channel: "sandbox", simulated: true, status: "approved", categories: ["office"], email: "kumar@traders.sandbox.test" })
+    .select("id")
+    .single();
+  const { data: handPayee } = await db
+    .from("payees")
+    .insert({ merchant_id: m.id, vendor_id: handVendor!.id, kind: "upi", display_name: "Kumar Traders", masked_identifier: "ku••@okaxis", details_enc: encryptJson({ kind: "upi", vpa: "kumartraders@okaxis" }), status: "active", approved_by: "preview", approved_at: new Date().toISOString(), simulated: false })
+    .select("id")
+    .single();
+  const { data: handPo } = await db.from("purchase_orders").insert({ merchant_id: m.id, vendor_id: handVendor!.id, status: "quoting", total_paise: 16000_00, advance_paise: 8000_00, rationale: "Restock Laptop Stand." }).select("id").single();
+  const { data: stand } = await db.from("products").select("id").eq("merchant_id", m.id).eq("sku", "stand-01").single();
+  await db.from("po_lines").insert({ merchant_id: m.id, po_id: handPo!.id, product_id: stand!.id, qty: 20, unit_price_paise: 80000 });
+  const manual = await buyer.callTool("enforce_action", { actionType: "payout.create", amount: 8000_00, currency: "INR", params: { payeeId: handPayee!.id, poId: handPo!.id, purpose: "vendor_advance" } });
+  console.log("manual:", JSON.stringify(manual).slice(0, 160));
   // A forged request.
   const forged = await buyer.sendTamperedRequest();
   console.log("forged:", forged.status);

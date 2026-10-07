@@ -7,6 +7,8 @@ import { getCurrentMerchant } from "@/lib/merchant";
 import { loadRazorpayXCredentials } from "@/lib/razorpay/client";
 import { createFundAccount, maskPayee, validatePayeeDetails, type PayeeDetails } from "@/lib/razorpay/payees";
 import type { Channel } from "@/types/db";
+import { getSettings } from "@/lib/settings";
+import { encryptJson } from "@/lib/secrets";
 
 /**
  * Suppliers and who may be paid.
@@ -103,10 +105,18 @@ export async function addPayee(input: PayeeInput): Promise<void> {
   if (!vendor) throw new Error("Unknown supplier.");
   if (vendor.status === "blocked") throw new Error("This supplier is blocked.");
 
-  // With RazorpayX connected the details are registered there and the payee can
-  // really be paid. Without it the payee is a sandbox payee: it is stored the
-  // same way but only the labelled sandbox executor will ever "pay" it.
-  const creds = await loadRazorpayXCredentials(merchant.id);
+  const settings = await getSettings(db, merchant.id);
+  const manual = settings.payout_mode === "manual";
+
+  // MANUAL: the merchant pays this supplier from their own bank, so nothing is
+  // registered with Razorpay. The full details are kept, encrypted, for exactly
+  // one purpose: showing them to the signed-in merchant at the moment they make
+  // the payment. They are never sent to an agent or to the browser as stored.
+  //
+  // AUTO: with RazorpayX connected the details are registered there and only the
+  // last digits are kept here. Without it the payee is a sandbox payee: stored the
+  // same way, but only the labelled sandbox executor will ever "pay" it.
+  const creds = manual ? null : await loadRazorpayXCredentials(merchant.id);
   let contactId: string | null = null;
   let fundAccountId: string | null = null;
   if (creds) {
@@ -123,8 +133,9 @@ export async function addPayee(input: PayeeInput): Promise<void> {
     masked_identifier: maskPayee(input.details),
     razorpay_contact_id: contactId,
     razorpay_fund_account_id: fundAccountId,
+    details_enc: manual ? encryptJson(input.details) : null,
     status: "pending",
-    simulated: !creds,
+    simulated: manual ? false : !creds,
   });
   if (error) throw new Error(error.message);
   revalidatePath("/dashboard");

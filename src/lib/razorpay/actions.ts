@@ -2,6 +2,8 @@ import "server-only";
 import type { ActionInput } from "@/lib/mcp/schemas";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { recordPayout } from "@/lib/ledger";
+import { getSettings } from "@/lib/settings";
+import { queueManualPayout } from "@/lib/manualPayouts";
 import { getRazorpayForMerchant } from "./client";
 import { sandboxLink, sandboxOrder, sandboxRefund } from "./sandbox";
 import { executePayout } from "./payouts";
@@ -134,6 +136,27 @@ async function dispatch(input: ActionInput, ctx: ExecutionContext): Promise<Json
         .maybeSingle();
       if (error) throw new Error(error.message);
       if (!payee || payee.status !== "active") throw new Error("This payee is no longer active, so the payout was not sent.");
+
+      // Manual mode: the merchant pays this one from their own bank. A sandbox
+      // payee is never a real account, so it still goes to the labelled sandbox
+      // executor below, whatever the mode.
+      const settings = await getSettings(db, ctx.merchantId);
+      if (settings.payout_mode === "manual" && !payee.simulated) {
+        const queued = await queueManualPayout(db, {
+          merchantId: ctx.merchantId,
+          traceId: ctx.traceId,
+          payeeId: payee.id,
+          poId: input.params.poId,
+          amountPaise: input.amount,
+        });
+        return {
+          payout_id: queued.id,
+          status: "queued",
+          manual: true,
+          simulated: false,
+          note: "Waiting for the merchant to pay this from their own bank and confirm it.",
+        } as unknown as Json;
+      }
 
       const result = await executePayout({
         traceId: ctx.traceId,

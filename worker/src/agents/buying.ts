@@ -186,7 +186,13 @@ async function confirmPurchaseOrder(s: Session, store: string, poId: string): Pr
   try {
     await s.call("channels_send_message_to_vendor", { vendor_id: vendor.id, subject: `Order confirmation: ${product.name}`, body });
   } catch (err) {
-    await alert(s, "notable", `Could not send the order confirmation to ${vendor.name}: ${err instanceof Error ? err.message : String(err)}`);
+    // Not sent, so not "confirmed": it is retried on the next run. The merchant is
+    // told once, not on every run.
+    if (!po.rationale?.includes("[confirm_failed]")) {
+      await alert(s, "notable", `Could not send the order confirmation to ${vendor.name}: ${err instanceof Error ? err.message : String(err)}. It will be retried.`);
+      await s.db.from("purchase_orders").update({ rationale: `${po.rationale ?? ""} [confirm_failed]`.trim() }).eq("id", poId).eq("merchant_id", s.merchant.id);
+    }
+    return [`Could not confirm the ${product.name} order with ${vendor.name} yet.`];
   }
   await s.db
     .from("purchase_orders")
@@ -232,6 +238,12 @@ async function payForPurchaseOrder(s: Session, store: string, poId: string): Pro
   const result = await s.wall("enforce", action);
   if (result.decision === "allow") {
     if (result.executionError) return [`Payment to ${vendor?.name} was allowed but failed: ${result.executionError}`];
+    // A manual payout is a task for the merchant. The supplier hears "paid" only
+    // after the merchant confirms they paid (see reconcilePurchaseOrders).
+    if (result.razorpayResponse?.manual === true) {
+      await alert(s, "notable", `Pay ${vendor?.name ?? "the supplier"} ${money(advance)} from your bank, then confirm it on the Today tab. The supplier is told once you do.`);
+      return [`The ${money(advance)} advance to ${vendor?.name} is cleared and waiting for you to pay it.`];
+    }
     const sim = result.razorpayResponse?.simulated === true ? " (sandbox payout, no money moved)" : "";
     const done = await confirmPurchaseOrder(s, store, poId);
     return [`Paid ${money(advance)} advance to ${vendor?.name}${sim}.`, ...done];

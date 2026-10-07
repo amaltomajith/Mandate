@@ -392,6 +392,8 @@ export interface Database {
           approved_by: string | null;
           approved_at: string | null;
           simulated: boolean;
+          /** Manual-payout payees only: encrypted details, never sent to the browser as stored. */
+          details_enc: string | null;
           created_at: string;
         };
         Insert: {
@@ -407,6 +409,7 @@ export interface Database {
           approved_by?: string | null;
           approved_at?: string | null;
           simulated?: boolean;
+          details_enc?: string | null;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["payees"]["Insert"]>;
@@ -608,6 +611,11 @@ export interface Database {
           status: PayoutStatus;
           razorpay_payout_id: string | null;
           simulated: boolean;
+          /** Paid by the merchant from their own bank; see manualPayouts.ts. */
+          manual: boolean;
+          paid_ref: string | null;
+          paid_at: string | null;
+          confirmed_by: string | null;
           created_at: string;
         };
         Insert: {
@@ -620,6 +628,10 @@ export interface Database {
           status?: PayoutStatus;
           razorpay_payout_id?: string | null;
           simulated?: boolean;
+          manual?: boolean;
+          paid_ref?: string | null;
+          paid_at?: string | null;
+          confirmed_by?: string | null;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["payouts"]["Insert"]>;
@@ -718,6 +730,7 @@ export interface Database {
           weekly_payout_budget_paise: number;
           payout_budget_pct: number;
           starting_float_paise: number;
+          payout_mode: "auto" | "manual";
           require_approved_vendors: boolean;
           agents_enabled: boolean;
           dry_run: boolean;
@@ -733,6 +746,7 @@ export interface Database {
           weekly_payout_budget_paise?: number;
           payout_budget_pct?: number;
           starting_float_paise?: number;
+          payout_mode?: "auto" | "manual";
           require_approved_vendors?: boolean;
           agents_enabled?: boolean;
           dry_run?: boolean;

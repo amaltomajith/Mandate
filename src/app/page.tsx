@@ -83,7 +83,7 @@ const REAL = [
   {
     kicker: "Money",
     title: "Razorpay and RazorpayX",
-    body: "Payment links and refunds through your Razorpay account, supplier payouts through RazorpayX. Payee details go to Razorpay and nowhere else; we keep only the last digits.",
+    body: "Payment links and refunds through your Razorpay account. Pay suppliers through RazorpayX (details go to Razorpay; we keep only the last digits), or by hand from your own bank, with the supplier's details shown only to you, encrypted until then.",
   },
   {
     kicker: "Finding suppliers",

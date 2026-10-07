@@ -203,9 +203,11 @@ export function SuppliersTab({ coo }: { coo: CooData }) {
           <div className="mt-5 rounded-xl p-4" style={{ background: "var(--panel-2)" }}>
             <p className="mb-1 text-[13px] font-semibold">Payment details for {vendorName(payeeFor)}</p>
             <p className="mb-3 text-[12px]" style={{ color: "var(--muted)" }}>
-              {coo.connections.some((c) => c.kind === "razorpayx" && c.status === "connected")
-                ? "These are sent straight to RazorpayX. Only the last digits are kept here, and your agents never see them."
-                : "RazorpayX isn't connected, so this will be a sandbox payee: it is stored the same way, but only the labelled sandbox executor will ever \"pay\" it."}{" "}
+              {coo.settings.payout_mode === "manual"
+                ? "You pay this supplier by hand, so these details are kept encrypted and shown only to you at the moment you make the payment. They are never shown to the agents."
+                : coo.connections.some((c) => c.kind === "razorpayx" && c.status === "connected")
+                  ? "These are sent straight to RazorpayX. Only the last digits are kept here, and your agents never see them."
+                  : "RazorpayX isn't connected, so this will be a sandbox payee: it is stored the same way, but only the labelled sandbox executor will ever \"pay\" it."}{" "}
               After you add it, approve it yourself: that is the step that lets money flow.
             </p>
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">

@@ -91,10 +91,11 @@ export function SalesTab({ coo, traces }: { coo: CooData; traces: Trace[] }) {
                 <tr key={p.id}>
                   <td className="px-2 py-2">
                     {vendorByPayee(p.payee_id)} {p.simulated && <Pill color="var(--entity-mandate)">sandbox</Pill>}
+                    {p.manual && <Pill color="var(--entity-agent)">by hand</Pill>}
                   </td>
                   <td className="px-2 py-2 tabular-nums">{rupees(Number(p.amount_paise))}</td>
                   <td className="px-2 py-2">
-                    <Pill color={p.status === "processed" ? "var(--decision-allow)" : p.status === "failed" || p.status === "reversed" ? "var(--decision-block)" : "var(--muted)"}>{p.status}</Pill>
+                    <Pill color={p.status === "processed" ? "var(--decision-allow)" : p.status === "failed" || p.status === "reversed" ? "var(--decision-block)" : "var(--decision-escalate)"}>{p.manual && p.status === "queued" ? "waiting for you" : p.status === "failed" && p.manual ? "cancelled" : p.status}</Pill>
                   </td>
                   <td className="px-2 py-2 text-[11px]" style={{ color: "var(--muted-2)" }}>
                     <TimeAgo iso={p.created_at} />

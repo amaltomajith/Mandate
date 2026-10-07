@@ -4,7 +4,7 @@ import { useState, type ReactNode } from "react";
 import type { ConnectionKind } from "@/types/db";
 import type { CooData, SafeConnection } from "@/lib/cooData";
 import { connectRazorpay, connectRazorpayX, connectSearch, disconnect, connectServerRazorpayKeys } from "@/lib/actions/connections";
-import { setChannelMode, setWhatsAppEnabled } from "@/lib/actions/team";
+import { setChannelMode, setPayoutMode, setWhatsAppEnabled } from "@/lib/actions/team";
 import { GhostButton, Icons, Panel, PrimaryButton } from "./ui";
 import { ErrorLine, Field, Pill, inputClass, inputStyle, useRunner } from "./kit";
 
@@ -71,6 +71,38 @@ export function ConnectionsTab({
             {live ? "Back to sandbox" : "Go live"}
           </GhostButton>
         </div>
+      </Card>
+
+      <Card title="How suppliers get paid" right={<Pill color={coo.settings.payout_mode === "manual" ? "var(--entity-agent)" : "var(--muted)"}>{coo.settings.payout_mode === "manual" ? "by hand" : "automatic"}</Pill>}>
+        <p className="mb-4 max-w-2xl text-[12.5px] leading-relaxed" style={{ color: "var(--muted)" }}>
+          Either way the Payment Wall decides first, with the same limits, budget and approvals. The difference is the last step.
+        </p>
+        <div className="grid gap-3 md:grid-cols-2">
+          {([
+            { mode: "auto" as const, title: "Automatic (RazorpayX)", body: "Approved payouts are sent through RazorpayX. Needs a RazorpayX account below. Without one, payouts run on the labelled sandbox and no money moves." },
+            { mode: "manual" as const, title: "By hand (your own bank)", body: "An approved payout becomes a task on the Today tab with the supplier's details and a UPI QR. You pay from your bank app and confirm. Needs no RazorpayX account." },
+          ]).map((o) => (
+            <button
+              key={o.mode}
+              type="button"
+              disabled={pending}
+              onClick={() => run(() => setPayoutMode(o.mode))}
+              className="rounded-xl border p-4 text-left transition-colors disabled:opacity-50"
+              style={{
+                borderColor: coo.settings.payout_mode === o.mode ? "var(--brand-violet)" : "var(--panel-border-strong)",
+                background: coo.settings.payout_mode === o.mode ? "color-mix(in srgb, var(--brand-violet) 10%, transparent)" : "transparent",
+              }}
+            >
+              <p className="text-[13.5px] font-semibold">{o.title}</p>
+              <p className="mt-1.5 text-[12px] leading-relaxed" style={{ color: "var(--muted)" }}>{o.body}</p>
+            </button>
+          ))}
+        </div>
+        {coo.settings.payout_mode === "manual" && (
+          <p className="mt-3 text-[11.5px]" style={{ color: "var(--muted-2)" }}>
+            Suppliers you add from now on keep their payment details encrypted, for showing to you when you pay. Suppliers added earlier in automatic mode will show only the last digits.
+          </p>
+        )}
       </Card>
 
       <Card title="Razorpay" right={status(by("razorpay"))}>

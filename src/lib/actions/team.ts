@@ -85,6 +85,14 @@ export async function setChannelMode(mode: "sandbox" | "live"): Promise<void> {
   revalidatePath("/dashboard");
 }
 
+export async function setPayoutMode(mode: "auto" | "manual"): Promise<void> {
+  if (mode !== "auto" && mode !== "manual") throw new Error("Unknown payout mode.");
+  const { merchant, db } = await scope();
+  const { error } = await db.from("merchant_settings").update({ payout_mode: mode, updated_at: new Date().toISOString() }).eq("merchant_id", merchant.id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/dashboard");
+}
+
 export async function setWhatsAppEnabled(on: boolean): Promise<void> {
   const { merchant, db } = await scope();
   const { error } = await db.from("merchant_settings").update({ whatsapp_enabled: on, updated_at: new Date().toISOString() }).eq("merchant_id", merchant.id);

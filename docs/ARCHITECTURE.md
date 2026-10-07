@@ -55,7 +55,10 @@ adds no rupee amount the template did not contain (`worker/src/agents/messages.t
 6. **Write-ahead trace**, *then* execution, then the trace is updated. A crash between the two leaves
    a record of an allowed action, never money gone with no explanation.
 7. **Execute** (`src/lib/razorpay/actions.ts`): the only place money moves. Payouts use the trace id
-   as the idempotency key; the ledger row is unique on it.
+   as the idempotency key; the ledger row is unique on it. In **by-hand** payout mode this step
+   queues a task for the merchant instead of calling RazorpayX (`src/lib/manualPayouts.ts`): the
+   payout is `queued`, reserved against the budget and the order, and the wallet is debited only
+   when the merchant confirms they paid. A sandbox payee is never turned into a real task.
 
 Fail-closed behaviour is deliberate: a payout whose payee cannot be resolved is blocked, and a sale
 whose cost is unknown escalates. These are the opposite of the "skip the rule if the fact is missing"
@@ -147,7 +150,7 @@ is held to the same list on every call. None of the local servers can move money
 | One merchant reaching another's data | Tenant derived from the session or the verified agent; every query scoped; reset and webhooks tested across two tenants. |
 | A model fetches `http://169.254.169.254`, or a name that rebinds to it | The research fetch validates the address the socket actually connects to (not an earlier lookup), refuses private, loopback, link-local, carrier-grade and documentation ranges, and re-checks every redirect. |
 | Header injection in outgoing mail | Header values are stripped of line breaks before the message is built. |
-| Secrets in the database | AES-256-GCM with `MANDATE_SECRET_KEY`; never selected into browser-bound data; bank details are not stored at all, only the last digits and Razorpay's ids. |
+| Secrets in the database | AES-256-GCM with `MANDATE_SECRET_KEY`; never selected into browser-bound data. In automatic mode bank details are not stored at all, only the last digits and Razorpay's ids. In by-hand mode the full details are stored encrypted, decrypted in one place (`getPayoutInstructions`), for the signed-in merchant, for a payout that is still waiting and whose payee is still active. |
 | A merchant borrowing the server's Razorpay or RazorpayX account by accident | Env keys are used only if the merchant explicitly chose "use this server's keys". |
 
 ## Sandbox and live

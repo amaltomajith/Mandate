@@ -9,6 +9,7 @@ import { EmptyState, Icons, Panel, PrimaryButton } from "./ui";
 import { TimeAgo } from "./TimeAgo";
 import { ErrorLine, Pill, Stat, rupees, rupeesShort, useRunner } from "./kit";
 import { makeDescriber } from "./describe";
+import { ManualPayoutsPanel } from "./ManualPayoutsPanel";
 
 /**
  * The first screen: is the business healthy, what did the team do, and what is
@@ -75,6 +76,8 @@ export function TodayTab({
         <Stat label="Cash in slow stock" value={rupeesShort(kpis.deadStockPaise)} sub="at cost" tone={kpis.deadStockPaise > 0 ? "var(--decision-escalate)" : undefined} />
         <Stat label="Running low" value={kpis.runningLow} sub={`${kpis.needsRestock} to reorder`} tone={kpis.runningLow > 0 ? "var(--decision-block)" : undefined} />
       </div>
+
+      <ManualPayoutsPanel coo={coo} />
 
       {map}
 

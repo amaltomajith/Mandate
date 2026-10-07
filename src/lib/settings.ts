@@ -33,6 +33,7 @@ export const DEFAULT_SETTINGS = {
   weekly_payout_budget_paise: 10_000_000,
   payout_budget_pct: 70,
   starting_float_paise: 2_500_000,
+  payout_mode: "auto" as const,
   require_approved_vendors: true,
   agents_enabled: true,
   dry_run: false,

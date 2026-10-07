@@ -81,8 +81,16 @@ Connect things under **Connections**, then press **Go live**. Until then nothing
 - **Razorpay**: paste a key pair (it is verified before it is kept), and point Razorpay's webhook at
   `<APP_URL>/api/webhooks/razorpay/<your-slug>`. Captured payments then book the sale, stock and
   wallet; payout failures return the money to the wallet.
-- **RazorpayX**: add your account number. Supplier bank/UPI details are sent to Razorpay and only the
-  last digits are kept here. Without RazorpayX, payouts use the labelled sandbox executor.
+- **Paying suppliers.** Two ways, chosen under Connections:
+  - **Automatic (RazorpayX)**: add your RazorpayX account number. Supplier bank/UPI details are sent to
+    Razorpay and only the last digits are kept here. Without RazorpayX, payouts use the labelled sandbox
+    executor and no money moves.
+  - **By hand**: needs no RazorpayX account. An approved payout becomes a task on the Today tab:
+    the supplier's details (kept encrypted, shown only to you), a UPI QR code and link, and a field
+    for your bank reference. You pay from your own bank app and press **I've paid this**; only then
+    does the wallet move, the order become paid, and the supplier get told. The same wall, limits,
+    budget and approvals apply either way, and a payment waiting for you already counts against
+    this week's budget and against the order, so it cannot be queued twice.
 - **Gmail**: set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (redirect URI
   `<APP_URL>/api/connections/gmail/callback`), then connect. Scopes: read and send only.
 - **WhatsApp**: enable it, run the worker, and scan the QR shown under Connections with a
@@ -114,7 +122,7 @@ oracle (`evaluate_offer`) that returns accept, counter or decline without reveal
 
 ```bash
 npm run verify:offline    # engine, inventory maths, channels, reset  (database only)
-npm run verify:online     # wall, buying, selling, webhook, closed loop  (needs `npm run dev`)
+npm run verify:online     # wall, manual payouts, buying, selling, webhook, closed loop  (needs `npm run dev`)
 npm run verify            # typecheck + lint + everything
 ```
 
@@ -125,13 +133,14 @@ npm run verify            # typecheck + lint + everything
 | `verify-inventory` | 15: velocity, runway, dead stock, floor price |
 | `verify-channels` | 36: Gmail parsing and header-injection safety, phone matching, who may be contacted, SSRF refusals |
 | `verify-reset` | 31: clears exactly one tenant, keeps what it promises |
+| `verify-manual` | 30: a payout becomes a task, the wallet moves only when you confirm, double-confirm and cross-tenant refused, cancel releases the budget |
 | `verify-wall` | 43: signatures, replay, payee/margin/budget/caps, purchase-order and refund ownership checks, currency, kill switches, dry-run, idempotency |
 | `verify-buying` | 35: quote → order → approval → payout → confirmation; hostile and unprofitable suppliers |
 | `verify-selling` | 28: clearance ladder, opt-in only, haggling, payment links, a buyer trying to talk the price to ₹1 |
 | `verify-webhook` | 18: signature, idempotency, sales, payout failures, out-of-order events |
 | `verify-loop` | 13: slow stock funds the restock, end to end |
 
-**Total: 285 checks.** The online suites make real model calls and take several minutes.
+**Total: 315 checks.** The online suites make real model calls and take several minutes.
 
 ## Honest notes
 
