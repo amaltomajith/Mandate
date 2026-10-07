@@ -250,7 +250,7 @@ async function main() {
     console.log("guardrails are rules");
     {
       const { data: managed } = await db.from("policy_rules").select("type").eq("merchant_id", A.id).eq("params->>managed", "guardrails");
-      const types = new Set((managed ?? []).map((r) => r.type));
+      const types = new Set<string>((managed ?? []).map((r) => r.type));
       check("the plain controls exist as enforceable rules", ["whitelisted_payee", "cap", "step_up", "payout_budget", "min_margin_floor"].every((t) => types.has(t)), [...types].join(","));
     }
   } finally {

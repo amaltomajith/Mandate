@@ -153,7 +153,13 @@ export async function getAggregates(
     const since = new Date(Date.now() - (params.period_days ?? 7) * 86_400_000).toISOString();
     const [paid, sold] = await Promise.all([
       db.from("payouts").select("amount_paise").eq("merchant_id", merchantId).in("status", ["queued", "processing", "processed"]).gte("created_at", since),
-      db.from("sales").select("amount_paise").eq("merchant_id", merchantId).gte("captured_at", since),
+      // Sample-store sales never fund payouts; see sample.ts.
+      db
+        .from("sales")
+        .select("amount_paise")
+        .eq("merchant_id", merchantId)
+        .gte("captured_at", since)
+        .or("razorpay_payment_id.is.null,razorpay_payment_id.not.like.sample_%"),
     ]);
     assertNoSupabaseError(paid.error);
     assertNoSupabaseError(sold.error);

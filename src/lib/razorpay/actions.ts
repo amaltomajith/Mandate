@@ -154,16 +154,29 @@ async function dispatch(input: ActionInput, ctx: ExecutionContext): Promise<Json
 
     case "price.change": {
       const db = createAdminClient();
-      const { data, error } = await db
+      const { data: current, error: readError } = await db
         .from("products")
-        .update({ price_paise: input.amount })
+        .select("price_paise, compare_at_price_paise")
         .eq("merchant_id", ctx.merchantId)
         .eq("sku", input.params.sku)
-        .select("sku, price_paise")
         .maybeSingle();
+      if (readError) throw new Error(readError.message);
+      if (!current) throw new Error(`No product with sku "${input.params.sku}".`);
+
+      // Remember the price a clearance started from, and forget it once the
+      // product is back at (or above) it. "20% off" only means something
+      // against a recorded original.
+      const original = current.compare_at_price_paise ?? current.price_paise;
+      const compareAt = input.amount < original ? original : null;
+      const { data, error } = await db
+        .from("products")
+        .update({ price_paise: input.amount, compare_at_price_paise: compareAt })
+        .eq("merchant_id", ctx.merchantId)
+        .eq("sku", input.params.sku)
+        .select("sku, price_paise, compare_at_price_paise")
+        .single();
       if (error) throw new Error(error.message);
-      if (!data) throw new Error(`No product with sku "${input.params.sku}".`);
-      return { sku: data.sku, new_price_paise: data.price_paise } as unknown as Json;
+      return { sku: data.sku, new_price_paise: data.price_paise, compare_at_price_paise: data.compare_at_price_paise } as unknown as Json;
     }
   }
 }

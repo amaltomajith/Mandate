@@ -67,6 +67,9 @@ export interface Database {
           name: string;
           email: string | null;
           razorpay_contact_id: string | null;
+          phone: string | null;
+          /** The Selling agent may only contact customers who opted in. */
+          marketing_opt_in: boolean;
           created_at: string;
         };
         Insert: {
@@ -75,6 +78,8 @@ export interface Database {
           name: string;
           email?: string | null;
           razorpay_contact_id?: string | null;
+          phone?: string | null;
+          marketing_opt_in?: boolean;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["customers"]["Insert"]>;
@@ -313,6 +318,8 @@ export interface Database {
           reorder_point: number;
           lead_time_days: number;
           last_sold_at: string | null;
+          /** Price before a clearance discount; null at normal price. */
+          compare_at_price_paise: number | null;
           created_at: string;
         };
         Insert: {
@@ -329,6 +336,7 @@ export interface Database {
           reorder_point?: number;
           lead_time_days?: number;
           last_sold_at?: string | null;
+          compare_at_price_paise?: number | null;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["products"]["Insert"]>;
@@ -447,6 +455,8 @@ export interface Database {
           subject: string | null;
           status: "open" | "closed";
           last_message_at: string;
+          /** Structured context, e.g. {"rfq": {"sku": "...", "qty": 40}} for a quote request. */
+          meta: Json;
           created_at: string;
         };
         Insert: {
@@ -461,6 +471,7 @@ export interface Database {
           subject?: string | null;
           status?: "open" | "closed";
           last_message_at?: string;
+          meta?: Json;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["threads"]["Insert"]>;
@@ -475,6 +486,7 @@ export interface Database {
           body: string;
           external_id: string | null;
           untrusted: boolean;
+          handled: boolean;
           agent_run_id: string | null;
           simulated: boolean;
           created_at: string;
@@ -487,6 +499,7 @@ export interface Database {
           body: string;
           external_id?: string | null;
           untrusted?: boolean;
+          handled?: boolean;
           agent_run_id?: string | null;
           simulated?: boolean;
           created_at?: string;
@@ -541,6 +554,7 @@ export interface Database {
           rationale: string | null;
           expected_at: string | null;
           received_at: string | null;
+          confirmed_at: string | null;
           created_at: string;
         };
         Insert: {
@@ -557,6 +571,7 @@ export interface Database {
           rationale?: string | null;
           expected_at?: string | null;
           received_at?: string | null;
+          confirmed_at?: string | null;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["purchase_orders"]["Insert"]>;
