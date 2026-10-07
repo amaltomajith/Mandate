@@ -81,7 +81,7 @@ export function Stat({
       )}
     </>
   );
-  const cls = "surface block w-full p-6 text-left";
+  const cls = "surface block h-full w-full p-6 text-left";
   return onClick ? (
     <button type="button" onClick={onClick} className={`${cls} surface-interactive focus-ring`}>
       {body}

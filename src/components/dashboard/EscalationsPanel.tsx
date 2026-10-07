@@ -5,6 +5,7 @@ import { approveEscalation, denyEscalation } from "@/lib/actions/escalations";
 import type { Escalation, Trace } from "@/types/db";
 import { actionTypeLabel, DangerButton, EmptyState, formatMoney, Icons, Panel, Spinner, SuccessButton } from "./ui";
 import { TimeAgo } from "./TimeAgo";
+import { ErrorLine } from "./kit";
 
 export function EscalationsPanel({
   escalations,
@@ -55,122 +56,85 @@ export function EscalationsPanel({
   return (
     <Panel
       title="Needs your approval"
+      description="Your team stopped and asked before going further."
       icon={<Icons.Escalation />}
       accent="var(--decision-escalate)"
       count={pending.length}
-      // Takes whatever the trust panel below doesn't need, and scrolls inside
-      // that rather than stretching the column — a busy queue used to push the
-      // entity graph beside it off the bottom of the screen. This is the panel
-      // that grows without bound, so it gets the flexible share.
-      className="min-h-0 flex-1"
-      bodyClassName="max-h-[520px] overflow-y-auto pr-1"
+      className="min-h-0"
+      bodyClassName="max-h-[640px] overflow-y-auto pr-1"
     >
-      {error && (
-        <p className="mb-3 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: "var(--decision-block)", color: "var(--decision-block)", background: "color-mix(in srgb, var(--decision-block) 14%, transparent)" }}>
-          {error}
-        </p>
-      )}
-      {pending.length === 0 && <EmptyState text="Nothing is waiting for you." />}
-      <div className="space-y-3">
+      <ErrorLine error={error} />
+      {pending.length === 0 && <EmptyState text="Nothing is waiting for you." hint="When your team wants to pay or price something outside your limits, it shows up here." />}
+      <div className="space-y-4">
         {pending.map((esc) => {
           const trace = tracesById[esc.trace_id];
           const rowBusy = isPending && busy?.id === esc.id;
           const approving = rowBusy && busy?.action === "approve";
           const denying = rowBusy && busy?.action === "deny";
+          const d = trace ? describe?.(trace) : null;
+          const p = trace ? (trace.params as { amount?: number; currency?: string } | null) : null;
           return (
             <div
               key={esc.id}
-              className="rounded-xl border p-3.5 transition-opacity"
-              style={{
-                borderColor: "color-mix(in srgb, var(--decision-escalate) 30%, var(--panel-border))",
-                background: "var(--panel-2)",
-                opacity: rowBusy ? 0.6 : 1,
-              }}
+              className="surface-tile p-6 transition-opacity"
+              style={{ borderColor: "color-mix(in srgb, var(--decision-escalate) 35%, var(--hairline))", opacity: rowBusy ? 0.6 : 1 }}
             >
               {/* No trace means the card cannot say what it is asking about.
                   Approving money you cannot see is the single worst thing this
                   panel could offer, so the buttons below go dead rather than
-                  the card rendering as a bare pair of them -- which is exactly
-                  what it used to do, and why five of these appeared as empty
-                  approve/deny pairs once the trace window filled up. */}
+                  the card rendering as a bare pair of them. */}
               {!trace && (
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>
-                      Details unavailable
-                    </p>
-                    <p className="mt-1 text-[11px] leading-snug" style={{ color: "var(--muted-2)" }}>
-                      The action behind this request could not be loaded, so there is nothing to show
-                      you and nothing to approve on. Reload; if it persists, find it by id in
-                      Transactions.
-                    </p>
-                    <p className="mt-1 font-mono text-[10px]" style={{ color: "var(--muted-2)" }}>
-                      {esc.trace_id}
-                    </p>
-                  </div>
-                  <span className="shrink-0 text-[10px]" style={{ color: "var(--muted-2)" }}>
-                    <TimeAgo iso={esc.created_at} />
-                  </span>
+                <div>
+                  <p className="text-[15px] font-semibold" style={{ color: "var(--muted)" }}>
+                    Details unavailable
+                  </p>
+                  <p className="mt-1.5 text-[14px] leading-6" style={{ color: "var(--muted-2)" }}>
+                    The action behind this request could not be loaded, so there is nothing to show you and nothing to approve on. Reload; if it persists, find it by id
+                    in Activity.
+                  </p>
+                  <p className="num mt-2 text-[12px]" style={{ color: "var(--muted-2)" }}>
+                    {esc.trace_id}
+                  </p>
                 </div>
               )}
               {trace && (
                 <>
-                  {/* Amount first and large: it is the thing a merchant decides
-                      on, and it is what distinguishes one queued item from the
-                      next when several are waiting. */}
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
-                      <p className="text-[19px] font-semibold leading-none tabular-nums" style={{ color: "var(--decision-escalate)" }}>
-                        {(() => {
-                          const p = trace.params as { amount?: number; currency?: string } | null;
-                          return p?.amount && p?.currency ? formatMoney(p.amount, p.currency) : "—";
-                        })()}
+                      <p className="num text-[32px] font-semibold leading-[36px]" style={{ color: "var(--decision-escalate)" }}>
+                        {p?.amount && p?.currency ? formatMoney(p.amount, p.currency) : "-"}
                       </p>
-                      <p className="mt-1.5 truncate text-[12px] font-medium">{actionTypeLabel(trace.action_type)}</p>
-                      {(() => {
-                        const d = describe?.(trace);
-                        if (!d) return null;
-                        return (
-                          <>
-                            <p className="mt-1 text-[12.5px] font-medium leading-snug">{d.title}</p>
-                            {d.detail && (
-                              <p className="mt-0.5 text-[11.5px] leading-snug" style={{ color: "var(--muted)" }}>
-                                {d.detail}
-                              </p>
-                            )}
-                          </>
-                        );
-                      })()}
+                      <p className="mt-2 text-[13px]" style={{ color: "var(--muted)" }}>
+                        {actionTypeLabel(trace.action_type)}
+                      </p>
                     </div>
-                    <span className="shrink-0 text-[10px]" style={{ color: "var(--muted-2)" }}>
+                    <span className="shrink-0 text-[13px]" style={{ color: "var(--muted-2)" }}>
                       <TimeAgo iso={esc.created_at} />
                     </span>
                   </div>
-                  <p className="mt-2 text-[11px] leading-relaxed" style={{ color: "var(--muted)" }}>
+                  {d && (
+                    <div className="mt-4">
+                      <p className="text-[16px] font-medium leading-6">{d.title}</p>
+                      {d.detail && (
+                        <p className="mt-1 text-[14px] leading-6" style={{ color: "var(--muted)" }}>
+                          {d.detail}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  <p className="mt-4 rounded-[12px] bg-white/[0.04] px-4 py-3 text-[14px] leading-6" style={{ color: "var(--muted)" }}>
                     {trace.reasoning}
                   </p>
                 </>
               )}
-              <div className="mt-3 flex gap-2">
-                <SuccessButton
-                  disabled={rowBusy || !trace}
-                  onClick={() => act(esc.id, "approve", approveEscalation)}
-                  className="flex-1"
-                >
-                  <span className="flex items-center justify-center gap-1.5">
-                    {approving && <Spinner />}
-                    {approving ? "Approving…" : "Approve"}
-                  </span>
+              <div className="mt-5 flex gap-3">
+                <SuccessButton disabled={rowBusy || !trace} onClick={() => act(esc.id, "approve", approveEscalation)} className="flex-1">
+                  {approving && <Spinner />}
+                  {approving ? "Approving…" : "Approve"}
                 </SuccessButton>
-                <DangerButton
-                  disabled={rowBusy || !trace}
-                  onClick={() => act(esc.id, "deny", denyEscalation)}
-                  className="flex-1"
-                >
-                  <span className="flex items-center justify-center gap-1.5">
-                    {denying && <Spinner />}
-                    {denying ? "Denying…" : "Deny"}
-                  </span>
+                <DangerButton disabled={rowBusy || !trace} onClick={() => act(esc.id, "deny", denyEscalation)} className="flex-1">
+                  {denying && <Spinner />}
+                  {denying ? "Denying…" : "Deny"}
                 </DangerButton>
               </div>
             </div>
