@@ -111,8 +111,8 @@ export default async function DashboardPage() {
           serverHasRazorpayKeys={Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) && isOperator((await currentUser())?.emailAddresses[0]?.emailAddress)}
           googleConfigured={Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)}
           map={<OperationsMap key="map" coo={coo} agents={agents} rules={rules} traces={traces} escalations={escalations} />}
-          topRight={<AlertsBell alerts={alerts} />}
-          railFooter={<SignOutButton />}
+          topRight={<AlertsBell key="bell" alerts={alerts} />}
+          railFooter={<SignOutButton key="signout" />}
         />
       </div>
     </div>
