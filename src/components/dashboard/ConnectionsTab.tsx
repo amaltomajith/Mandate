@@ -1,20 +1,35 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { Bank, CreditCard, EnvelopeSimple, GlobeSimple, WhatsappLogo, Flask, Lightning } from "@phosphor-icons/react";
 import type { ConnectionKind } from "@/types/db";
 import type { CooData, SafeConnection } from "@/lib/cooData";
 import { connectRazorpay, connectRazorpayX, connectSearch, disconnect, connectServerRazorpayKeys } from "@/lib/actions/connections";
 import { setChannelMode, setPayoutMode, setWhatsAppEnabled } from "@/lib/actions/team";
-import { GhostButton, Icons, Panel, PrimaryButton } from "./ui";
+import { GhostButton, PrimaryButton } from "./ui";
 import { ErrorLine, Field, Pill, inputClass, inputStyle, useRunner } from "./kit";
+import { ConfirmSheet, Reveal } from "./motion";
 
-function Card({ title, children, right, accent }: { title: string; children: ReactNode; right?: ReactNode; accent?: string }) {
+function Tile({ title, icon, connected, children, wide, index }: { title: string; icon: ReactNode; connected: boolean; children: ReactNode; wide?: boolean; index: number }) {
   return (
-    <Panel title={title} icon={<Icons.Shield />} accent={accent ?? "var(--entity-agent)"} action={right}>
-      {children}
-    </Panel>
+    <Reveal index={index} className={`h-full ${wide ? "lg:col-span-2" : ""}`}>
+      <section className="surface flex h-full flex-col p-7">
+        <div className="mb-5 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <span className="flex h-12 w-12 items-center justify-center rounded-[14px]" style={{ background: "color-mix(in srgb, var(--brand-violet) 16%, transparent)", color: "var(--brand-pink)" }}>
+              {icon}
+            </span>
+            <h2 className="text-[19px] font-semibold tracking-[-0.01em]">{title}</h2>
+          </div>
+          <Pill color={connected ? "var(--decision-allow)" : "var(--muted)"}>{connected ? "Connected" : "Not connected"}</Pill>
+        </div>
+        {children}
+      </section>
+    </Reveal>
   );
 }
+
+const copy = "text-[15px] leading-6";
 
 /**
  * Where the business plugs in. Secrets go in once and are never shown again; this
@@ -34,214 +49,272 @@ export function ConnectionsTab({
   googleConfigured: boolean;
 }) {
   const { error, pending, run } = useRunner();
+  const [goLive, setGoLive] = useState(false);
   const by = (k: ConnectionKind): SafeConnection | undefined => coo.connections.find((c) => c.kind === k);
+  const on = (k: ConnectionKind) => by(k)?.status === "connected";
   const live = coo.settings.channel_mode === "live";
   const [rz, setRz] = useState({ keyId: "", keySecret: "", webhook: "" });
   const [rx, setRx] = useState("");
   const [search, setSearch] = useState({ provider: "brave" as "brave" | "tavily", key: "" });
   const hook = `${appUrl.replace(/\/$/, "")}/api/webhooks/razorpay/${slug}`;
-
-  const status = (c?: SafeConnection) =>
-    c?.status === "connected" ? <Pill color="var(--decision-allow)">connected</Pill> : <Pill color="var(--muted)">not connected</Pill>;
-
   const qr = (by("whatsapp")?.meta as { qr_data_url?: string } | null)?.qr_data_url;
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-8">
       <ErrorLine error={error} />
 
-      <Card
-        title="Sandbox or live"
-        accent={live ? "var(--decision-escalate)" : "var(--entity-mandate)"}
-        right={<Pill color={live ? "var(--decision-escalate)" : "var(--entity-mandate)"}>{live ? "live" : "sandbox"}</Pill>}
-      >
-        <p className="max-w-2xl text-[13px] leading-relaxed" style={{ color: "var(--muted)" }}>
-          In <strong>sandbox</strong>, your team rehearses with simulated suppliers and buyers: nothing is sent to a real person and no real money moves. In <strong>live</strong>, it
-          messages real contacts through your connected Gmail and WhatsApp, and uses your Razorpay accounts. Everything still passes the Payment Wall and your guardrails either way.
-        </p>
-        <div className="mt-4">
-          <GhostButton
-            disabled={pending}
-            className="px-4"
-            onClick={() => {
-              if (!live && !confirm("Go live? Your team will message real suppliers and buyers and use your connected Razorpay accounts.")) return;
-              run(() => setChannelMode(live ? "sandbox" : "live"));
-            }}
-          >
-            {live ? "Back to sandbox" : "Go live"}
-          </GhostButton>
-        </div>
-      </Card>
-
-      <Card title="How suppliers get paid" right={<Pill color={coo.settings.payout_mode === "manual" ? "var(--entity-agent)" : "var(--muted)"}>{coo.settings.payout_mode === "manual" ? "by hand" : "automatic"}</Pill>}>
-        <p className="mb-4 max-w-2xl text-[12.5px] leading-relaxed" style={{ color: "var(--muted)" }}>
-          Either way the Payment Wall decides first, with the same limits, budget and approvals. The difference is the last step.
-        </p>
-        <div className="grid gap-3 md:grid-cols-2">
-          {([
-            { mode: "auto" as const, title: "Automatic (RazorpayX)", body: "Approved payouts are sent through RazorpayX. Needs a RazorpayX account below. Without one, payouts run on the labelled sandbox and no money moves." },
-            { mode: "manual" as const, title: "By hand (your own bank)", body: "An approved payout becomes a task on the Today tab with the supplier's details and a UPI QR. You pay from your bank app and confirm. Needs no RazorpayX account." },
-          ]).map((o) => (
-            <button
-              key={o.mode}
-              type="button"
-              disabled={pending}
-              onClick={() => run(() => setPayoutMode(o.mode))}
-              className="rounded-xl border p-4 text-left transition-colors disabled:opacity-50"
-              style={{
-                borderColor: coo.settings.payout_mode === o.mode ? "var(--brand-violet)" : "var(--panel-border-strong)",
-                background: coo.settings.payout_mode === o.mode ? "color-mix(in srgb, var(--brand-violet) 10%, transparent)" : "transparent",
-              }}
-            >
-              <p className="text-[13.5px] font-semibold">{o.title}</p>
-              <p className="mt-1.5 text-[12px] leading-relaxed" style={{ color: "var(--muted)" }}>{o.body}</p>
-            </button>
-          ))}
-        </div>
-        {coo.settings.payout_mode === "manual" && (
-          <p className="mt-3 text-[11.5px]" style={{ color: "var(--muted-2)" }}>
-            Suppliers you add from now on keep their payment details encrypted, for showing to you when you pay. Suppliers added earlier in automatic mode will show only the last digits.
-          </p>
-        )}
-      </Card>
-
-      <Card title="Razorpay" right={status(by("razorpay"))}>
-        <p className="mb-3 text-[12.5px]" style={{ color: "var(--muted)" }}>
-          For payment links and refunds. {by("razorpay")?.account_label && <>Connected as <strong>{by("razorpay")?.account_label}</strong>. </>}Without it, links are labelled sandbox links that no buyer can pay.
-        </p>
-        {by("razorpay")?.status === "connected" ? (
-          <GhostButton disabled={pending} className="px-4" onClick={() => run(() => disconnect("razorpay"))}>Disconnect</GhostButton>
-        ) : (
-          <>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              <Field label="Key id"><input className={inputClass} style={inputStyle} autoComplete="off" value={rz.keyId} onChange={(e) => setRz({ ...rz, keyId: e.target.value })} placeholder="rzp_test_…" /></Field>
-              <Field label="Key secret"><input className={inputClass} style={inputStyle} type="password" autoComplete="off" value={rz.keySecret} onChange={(e) => setRz({ ...rz, keySecret: e.target.value })} /></Field>
-              <Field label="Webhook secret" hint="Optional now; needed to book payments automatically">
-                <input className={inputClass} style={inputStyle} type="password" autoComplete="off" value={rz.webhook} onChange={(e) => setRz({ ...rz, webhook: e.target.value })} />
-              </Field>
-            </div>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <PrimaryButton disabled={pending} className="px-5" onClick={() => run(async () => { await connectRazorpay({ keyId: rz.keyId.trim(), keySecret: rz.keySecret.trim(), webhookSecret: rz.webhook.trim() || undefined }); setRz({ keyId: "", keySecret: "", webhook: "" }); })}>
-                {pending ? "Checking…" : "Connect"}
-              </PrimaryButton>
-              {serverHasRazorpayKeys && (
-                <GhostButton disabled={pending} className="px-4" onClick={() => run(() => connectServerRazorpayKeys())}>
-                  Use this server&apos;s test keys
-                </GhostButton>
-              )}
-            </div>
-          </>
-        )}
-        <p className="mt-4 text-[11.5px]" style={{ color: "var(--muted-2)" }}>
-          Point Razorpay&apos;s webhook (events <code>payment.captured</code>, <code>payment_link.paid</code>, <code>payout.*</code>) at:
-        </p>
-        <code className="mt-1 block break-all rounded-lg px-3 py-2 text-[11.5px]" style={{ background: "var(--panel-2)" }}>{hook}</code>
-      </Card>
-
-      <Card title="RazorpayX payouts" right={status(by("razorpayx"))}>
-        <p className="mb-3 text-[12.5px]" style={{ color: "var(--muted)" }}>
-          How suppliers get paid. Needs a RazorpayX account. Without it, payouts run on the labelled sandbox executor and no money moves.
-        </p>
-        {by("razorpayx")?.status === "connected" ? (
-          <>
-            <p className="mb-3 text-[12.5px]">{by("razorpayx")?.account_label}</p>
-            <GhostButton disabled={pending} className="px-4" onClick={() => run(() => disconnect("razorpayx"))}>Disconnect</GhostButton>
-          </>
-        ) : (
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="w-64">
-              <Field label="RazorpayX account number"><input className={inputClass} style={inputStyle} inputMode="numeric" autoComplete="off" value={rx} onChange={(e) => setRx(e.target.value)} /></Field>
-            </div>
-            <PrimaryButton disabled={pending || by("razorpay")?.status !== "connected"} className="px-5" onClick={() => run(async () => { await connectRazorpayX({ accountNumber: rx.trim() }); setRx(""); })}>
-              Connect
-            </PrimaryButton>
-            {by("razorpay")?.status !== "connected" && <span className="text-[11.5px]" style={{ color: "var(--muted-2)" }}>Connect Razorpay first.</span>}
-          </div>
-        )}
-      </Card>
-
-      <Card title="Gmail" right={status(by("gmail"))}>
-        <p className="mb-3 text-[12.5px]" style={{ color: "var(--muted)" }}>
-          Lets the team email suppliers and read their replies. It can read and send mail from the account you connect, and only talks to approved suppliers and customers who opted in.
-        </p>
-        {by("gmail")?.status === "connected" ? (
-          <>
-            <p className="mb-3 text-[12.5px]">{by("gmail")?.account_label}</p>
-            <GhostButton disabled={pending} className="px-4" onClick={() => run(() => disconnect("gmail"))}>Disconnect</GhostButton>
-          </>
-        ) : googleConfigured ? (
-          <a href="/api/connections/gmail/start" className="inline-block rounded-lg px-5 py-2 text-xs font-semibold text-white" style={{ background: "linear-gradient(135deg, #7c5cff, #5227ff)" }}>
-            Connect Gmail
-          </a>
-        ) : (
-          <p className="text-[12px]" style={{ color: "var(--decision-escalate)" }}>
-            This server has no Google OAuth client yet. Set <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> (redirect URI <code>{appUrl.replace(/\/$/, "")}/api/connections/gmail/callback</code>).
-          </p>
-        )}
-      </Card>
-
-      <Card title="WhatsApp" right={status(by("whatsapp"))}>
-        <p className="mb-3 text-[12.5px]" style={{ color: "var(--muted)" }}>
-          Uses a dedicated WhatsApp number linked like WhatsApp Web (via Baileys, an unofficial client). Use a number you can afford to lose: WhatsApp can restrict numbers that
-          automate messages, so the team only writes to approved suppliers and opted-in customers, at a human pace. The worker holds the connection.
-        </p>
-        <label className="mb-3 flex items-center gap-2 text-[13px]">
-          <input type="checkbox" checked={coo.settings.whatsapp_enabled} disabled={pending} onChange={(e) => run(() => setWhatsAppEnabled(e.target.checked))} />
-          Enable WhatsApp for this account
-        </label>
-        {coo.settings.whatsapp_enabled && by("whatsapp")?.status !== "connected" && (
-          <div className="rounded-xl p-4" style={{ background: "var(--panel-2)" }}>
-            {qr ? (
-              <div className="flex flex-wrap items-center gap-5">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={qr} alt="WhatsApp pairing code" width={180} height={180} className="rounded-lg bg-white p-2" />
-                <p className="max-w-sm text-[12.5px]" style={{ color: "var(--muted)" }}>
-                  On the phone: WhatsApp, Settings, Linked devices, Link a device, then scan this code. It refreshes every few seconds while the worker is waiting.
+      <Reveal>
+        <section className="surface overflow-hidden p-8" style={{ borderColor: live ? "color-mix(in srgb, var(--decision-escalate) 45%, transparent)" : undefined }}>
+          <div className="flex flex-wrap items-start justify-between gap-6">
+            <div className="flex max-w-2xl items-start gap-5">
+              <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[16px]" style={{ background: `color-mix(in srgb, ${live ? "var(--decision-escalate)" : "var(--entity-mandate)"} 16%, transparent)`, color: live ? "var(--decision-escalate)" : "var(--entity-mandate)" }}>
+                {live ? <Lightning size={30} weight="fill" /> : <Flask size={30} weight="fill" />}
+              </span>
+              <div>
+                <p className="text-[24px] font-semibold leading-[30px] tracking-tight">{live ? "You are live" : "You are in the sandbox"}</p>
+                <p className={`mt-2 ${copy}`} style={{ color: "var(--muted)" }}>
+                  In the <strong style={{ color: "var(--foreground)" }}>sandbox</strong>, your team rehearses with simulated suppliers and buyers: nothing is sent to a real person and no real money moves. When{" "}
+                  <strong style={{ color: "var(--foreground)" }}>live</strong>, it messages real contacts through your connected Gmail and WhatsApp, and uses your Razorpay accounts. Everything still passes the Payment Wall and your guardrails either way.
                 </p>
               </div>
+            </div>
+            <GhostButton disabled={pending} className="px-6" onClick={() => (live ? run(() => setChannelMode("sandbox")) : setGoLive(true))}>
+              {live ? "Back to sandbox" : "Go live"}
+            </GhostButton>
+          </div>
+        </section>
+      </Reveal>
+
+      <Reveal index={1}>
+        <section className="surface p-8">
+          <div className="mb-6">
+            <p className="text-[19px] font-semibold tracking-[-0.01em]">How suppliers get paid</p>
+            <p className={`mt-1.5 max-w-2xl ${copy}`} style={{ color: "var(--muted)" }}>
+              Either way the Payment Wall decides first, with the same limits, budget and approvals. The difference is the last step.
+            </p>
+          </div>
+          <div className="grid gap-5 md:grid-cols-2">
+            {([
+              { mode: "auto" as const, title: "Automatic (RazorpayX)", body: "Approved payouts are sent through RazorpayX. Needs a RazorpayX account below. Without one, payouts run on the labelled sandbox and no money moves.", Icon: Bank },
+              { mode: "manual" as const, title: "By hand (your own bank)", body: "An approved payout becomes a task on Today with the supplier's details and a UPI QR. You pay from your bank app and confirm. Needs no RazorpayX account.", Icon: CreditCard },
+            ]).map((o) => {
+              const selected = coo.settings.payout_mode === o.mode;
+              return (
+                <button
+                  key={o.mode}
+                  type="button"
+                  disabled={pending}
+                  onClick={() => run(() => setPayoutMode(o.mode))}
+                  aria-pressed={selected}
+                  className="surface-interactive focus-ring rounded-[18px] border p-6 text-left disabled:opacity-50"
+                  style={{
+                    borderColor: selected ? "var(--brand-violet)" : "var(--hairline-strong)",
+                    background: selected ? "color-mix(in srgb, var(--brand-violet) 12%, transparent)" : "rgba(255,255,255,0.02)",
+                    boxShadow: selected ? "0 0 0 1px var(--brand-violet), 0 18px 40px -24px rgba(82,39,255,0.9)" : undefined,
+                  }}
+                >
+                  <span className="flex items-center justify-between">
+                    <o.Icon size={28} style={{ color: selected ? "var(--brand-pink)" : "var(--muted)" }} />
+                    {selected && <Pill color="var(--brand-pink)">Selected</Pill>}
+                  </span>
+                  <p className="mt-4 text-[17px] font-semibold tracking-[-0.01em]">{o.title}</p>
+                  <p className="mt-1.5 text-[14px] leading-6" style={{ color: "var(--muted)" }}>
+                    {o.body}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+          {coo.settings.payout_mode === "manual" && (
+            <p className="mt-5 text-[14px] leading-6" style={{ color: "var(--muted-2)" }}>
+              Suppliers you add from now on keep their payment details encrypted, for showing to you when you pay. Suppliers added earlier in automatic mode will show only the last digits.
+            </p>
+          )}
+        </section>
+      </Reveal>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Tile index={2} title="Razorpay" icon={<CreditCard size={26} />} connected={on("razorpay")} wide>
+          <p className={`mb-5 ${copy}`} style={{ color: "var(--muted)" }}>
+            For payment links and refunds. {by("razorpay")?.account_label && <>Connected as <strong style={{ color: "var(--foreground)" }}>{by("razorpay")?.account_label}</strong>. </>}Without it, links are labelled sandbox links that no buyer can pay.
+          </p>
+          {on("razorpay") ? (
+            <div>
+              <GhostButton disabled={pending} onClick={() => run(() => disconnect("razorpay"))}>
+                Disconnect
+              </GhostButton>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
+                <Field label="Key id">
+                  <input className={inputClass} style={inputStyle} autoComplete="off" value={rz.keyId} onChange={(e) => setRz({ ...rz, keyId: e.target.value })} placeholder="rzp_test_..." />
+                </Field>
+                <Field label="Key secret">
+                  <input className={inputClass} style={inputStyle} type="password" autoComplete="off" value={rz.keySecret} onChange={(e) => setRz({ ...rz, keySecret: e.target.value })} />
+                </Field>
+                <Field label="Webhook secret" hint="Optional now; needed to book payments automatically">
+                  <input className={inputClass} style={inputStyle} type="password" autoComplete="off" value={rz.webhook} onChange={(e) => setRz({ ...rz, webhook: e.target.value })} />
+                </Field>
+              </div>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <PrimaryButton
+                  disabled={pending}
+                  className="px-6"
+                  onClick={() =>
+                    run(async () => {
+                      await connectRazorpay({ keyId: rz.keyId.trim(), keySecret: rz.keySecret.trim(), webhookSecret: rz.webhook.trim() || undefined });
+                      setRz({ keyId: "", keySecret: "", webhook: "" });
+                    })
+                  }
+                >
+                  {pending ? "Checking…" : "Connect"}
+                </PrimaryButton>
+                {serverHasRazorpayKeys && (
+                  <GhostButton disabled={pending} onClick={() => run(() => connectServerRazorpayKeys())}>
+                    Use this server&apos;s test keys
+                  </GhostButton>
+                )}
+              </div>
+            </>
+          )}
+          <p className="mt-6 text-[14px] leading-6" style={{ color: "var(--muted-2)" }}>
+            Point Razorpay&apos;s webhook (events <code>payment.captured</code>, <code>payment_link.paid</code>, <code>payout.*</code>) at:
+          </p>
+          <code className="num mt-2 block break-all rounded-[12px] bg-white/[0.04] px-4 py-3 text-[13px]">{hook}</code>
+        </Tile>
+
+        <Tile index={3} title="RazorpayX payouts" icon={<Bank size={26} />} connected={on("razorpayx")}>
+          <p className={`mb-5 ${copy}`} style={{ color: "var(--muted)" }}>
+            How suppliers get paid automatically. Needs a RazorpayX account. Without it, payouts run on the labelled sandbox executor and no money moves.
+          </p>
+          {on("razorpayx") ? (
+            <div className="mt-auto">
+              <p className="mb-4 text-[15px]">{by("razorpayx")?.account_label}</p>
+              <GhostButton disabled={pending} onClick={() => run(() => disconnect("razorpayx"))}>
+                Disconnect
+              </GhostButton>
+            </div>
+          ) : (
+            <div className="mt-auto space-y-4">
+              <Field label="RazorpayX account number">
+                <input className={inputClass} style={inputStyle} inputMode="numeric" autoComplete="off" value={rx} onChange={(e) => setRx(e.target.value)} />
+              </Field>
+              <div className="flex items-center gap-4">
+                <PrimaryButton disabled={pending || !on("razorpay")} className="px-6" onClick={() => run(async () => { await connectRazorpayX({ accountNumber: rx.trim() }); setRx(""); })}>
+                  Connect
+                </PrimaryButton>
+                {!on("razorpay") && (
+                  <span className="text-[14px]" style={{ color: "var(--muted-2)" }}>
+                    Connect Razorpay first.
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </Tile>
+
+        <Tile index={4} title="Gmail" icon={<EnvelopeSimple size={26} />} connected={on("gmail")}>
+          <p className={`mb-5 ${copy}`} style={{ color: "var(--muted)" }}>
+            Lets the team email suppliers and read their replies. It can read and send mail from the account you connect, and only talks to approved suppliers and customers who opted in.
+          </p>
+          <div className="mt-auto">
+            {on("gmail") ? (
+              <>
+                <p className="mb-4 text-[15px]">{by("gmail")?.account_label}</p>
+                <GhostButton disabled={pending} onClick={() => run(() => disconnect("gmail"))}>
+                  Disconnect
+                </GhostButton>
+              </>
+            ) : googleConfigured ? (
+              <a href="/api/connections/gmail/start" className="focus-ring inline-flex min-h-[44px] items-center rounded-[12px] px-6 text-[15px] font-semibold text-white transition-transform active:scale-[0.97]" style={{ background: "linear-gradient(135deg, #7c5cff, #5227ff)" }}>
+                Connect Gmail
+              </a>
             ) : (
-              <p className="text-[12.5px]" style={{ color: "var(--muted)" }}>
-                Waiting for the worker to produce a pairing code. Make sure it is running: <code>npm run worker</code>.
+              <p className="text-[14px] leading-6" style={{ color: "var(--decision-escalate)" }}>
+                This server has no Google OAuth client yet. Set <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> (redirect URI <code>{appUrl.replace(/\/$/, "")}/api/connections/gmail/callback</code>).
               </p>
             )}
           </div>
-        )}
-        {by("whatsapp")?.status === "connected" && (
-          <div className="flex items-center gap-3">
-            <span className="text-[12.5px]">{by("whatsapp")?.account_label}</span>
-            <GhostButton disabled={pending} className="px-4" onClick={() => run(() => disconnect("whatsapp"))}>Unlink</GhostButton>
-          </div>
-        )}
-      </Card>
+        </Tile>
 
-      <Card title="Web search" right={status(by("search"))}>
-        <p className="mb-3 text-[12.5px]" style={{ color: "var(--muted)" }}>
-          How the buying agent finds new suppliers. It works without a key using a free search, but a Brave or Tavily key gives better results.
-        </p>
-        {by("search")?.status === "connected" ? (
-          <>
-            <p className="mb-3 text-[12.5px]">{by("search")?.account_label}</p>
-            <GhostButton disabled={pending} className="px-4" onClick={() => run(() => disconnect("search"))}>Disconnect</GhostButton>
-          </>
-        ) : (
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="w-40">
-              <Field label="Provider">
-                <select className={inputClass} style={inputStyle} value={search.provider} onChange={(e) => setSearch({ ...search, provider: e.target.value as "brave" | "tavily" })}>
-                  <option value="brave" style={{ background: "#14141f" }}>Brave</option>
-                  <option value="tavily" style={{ background: "#14141f" }}>Tavily</option>
-                </select>
-              </Field>
+        <Tile index={5} title="WhatsApp" icon={<WhatsappLogo size={26} />} connected={on("whatsapp")}>
+          <p className={`mb-5 ${copy}`} style={{ color: "var(--muted)" }}>
+            Uses a dedicated number linked like WhatsApp Web (via Baileys, an unofficial client). Use a number you can afford to lose: WhatsApp can restrict numbers that automate messages, so the team only writes to approved suppliers and opted-in customers, at a human pace.
+          </p>
+          <label className="mb-4 flex cursor-pointer items-center gap-3 text-[15px]">
+            <input type="checkbox" className="h-5 w-5 accent-[#7c5cff]" checked={coo.settings.whatsapp_enabled} disabled={pending} onChange={(e) => run(() => setWhatsAppEnabled(e.target.checked))} />
+            Enable WhatsApp for this account
+          </label>
+          {coo.settings.whatsapp_enabled && !on("whatsapp") && (
+            <div className="rounded-[14px] bg-white/[0.04] p-5">
+              {qr ? (
+                <div className="flex flex-wrap items-center gap-5">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={qr} alt="WhatsApp pairing code" width={180} height={180} className="rounded-[14px] bg-white p-2" />
+                  <p className="max-w-xs text-[14px] leading-6" style={{ color: "var(--muted)" }}>
+                    On the phone: WhatsApp, Settings, Linked devices, Link a device, then scan this code. It refreshes every few seconds while the worker is waiting.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-[14px] leading-6" style={{ color: "var(--muted)" }}>
+                  Waiting for the worker to produce a pairing code. Make sure it is running: <code>npm run worker</code>.
+                </p>
+              )}
             </div>
-            <div className="w-72">
-              <Field label="API key"><input className={inputClass} style={inputStyle} type="password" autoComplete="off" value={search.key} onChange={(e) => setSearch({ ...search, key: e.target.value })} /></Field>
+          )}
+          {on("whatsapp") && (
+            <div className="flex items-center gap-4">
+              <span className="text-[15px]">{by("whatsapp")?.account_label}</span>
+              <GhostButton disabled={pending} onClick={() => run(() => disconnect("whatsapp"))}>
+                Unlink
+              </GhostButton>
             </div>
-            <PrimaryButton disabled={pending || search.key.length < 8} className="px-5" onClick={() => run(async () => { await connectSearch({ provider: search.provider, key: search.key.trim() }); setSearch({ ...search, key: "" }); })}>
-              Save
-            </PrimaryButton>
-          </div>
-        )}
-      </Card>
+          )}
+        </Tile>
+
+        <Tile index={6} title="Web search" icon={<GlobeSimple size={26} />} connected={on("search")} wide>
+          <p className={`mb-5 max-w-3xl ${copy}`} style={{ color: "var(--muted)" }}>
+            How the buying agent finds new suppliers. It works without a key using a free search, but a Brave or Tavily key gives better results.
+          </p>
+          {on("search") ? (
+            <div>
+              <p className="mb-4 text-[15px]">{by("search")?.account_label}</p>
+              <GhostButton disabled={pending} onClick={() => run(() => disconnect("search"))}>
+                Disconnect
+              </GhostButton>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-end gap-5">
+              <div className="w-44">
+                <Field label="Provider">
+                  <select className={inputClass} style={inputStyle} value={search.provider} onChange={(e) => setSearch({ ...search, provider: e.target.value as "brave" | "tavily" })}>
+                    <option value="brave" style={{ background: "#14141f" }}>Brave</option>
+                    <option value="tavily" style={{ background: "#14141f" }}>Tavily</option>
+                  </select>
+                </Field>
+              </div>
+              <div className="w-80 max-w-full">
+                <Field label="API key">
+                  <input className={inputClass} style={inputStyle} type="password" autoComplete="off" value={search.key} onChange={(e) => setSearch({ ...search, key: e.target.value })} />
+                </Field>
+              </div>
+              <PrimaryButton disabled={pending || search.key.length < 8} className="px-6" onClick={() => run(async () => { await connectSearch({ provider: search.provider, key: search.key.trim() }); setSearch({ ...search, key: "" }); })}>
+                Save
+              </PrimaryButton>
+            </div>
+          )}
+        </Tile>
+      </div>
+
+      <ConfirmSheet
+        open={goLive}
+        title="Go live?"
+        body="Your team will message real suppliers and buyers and use your connected Razorpay accounts. Every action still passes the Payment Wall and your guardrails. You can return to the sandbox at any time."
+        confirmLabel="Go live"
+        onClose={() => setGoLive(false)}
+        onConfirm={() => run(() => setChannelMode("live"))}
+      />
     </div>
   );
 }
