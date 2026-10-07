@@ -9,7 +9,6 @@ import { AlertToasts } from "@/components/dashboard/AlertToasts";
 import { AlertsBell } from "@/components/dashboard/AlertsBell";
 import { SignOutButton } from "@/components/dashboard/SignOutButton";
 import { DashboardTabs } from "@/components/dashboard/DashboardTabs";
-import { MandateMark } from "@/components/brand/MandateMark";
 import { OperationsMap } from "@/components/graph/OperationsMap";
 import { currentUser } from "@clerk/nextjs/server";
 import { isOperator } from "@/lib/operator";
@@ -32,7 +31,6 @@ export default async function DashboardPage() {
   const coo = await getCooData(createAdminClient(), merchant.id);
   const tracesById: Record<string, Trace> = Object.fromEntries(traces.map((t) => [t.id, t]));
 
-  const pendingEscalations = escalations.filter((e) => e.status === "pending").length;
   // `agents` is live-only now, so this counts what it says it counts. It used
   // to read the unfiltered list and reported six while the roster below it
   // showed four -- the same page disagreeing with itself about how many agents
@@ -55,7 +53,7 @@ export default async function DashboardPage() {
           landing page does. It also sits BEHIND a sticky header rather than
           inside it, so it scrolls out of view and the component's own
           intersection observer stops rendering it entirely. */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-[168px] overflow-hidden">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-[220px] overflow-hidden">
         <GradientWaves
           horizonColor="#5227ff"
           waveColor="#ff9ffc"
@@ -84,39 +82,10 @@ export default async function DashboardPage() {
         />
       </div>
 
-      <header className="panel-glass sticky top-0 z-20 flex items-center justify-between px-6 py-3.5" style={{ borderTop: "none", borderLeft: "none", borderRight: "none" }}>
-        <div className="flex items-center gap-3">
-          <MandateMark size={28} />
-          <div>
-            <h1 className="text-[15px] font-semibold tracking-tight">Mandate</h1>
-            <p className="text-[11px] leading-none" style={{ color: "var(--muted-2)" }}>
-              autonomous store manager
-            </p>
-          </div>
-
-          <div className="ml-6 hidden items-center gap-4 border-l pl-6 sm:flex" style={{ borderColor: "var(--panel-border)" }}>
-            <StatChip label="needs you" value={pendingEscalations} tone={pendingEscalations > 0 ? "var(--decision-escalate)" : undefined} />
-            <StatChip label="running low" value={coo.kpis.runningLow} tone={coo.kpis.runningLow > 0 ? "var(--decision-block)" : undefined} />
-            <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider" style={{ background: coo.settings.channel_mode === "live" ? "color-mix(in srgb, var(--decision-escalate) 18%, transparent)" : "color-mix(in srgb, var(--entity-mandate) 18%, transparent)", color: coo.settings.channel_mode === "live" ? "var(--decision-escalate)" : "var(--entity-mandate)" }}>
-              {coo.settings.channel_mode}
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 text-[11px]" style={{ color: "var(--muted)" }}>
-            <span className="live-dot h-1.5 w-1.5 rounded-full" style={{ background: "var(--decision-allow)" }} />
-            live
-          </div>
-          <AlertsBell alerts={alerts} />
-          <SignOutButton />
-        </div>
-      </header>
-
-      <div className="relative z-10 flex flex-1 flex-col gap-5 p-5">
+      <div className="relative z-10 flex flex-1 flex-col">
         {loadError && (
           <div
-            className="rounded-2xl border px-4 py-3 text-sm"
+            className="mx-8 mt-6 rounded-2xl border px-5 py-4 text-[14px] lg:ml-[calc(76px+2rem)] xl:ml-[calc(248px+2rem)]"
             style={{ borderColor: "var(--decision-block)", color: "var(--decision-block)", background: "color-mix(in srgb, var(--decision-block) 10%, transparent)" }}
           >
             <strong>Couldn&apos;t load live data from Supabase:</strong> {loadError}. The panels below
@@ -142,24 +111,10 @@ export default async function DashboardPage() {
           serverHasRazorpayKeys={Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) && isOperator((await currentUser())?.emailAddresses[0]?.emailAddress)}
           googleConfigured={Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)}
           map={<OperationsMap key="map" coo={coo} agents={agents} rules={rules} traces={traces} escalations={escalations} />}
+          topRight={<AlertsBell alerts={alerts} />}
+          railFooter={<SignOutButton />}
         />
       </div>
-    </div>
-  );
-}
-
-/** Pluralises by count. Done here rather than at each call site so a new chip
- *  cannot reintroduce "1 agents" by forgetting. */
-function StatChip({ label, value, tone }: { label: string; value: number; tone?: string }) {
-  const shown = value === 1 && label.endsWith("s") ? label.slice(0, -1) : label;
-  return (
-    <div className="flex items-baseline gap-1.5">
-      <span className="text-sm font-semibold tabular-nums" style={{ color: tone ?? "var(--foreground)" }}>
-        {value}
-      </span>
-      <span className="text-[11px]" style={{ color: "var(--muted-2)" }}>
-        {shown}
-      </span>
     </div>
   );
 }

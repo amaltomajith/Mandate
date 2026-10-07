@@ -6,7 +6,6 @@ import { getCooData } from "@/lib/cooData";
 import { auditPolicySet } from "@/lib/policy/audit";
 import { DashboardTabs } from "@/components/dashboard/DashboardTabs";
 import { OperationsMap } from "@/components/graph/OperationsMap";
-import { MandateMark } from "@/components/brand/MandateMark";
 import type { Trace } from "@/types/db";
 
 export const dynamic = "force-dynamic";
@@ -31,13 +30,8 @@ export default async function Preview({ searchParams }: { searchParams: Promise<
   const tracesById: Record<string, Trace> = Object.fromEntries(traces.map((t) => [t.id, t]));
 
   return (
-    <div className="flex min-h-screen flex-col bg-[var(--background-2)]">
-      <header className="panel-glass flex items-center gap-3 px-6 py-3.5">
-        <MandateMark size={28} />
-        <h1 className="text-[15px] font-semibold tracking-tight">Mandate</h1>
-        <span className="text-[11px]" style={{ color: "var(--muted-2)" }}>development preview · {merchant.slug}</span>
-      </header>
-      <div className="flex flex-1 flex-col gap-5 p-5">
+    <div className="relative flex min-h-screen flex-col bg-[var(--background-2)]">
+      <div className="flex flex-1 flex-col">
         <DashboardTabs
           agents={agents}
           allAgents={allAgents}
