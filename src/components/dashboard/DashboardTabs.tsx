@@ -1,145 +1,112 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import type { Agent, AgentRun, Customer, Escalation, Merchant, PolicyRule, Product, Trace } from "@/types/db";
+import { useState, type ReactNode } from "react";
+import type { Agent, Alert, Customer, Escalation, PolicyRule, Trace } from "@/types/db";
 import type { PolicyIssue } from "@/lib/policy/audit";
-import { EscalationsPanel } from "./EscalationsPanel";
-import { AgentTrustPanel } from "./AgentTrustPanel";
-import { PolicyRulesPanel } from "./PolicyRulesPanel";
-import { PolicyHealthPanel } from "./PolicyHealthPanel";
-import { ThresholdTuner } from "./ThresholdTuner";
-import { CatalogPanel } from "./CatalogPanel";
-import { AgentsPanel } from "./AgentsPanel";
-import { RevenueImpactPanel } from "./RevenueImpactPanel";
-import { TransactionsView } from "./TransactionsView";
+import type { CooData } from "@/lib/cooData";
+import { TodayTab } from "./TodayTab";
+import { InventoryTab } from "./InventoryTab";
+import { SuppliersTab } from "./SuppliersTab";
+import { SalesTab } from "./SalesTab";
+import { GuardrailsTab } from "./GuardrailsTab";
+import { ActivityTab } from "./ActivityTab";
+import { TeamTab } from "./TeamTab";
+import { ConnectionsTab } from "./ConnectionsTab";
 
-type Tab = "overview" | "catalog" | "agents" | "transactions" | "policies";
-
-const TABS: { key: Tab; label: string; badge?: (props: Props) => number }[] = [
-  { key: "overview", label: "Overview" },
-  { key: "catalog", label: "Catalog" },
-  { key: "agents", label: "Agents", badge: (p) => p.agents.filter((a) => a.status === "paused").length },
-  { key: "transactions", label: "Transactions", badge: (p) => p.traces.length },
-  { key: "policies", label: "Policies", badge: (p) => p.pendingCount + p.deterministicIssues.length },
-];
+type Tab = "today" | "inventory" | "suppliers" | "sales" | "guardrails" | "activity" | "team" | "connections";
 
 interface Props {
-  /** LIVE agents. Everything that lists things which CAN ACT uses this: the
-   *  roster, the entity graph, the trust panel, the header count. */
+  /** LIVE agents. Anything that lists things which CAN ACT uses this. */
   agents: Agent[];
-  /** Every agent including retired ones. Two callers, both reading history
-   *  rather than listing actors -- Transactions resolves trace names from it,
-   *  Mandates resolves the agent behind an old authorization. */
+  /** Every agent including retired ones, for resolving names in history. */
   allAgents: Agent[];
   rules: PolicyRule[];
   traces: Trace[];
   escalations: Escalation[];
   tracesById: Record<string, Trace>;
+  alerts: Alert[];
   deterministicIssues: PolicyIssue[];
-  pendingCount: number;
-  runs: AgentRun[];
   customers: Customer[];
-  products: Product[];
-  merchant: Merchant;
+  coo: CooData;
+  slug: string;
+  appUrl: string;
+  serverHasRazorpayKeys: boolean;
+  googleConfigured: boolean;
+  /** The 3D operations map, rendered by the page so it can be code-split. */
+  map: ReactNode;
 }
 
 /**
- * A single dashboard was starting to bury the things that most need
- * attention (a growing transactions table, a growing policy set) under a
- * graph that dominates the page — this splits them into real sections
- * instead of stacking everything into one increasingly long scroll.
+ * The dashboard, as the merchant thinks about the business: how it is doing
+ * today, what is on the shelf, who supplies it, what came in and went out, the
+ * limits on the team, what the team has done, and what it is plugged into.
  */
 export function DashboardTabs(props: Props) {
-  const { agents, allAgents, rules, traces, escalations, tracesById, deterministicIssues, runs, customers } = props;
-  const [tab, setTab] = useState<Tab>("overview");
-
+  const { coo, escalations, deterministicIssues } = props;
+  const [tab, setTab] = useState<Tab>("today");
   const [highlightRuleId, setHighlightRuleId] = useState<string | null>(null);
 
+  const pending = escalations.filter((e) => e.status === "pending").length;
+  const candidates = coo.vendors.filter((v) => v.status === "candidate").length;
+  const waitingOrders = coo.purchaseOrders.filter((p) => p.status === "draft" && p.rationale?.includes("[needs_payee]")).length;
+
+  const TABS: { key: Tab; label: string; badge?: number; tone?: string }[] = [
+    { key: "today", label: "Today", badge: pending, tone: "var(--decision-escalate)" },
+    { key: "inventory", label: "Inventory", badge: coo.kpis.runningLow, tone: "var(--decision-block)" },
+    { key: "suppliers", label: "Suppliers", badge: candidates + waitingOrders, tone: "var(--decision-escalate)" },
+    { key: "sales", label: "Sales" },
+    { key: "guardrails", label: "Guardrails", badge: deterministicIssues.length, tone: "var(--decision-block)" },
+    { key: "activity", label: "Activity" },
+    { key: "team", label: "Team", badge: props.agents.filter((a) => a.status === "paused").length || (coo.settings.agents_enabled ? 0 : 1), tone: "var(--decision-block)" },
+    { key: "connections", label: "Connections" },
+  ];
+
   function jumpToRule(ruleId: string) {
-    setTab("policies");
+    setTab("guardrails");
     setHighlightRuleId(ruleId);
-    // Clear the highlight after a few seconds so it reads as "look here now,"
-    // not a permanent marker.
-    setTimeout(() => setHighlightRuleId((current) => (current === ruleId ? null : current)), 4000);
+    // Cleared after a few seconds so it reads as "look here now", not a permanent marker.
+    setTimeout(() => setHighlightRuleId((cur) => (cur === ruleId ? null : cur)), 4000);
   }
 
   return (
     <div className="flex flex-1 flex-col gap-5">
-      <nav className="flex gap-1 rounded-xl p-1" style={{ background: "var(--panel-2)", width: "fit-content" }}>
-        {TABS.map((t) => {
-          const count = t.badge?.(props) ?? 0;
-          return (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-[13px] font-medium transition-colors"
-              style={{
-                background: tab === t.key ? "var(--panel)" : "transparent",
-                color: tab === t.key ? "var(--foreground)" : "var(--muted)",
-                boxShadow: tab === t.key ? "var(--shadow-card)" : "none",
-              }}
-            >
-              {t.label}
-              {count > 0 && (
-                <span
-                  className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
-                  style={{
-                    background: tab === t.key ? "var(--entity-agent)" : "var(--panel-border-strong)",
-                    color: tab === t.key ? "white" : "var(--muted)",
-                  }}
-                >
-                  {count}
-                </span>
-              )}
-            </button>
-          );
-        })}
-
-        {/* Settings is a real route, not a tab, so it is a Link rather than a
-            state toggle — see src/app/dashboard/settings/page.tsx for why it
-            has its own URL. Styled to sit with the tabs because to a merchant
-            it is simply the next item in the nav, but separated by a rule
-            because leaving this page is a navigation, not a tab switch. */}
+      <nav className="flex max-w-full gap-1 overflow-x-auto rounded-xl p-1" style={{ background: "var(--panel-2)", width: "fit-content" }}>
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className="flex shrink-0 items-center gap-1.5 rounded-lg px-4 py-2 text-[13px] font-medium transition-colors"
+            style={{
+              background: tab === t.key ? "var(--panel)" : "transparent",
+              color: tab === t.key ? "var(--foreground)" : "var(--muted)",
+              boxShadow: tab === t.key ? "var(--shadow-card)" : "none",
+            }}
+          >
+            {t.label}
+            {!!t.badge && t.badge > 0 && (
+              <span className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white" style={{ background: t.tone ?? "var(--entity-agent)" }}>
+                {t.badge}
+              </span>
+            )}
+          </button>
+        ))}
         <span className="mx-1 my-1.5 w-px shrink-0" style={{ background: "var(--panel-border-strong)" }} />
-        <Link
-          href="/dashboard/settings"
-          className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-[13px] font-medium transition-colors hover:bg-[var(--panel)]"
-          style={{ color: "var(--muted)" }}
-        >
+        <Link href="/dashboard/settings" className="flex shrink-0 items-center rounded-lg px-4 py-2 text-[13px] font-medium transition-colors hover:bg-[var(--panel)]" style={{ color: "var(--muted)" }}>
           Settings
         </Link>
       </nav>
 
-      {tab === "overview" && (
-        <div className="flex flex-1 flex-col gap-5">
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-            <EscalationsPanel escalations={escalations} tracesById={tracesById} />
-            <AgentTrustPanel agents={agents} rules={rules} />
-          </div>
-
-          {/* Revenue impact closes the tab: the payoff, read after watching
-              the graph and the queue move rather than before either has. */}
-          <RevenueImpactPanel traces={traces} escalations={escalations} />
-        </div>
+      {tab === "today" && <TodayTab coo={coo} escalations={escalations} tracesById={props.tracesById} alerts={props.alerts} map={props.map} />}
+      {tab === "inventory" && <InventoryTab insights={coo.insights} />}
+      {tab === "suppliers" && <SuppliersTab coo={coo} />}
+      {tab === "sales" && <SalesTab coo={coo} traces={props.traces} />}
+      {tab === "guardrails" && <GuardrailsTab settings={coo.settings} rules={props.rules} deterministicIssues={deterministicIssues} highlightRuleId={highlightRuleId} />}
+      {tab === "activity" && <ActivityTab coo={coo} traces={props.traces} agents={props.allAgents} customers={props.customers} rules={props.rules} onJumpToRule={jumpToRule} />}
+      {tab === "team" && <TeamTab coo={coo} agents={props.allAgents} rules={props.rules} />}
+      {tab === "connections" && (
+        <ConnectionsTab coo={coo} slug={props.slug} appUrl={props.appUrl} serverHasRazorpayKeys={props.serverHasRazorpayKeys} googleConfigured={props.googleConfigured} />
       )}
-
-      {tab === "catalog" && <CatalogPanel />}
-
-      {tab === "agents" && <AgentsPanel agents={allAgents} runs={runs} />}
-
-      {tab === "transactions" && <TransactionsView traces={traces} agents={allAgents} customers={customers} rules={rules} onJumpToRule={jumpToRule} />}
-
-      {tab === "policies" && (
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-          <PolicyRulesPanel rules={rules} highlightRuleId={highlightRuleId} />
-          <div className="space-y-5">
-            <ThresholdTuner />
-            <PolicyHealthPanel deterministicIssues={deterministicIssues} />
-          </div>
-        </div>
-      )}
-
     </div>
   );
 }

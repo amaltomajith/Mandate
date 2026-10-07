@@ -4,16 +4,14 @@
 // in one place and friendly text in another.
 
 const ACTION_TYPE_LABELS: Record<string, string> = {
-  "order.create": "New purchase order",
+  "order.create": "Order",
   "refund.create": "Refund",
-  "subscription.create": "New subscription",
   "payment_link.create": "Payment link",
-  // `payout.create` is no longer an accepted action type (RazorpayX needs a
-  // registered business Razorpay gates, so it could never execute here — see
-  // src/lib/razorpay/actions.ts). Its label stays because traces recorded
-  // before it was removed are still in the database and still render in the
-  // Transactions table; dropping it would show them a raw slug instead.
-  "payout.create": "Vendor payout",
+  "payout.create": "Supplier payout",
+  "price.change": "Price change",
+  // Recorded before the subscription feature was removed; kept so old traces
+  // still read as words rather than a raw slug.
+  "subscription.create": "Subscription",
 };
 
 export function actionTypeLabel(actionType: string): string {

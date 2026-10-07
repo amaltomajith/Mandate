@@ -9,10 +9,13 @@ import { SandboxDriver } from "./sandbox";
  * merchant is in live mode AND has connected them; see gmail.ts and whatsapp.ts.
  */
 export async function buildDrivers(
-  _db: SupabaseClient,
-  _merchantId: string,
-  _settings: MerchantSettings
+  db: SupabaseClient,
+  merchantId: string,
+  settings: MerchantSettings
 ): Promise<Map<Channel, ChannelDriver>> {
+  void db;
+  void merchantId;
+  void settings;
   const drivers = new Map<Channel, ChannelDriver>();
   drivers.set("sandbox", new SandboxDriver());
   return drivers;

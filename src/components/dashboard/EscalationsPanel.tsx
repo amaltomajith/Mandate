@@ -9,9 +9,13 @@ import { TimeAgo } from "./TimeAgo";
 export function EscalationsPanel({
   escalations,
   tracesById,
+  describe,
 }: {
   escalations: Escalation[];
   tracesById: Record<string, Trace>;
+  /** Says what an action is about in the merchant's terms (who gets paid, for
+   *  which order). Optional: the panel still works from the trace alone. */
+  describe?: (trace: Trace) => { title: string; detail?: string } | null;
 }) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -50,7 +54,7 @@ export function EscalationsPanel({
 
   return (
     <Panel
-      title="Escalations"
+      title="Needs your approval"
       icon={<Icons.Escalation />}
       accent="var(--decision-escalate)"
       count={pending.length}
@@ -59,14 +63,14 @@ export function EscalationsPanel({
       // entity graph beside it off the bottom of the screen. This is the panel
       // that grows without bound, so it gets the flexible share.
       className="min-h-0 flex-1"
-      bodyClassName="overflow-y-auto pr-1"
+      bodyClassName="max-h-[520px] overflow-y-auto pr-1"
     >
       {error && (
         <p className="mb-3 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: "var(--decision-block)", color: "var(--decision-block)", background: "color-mix(in srgb, var(--decision-block) 14%, transparent)" }}>
           {error}
         </p>
       )}
-      {pending.length === 0 && <EmptyState text="No pending escalations — the queue is clear." />}
+      {pending.length === 0 && <EmptyState text="Nothing is waiting for you." />}
       <div className="space-y-3">
         {pending.map((esc) => {
           const trace = tracesById[esc.trace_id];
@@ -123,6 +127,20 @@ export function EscalationsPanel({
                         })()}
                       </p>
                       <p className="mt-1.5 truncate text-[12px] font-medium">{actionTypeLabel(trace.action_type)}</p>
+                      {(() => {
+                        const d = describe?.(trace);
+                        if (!d) return null;
+                        return (
+                          <>
+                            <p className="mt-1 text-[12.5px] font-medium leading-snug">{d.title}</p>
+                            {d.detail && (
+                              <p className="mt-0.5 text-[11.5px] leading-snug" style={{ color: "var(--muted)" }}>
+                                {d.detail}
+                              </p>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                     <span className="shrink-0 text-[10px]" style={{ color: "var(--muted-2)" }}>
                       <TimeAgo iso={esc.created_at} />

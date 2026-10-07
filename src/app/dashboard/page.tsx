@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import { getDashboardData } from "@/lib/dashboardData";
+import { getCooData } from "@/lib/cooData";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { auditPolicySet } from "@/lib/policy/audit";
 import { LiveRefresher } from "@/components/dashboard/LiveRefresher";
 import { AlertToasts } from "@/components/dashboard/AlertToasts";
@@ -23,7 +25,8 @@ export default async function DashboardPage() {
   const { userId } = await auth();
   if (!userId) redirect("/login");
 
-  const { agents, allAgents, rules, traces, escalations, alerts, runs, customers, products, merchant, loadError } = await getDashboardData();
+  const { agents, allAgents, rules, traces, escalations, alerts, customers, merchant, loadError } = await getDashboardData();
+  const coo = await getCooData(createAdminClient(), merchant.id);
   const tracesById: Record<string, Trace> = Object.fromEntries(traces.map((t) => [t.id, t]));
 
   const pendingEscalations = escalations.filter((e) => e.status === "pending").length;
@@ -31,8 +34,6 @@ export default async function DashboardPage() {
   // to read the unfiltered list and reported six while the roster below it
   // showed four -- the same page disagreeing with itself about how many agents
   // exist.
-  const activeAgents = agents.length;
-  const activeRules = rules.filter((r) => r.status === "active").length;
   const deterministicIssues = auditPolicySet(rules);
 
   return (
@@ -86,21 +87,16 @@ export default async function DashboardPage() {
           <div>
             <h1 className="text-[15px] font-semibold tracking-tight">Mandate</h1>
             <p className="text-[11px] leading-none" style={{ color: "var(--muted-2)" }}>
-              control plane
+              autonomous store manager
             </p>
           </div>
 
           <div className="ml-6 hidden items-center gap-4 border-l pl-6 sm:flex" style={{ borderColor: "var(--panel-border)" }}>
-            <StatChip label="agents" value={activeAgents} />
-            <StatChip label="active rules" value={activeRules} />
-            <StatChip
-              label="pending"
-              value={pendingEscalations}
-              tone={pendingEscalations > 0 ? "var(--decision-escalate)" : undefined}
-            />
-            {deterministicIssues.length > 0 && (
-              <StatChip label="policy issues" value={deterministicIssues.length} tone="var(--decision-block)" />
-            )}
+            <StatChip label="needs you" value={pendingEscalations} tone={pendingEscalations > 0 ? "var(--decision-escalate)" : undefined} />
+            <StatChip label="running low" value={coo.kpis.runningLow} tone={coo.kpis.runningLow > 0 ? "var(--decision-block)" : undefined} />
+            <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider" style={{ background: coo.settings.channel_mode === "live" ? "color-mix(in srgb, var(--decision-escalate) 18%, transparent)" : "color-mix(in srgb, var(--entity-mandate) 18%, transparent)", color: coo.settings.channel_mode === "live" ? "var(--decision-escalate)" : "var(--entity-mandate)" }}>
+              {coo.settings.channel_mode}
+            </span>
           </div>
         </div>
 
@@ -128,19 +124,21 @@ export default async function DashboardPage() {
         )}
 
         <DashboardTabs
-        allAgents={allAgents}
           agents={agents}
+          allAgents={allAgents}
           rules={rules}
           traces={traces}
           escalations={escalations}
           tracesById={tracesById}
+          alerts={alerts}
           deterministicIssues={deterministicIssues}
-          pendingCount={pendingEscalations}
-          runs={runs}
           customers={customers}
-          products={products}
-          merchant={merchant}
-
+          coo={coo}
+          slug={merchant.slug}
+          appUrl={process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}
+          serverHasRazorpayKeys={Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET)}
+          googleConfigured={Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)}
+          map={null}
         />
       </div>
     </div>
