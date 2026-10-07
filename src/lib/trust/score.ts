@@ -1,13 +1,20 @@
 /**
  * Trust score formula:
  *
+ *   confidence = total / (total + TRUST_PRIOR)
  *   score = clamp(0, 100,
  *     50
- *     + 30 * (approvals - blocks) / total
- *     - 10 * (escalations / total)
+ *     + 30 * (approvals - blocks) / total * confidence
+ *     - 10 * (escalations / total) * confidence
  *     + 10 * min(accountAgeDays, 30) / 30
  *   )
  *
+ * `confidence` shrinks the evidence terms toward the neutral 50 while there is
+ * little of it. Without it, a brand-new agent's first block (1 of 1) scored
+ * 20 and the trust floor held every later action: one routine margin-floor
+ * refusal was enough to put a legitimate agent on permanent hold. With a prior
+ * of 8 decisions, one block costs about 3 points, and it takes sustained bad
+ * behaviour (roughly eight or more blocks in a row) to fall under the floor.
  * Starts every agent at a neutral 50. Rewards a clean approve/block ratio,
  * penalizes escalations lightly, and gives a small, capped boost for tenure so
  * a brand-new agent can't out-trust an established one on a lucky streak.
@@ -53,6 +60,10 @@
  *  history and a freshly recomputed score describable by the same rule. */
 export const TRUST_WINDOW_SIZE = 50;
 
+/** How many decisions' worth of doubt the score starts with. See the formula
+ *  note above: it is the weight of "we do not know this agent yet". */
+export const TRUST_PRIOR = 8;
+
 export interface TrustInputs {
   approvals: number;
   blocks: number;
@@ -94,8 +105,9 @@ export function computeTrustScore(inputs: TrustInputs): TrustComponents {
     };
   }
 
-  const approvalBlockTerm = 30 * ((inputs.approvals - inputs.blocks) / total);
-  const escalationPenalty = -10 * (inputs.escalations / total);
+  const confidence = total / (total + TRUST_PRIOR);
+  const approvalBlockTerm = 30 * ((inputs.approvals - inputs.blocks) / total) * confidence;
+  const escalationPenalty = -10 * (inputs.escalations / total) * confidence;
   const tenureBonus = 10 * (Math.min(inputs.accountAgeDays, 30) / 30);
   const raw = base + approvalBlockTerm + escalationPenalty + tenureBonus;
   const score = Math.max(0, Math.min(100, raw));

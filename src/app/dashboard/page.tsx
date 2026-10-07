@@ -23,7 +23,7 @@ export default async function DashboardPage() {
   const { userId } = await auth();
   if (!userId) redirect("/login");
 
-  const { agents, allAgents, rules, traces, escalations, alerts, mandates, customers, products, merchant, loadError } = await getDashboardData();
+  const { agents, allAgents, rules, traces, escalations, alerts, runs, customers, products, merchant, loadError } = await getDashboardData();
   const tracesById: Record<string, Trace> = Object.fromEntries(traces.map((t) => [t.id, t]));
 
   const pendingEscalations = escalations.filter((e) => e.status === "pending").length;
@@ -136,7 +136,7 @@ export default async function DashboardPage() {
           tracesById={tracesById}
           deterministicIssues={deterministicIssues}
           pendingCount={pendingEscalations}
-          mandates={mandates}
+          runs={runs}
           customers={customers}
           products={products}
           merchant={merchant}

@@ -1,6 +1,7 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentMerchant } from "@/lib/merchant";
+import { ensureWorkspace } from "@/lib/workspace";
 
 /**
  * Dashboard reads go through the service-role client (Clerk gates the routes;
@@ -88,9 +89,12 @@ export async function getDashboardData() {
   // applied here at the single place all dashboard reads funnel through rather
   // than trusted to be remembered at each call site.
   const merchant = await getCurrentMerchant();
+  // Accounts created before the COO existed get their agents, settings and
+  // guardrails the first time they open the dashboard.
+  await ensureWorkspace(supabase, merchant.id);
   const mine = <T,>(q: T & { eq: (c: string, v: string) => T }) => q.eq("merchant_id", merchant.id);
 
-  const [agents, rules, traces, escalations, alerts, mandates, customers, products] = await Promise.all([
+  const [agents, rules, traces, escalations, alerts, runs, customers, products] = await Promise.all([
     withRetry(() => mine(supabase.from("agents").select("*").order("trust_score", { ascending: false }))),
     withRetry(() => mine(supabase.from("policy_rules").select("*").order("created_at", { ascending: false }))),
     withRetry(() => mine(supabase.from("traces").select("*").order("created_at", { ascending: false }).limit(300))),
@@ -109,7 +113,7 @@ export async function getDashboardData() {
     // actually fixes that; this limit only stops the reverse problem.
     withRetry(() => mine(supabase.from("escalations").select("*").order("created_at", { ascending: false }).limit(300))),
     withRetry(() => mine(supabase.from("alerts").select("*").order("created_at", { ascending: false }).limit(50))),
-    withRetry(() => mine(supabase.from("mandates").select("*").order("created_at", { ascending: false }))),
+    withRetry(() => mine(supabase.from("agent_runs").select("*").order("started_at", { ascending: false }).limit(40))),
     withRetry(() => mine(supabase.from("customers").select("*").order("created_at", { ascending: false }))),
     // Unlimited on purpose: the order history names the product behind each
     // trace by SKU lookup, and a truncated product list would silently turn
@@ -138,7 +142,7 @@ export async function getDashboardData() {
     console.warn("[dashboardData] could not backfill traces for escalations:", backfilled.error.message);
   }
 
-  const errors = [agents, rules, traces, escalations, alerts, mandates, customers, products]
+  const errors = [agents, rules, traces, escalations, alerts, runs, customers, products]
     .map((r) => r.error)
     .filter((e): e is NonNullable<typeof e> => e !== null);
 
@@ -201,7 +205,7 @@ export async function getDashboardData() {
     traces: [...(traces.data ?? []), ...(backfilled.data ?? [])],
     escalations: escalations.data ?? [],
     alerts: alerts.data ?? [],
-    mandates: mandates.data ?? [],
+    runs: runs.data ?? [],
     customers: customers.data ?? [],
     products: products.data ?? [],
     merchant,

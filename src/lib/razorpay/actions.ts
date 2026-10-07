@@ -1,52 +1,38 @@
 import "server-only";
-import { randomUUID } from "node:crypto";
 import type { ActionInput } from "@/lib/mcp/schemas";
-import { getRazorpay } from "./client";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { recordPayout } from "@/lib/ledger";
+import { getRazorpayForMerchant } from "./client";
+import { executePayout } from "./payouts";
 import type { Json } from "@/types/db";
 
-/** Razorpay's Plans/Subscriptions API returns a plain 401 when the
- *  "Subscriptions" product isn't activated on the account — the same
- *  category of test-mode gate as RazorpayX needing a registered business
- *  (§6). Confirmed by direct diagnostic: the exact same key pair that
- *  succeeds on `orders.create` gets `{statusCode: 401, error:
- *  "Unauthorized"}` on `plans.create` alone — not a credentials problem. */
-function isSubscriptionsNotActivated(err: unknown): boolean {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    "statusCode" in err &&
-    (err as { statusCode: unknown }).statusCode === 401
-  );
+/**
+ * The only place real money-moving calls happen. Called by the wall after the
+ * policy engine has returned "allow" (or after a human approves an escalation) —
+ * never called directly, and never called for a block or an unanswered
+ * escalation.
+ *
+ * `order.create` and `payment_link.create` are the first leg of a sale:
+ * capturing the payment is the customer's own step at Razorpay Checkout.
+ * `refund.create` is end to end server-to-server. `payout.create` sends money to
+ * a supplier through RazorpayX, or through the labelled sandbox executor when
+ * RazorpayX is not connected (see payouts.ts). `price.change` moves no money but
+ * gives some away, so it is gated the same way and applied only here.
+ */
+
+export interface ExecutionContext {
+  merchantId: string;
+  /** The wall's trace for this decision. Written BEFORE this runs, and used as
+   *  the idempotency key so a retry cannot pay twice. */
+  traceId: string;
+  agentId: string | null;
 }
 
 /**
- * The only place real money-moving Razorpay/RazorpayX calls happen. Called by
- * `enforce_action` after the policy engine has already returned "allow" — never
- * called directly, and never called for a "block"/"escalate" decision.
- *
- * Scope note (see HANDOVER.md "What's real vs illustrative"): `order.create` and
- * `subscription.create` are real, server-to-server Razorpay API calls that
- * represent the *first* leg of those flows. Actually capturing a payment or
- * authorizing a UPI Autopay mandate is, by Razorpay's own design, a customer-facing
- * step (Checkout / an auth link) that happens outside this control plane — Mandate's
- * job is the gate before and the record after, not reimplementing Razorpay's own
- * checkout UI. `refund.create` is genuinely end-to-end server-to-server with no
- * customer-facing step.
- *
- * `payout.create` (RazorpayX) was removed rather than left in place: it needs a
- * registered business Razorpay itself gates, so it could never execute on this
- * account, and nothing in the app called it. Keeping unreachable code around
- * implied a capability that didn't exist. The three action types here are the
- * ones that genuinely run.
- */
-/**
  * Razorpay's SDK rejects with a plain object, not an Error.
  *
- * The MCP server wraps a non-Error throw as `new Error(String(error))`, and
- * `String({})` is "[object Object]" — so a genuine Razorpay refusal reached the
- * caller as five useless words, with the actual reason discarded. This is the
- * same shape as the bug the handover already records for Supabase errors, in a
- * second library.
+ * Without unwrapping it, a genuine Razorpay refusal reaches the caller as
+ * "[object Object]" with the actual reason discarded.
  */
 function asError(err: unknown): Error {
   if (err instanceof Error) return err;
@@ -62,34 +48,38 @@ function asError(err: unknown): Error {
   return new Error(String(err));
 }
 
-export async function executeRealAction(input: ActionInput): Promise<Json> {
+export async function executeRealAction(input: ActionInput, ctx: ExecutionContext): Promise<Json> {
   try {
-    return await dispatch(input);
+    return await dispatch(input, ctx);
   } catch (err) {
     throw asError(err);
   }
 }
 
-async function dispatch(input: ActionInput): Promise<Json> {
+/** Razorpay note values are capped at 256 characters. */
+function itemsNote(items: { sku: string; qty: number }[] | undefined): Record<string, string> {
+  if (!items || items.length === 0) return {};
+  return { items: items.map((i) => `${i.sku}x${i.qty}`).join(",").slice(0, 250) };
+}
+
+async function dispatch(input: ActionInput, ctx: ExecutionContext): Promise<Json> {
   switch (input.actionType) {
     case "order.create": {
-      const rzp = getRazorpay();
+      const rzp = await getRazorpayForMerchant(ctx.merchantId);
       const order = await rzp.orders.create({
         amount: input.amount,
         currency: input.currency,
         receipt: input.params.receipt,
-        notes: input.params.notes,
+        notes: { ...(input.params.notes ?? {}), ...itemsNote(input.params.lineItems), mandate_trace: ctx.traceId },
       });
       return order as unknown as Json;
     }
 
-    // A real Razorpay payment link, and the only action here whose outcome is
-    // observable after the fact: the link object carries a `status` that moves
-    // to "paid" and an `amount_paid`, so a campaign's conversion can be read
-    // back rather than asserted. Orders cannot tell you that -- creating one
-    // says nothing about whether anybody paid.
+    // A real Razorpay payment link, and the action whose outcome is observable
+    // afterwards: the link carries a `status` that moves to "paid", and the
+    // captured-payment webhook turns that into a sale and a wallet credit.
     case "payment_link.create": {
-      const rzp = getRazorpay();
+      const rzp = await getRazorpayForMerchant(ctx.merchantId);
       const p = input.params;
       const link = await rzp.paymentLink.create({
         amount: input.amount,
@@ -100,9 +90,9 @@ async function dispatch(input: ActionInput): Promise<Json> {
           ...(p.customerEmail ? { email: p.customerEmail } : {}),
           ...(p.customerContact ? { contact: p.customerContact } : {}),
         },
-        // Off unless explicitly asked for. Razorpay does the sending, so a
-        // campaign run against synthetic customers with this on would be
-        // mailing real addresses that happen to look fake.
+        // Off unless explicitly asked for. Razorpay does the sending, so a test
+        // run against synthetic customers with this on would be mailing real
+        // addresses that happen to look fake.
         notify: { email: p.notify, sms: p.notify },
         reminder_enable: false,
         ...(p.expiresInHours
@@ -110,55 +100,70 @@ async function dispatch(input: ActionInput): Promise<Json> {
           : {}),
         notes: {
           ...(p.notes ?? {}),
+          ...itemsNote(p.lineItems),
           discount_paise: String(p.discountPaise),
+          mandate_trace: ctx.traceId,
         },
       });
       return link as unknown as Json;
     }
 
     case "refund.create": {
-      const rzp = getRazorpay();
+      const rzp = await getRazorpayForMerchant(ctx.merchantId);
       const refund = await rzp.payments.refund(input.params.paymentId, {
         amount: input.amount,
       });
       return refund as unknown as Json;
     }
 
-    case "subscription.create": {
-      const rzp = getRazorpay();
-      try {
-        const plan = await rzp.plans.create({
-          period: input.params.period,
-          interval: input.params.interval,
-          item: {
-            name: input.params.planName,
-            amount: input.amount,
-            currency: input.currency,
-          },
-        });
-        const subscription = await rzp.subscriptions.create({
-          plan_id: plan.id,
-          total_count: input.params.totalCount,
-          customer_notify: input.params.customerNotify ? 1 : 0,
-        });
-        return { plan, subscription } as unknown as Json;
-      } catch (err) {
-        if (!isSubscriptionsNotActivated(err)) throw err;
-        // Falls back to a locally-recorded, clearly-labeled mandate object
-        // rather than failing the whole action — exactly the "real if the
-        // API cooperates, else a clearly-labeled simplified mandate object"
-        // scope decision this project already made for UPI Autopay (§6).
-        // The part this actually demonstrates — a merchant revoking a
-        // mandate blocking the agent's next action — doesn't depend on the
-        // subscription object underneath it being genuinely from Razorpay.
-        const subscriptionId = `sim_sub_${randomUUID()}`;
-        return {
-          plan: null,
-          subscription: { id: subscriptionId, status: "created" },
-          simulated: true,
-          note: "Razorpay's Subscriptions API isn't activated on this test account (see HANDOVER.md §6) — recorded as a simplified mandate object instead of a real Razorpay subscription.",
-        } as unknown as Json;
-      }
+    case "payout.create": {
+      const db = createAdminClient();
+      // Read again at execution time, not trusted from the decision: the payee
+      // must still be active at the moment the money moves.
+      const { data: payee, error } = await db
+        .from("payees")
+        .select("id, kind, status, razorpay_fund_account_id, simulated, display_name")
+        .eq("id", input.params.payeeId)
+        .eq("merchant_id", ctx.merchantId)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!payee || payee.status !== "active") throw new Error("This payee is no longer active, so the payout was not sent.");
+
+      const result = await executePayout({
+        traceId: ctx.traceId,
+        merchantId: ctx.merchantId,
+        amountPaise: input.amount,
+        currency: input.currency,
+        purpose: input.params.purpose,
+        narration: `Mandate ${input.params.purpose}`,
+        payee: { kind: payee.kind, razorpayFundAccountId: payee.razorpay_fund_account_id, simulated: payee.simulated },
+      });
+      await recordPayout({
+        merchantId: ctx.merchantId,
+        traceId: ctx.traceId,
+        payeeId: payee.id,
+        poId: input.params.poId,
+        amountPaise: input.amount,
+        razorpayPayoutId: result.id,
+        status: result.status,
+        simulated: result.simulated,
+        note: `${input.params.purpose.replace("_", " ")} to ${payee.display_name}`,
+      });
+      return { payout_id: result.id, status: result.status, simulated: result.simulated, raw: result.raw } as unknown as Json;
+    }
+
+    case "price.change": {
+      const db = createAdminClient();
+      const { data, error } = await db
+        .from("products")
+        .update({ price_paise: input.amount })
+        .eq("merchant_id", ctx.merchantId)
+        .eq("sku", input.params.sku)
+        .select("sku, price_paise")
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data) throw new Error(`No product with sku "${input.params.sku}".`);
+      return { sku: data.sku, new_price_paise: data.price_paise } as unknown as Json;
     }
   }
 }

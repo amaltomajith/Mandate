@@ -5,12 +5,22 @@ import type { Decision, PolicyRuleType } from "@/types/db";
  *  Absent means "applies to every action", which is what every rule written
  *  before this field existed means, so nothing changes meaning by default.
  *  See `appliesTo` in engine.ts. */
-const actionTypes = { action_types: z.array(z.string()).optional() };
+const actionTypes = {
+  action_types: z.array(z.string()).optional(),
+  /** Set on rules the Guardrails page writes from the merchant's plain controls
+   *  (see guardrails.ts). Carried so a validated rewrite does not strip it. */
+  managed: z.literal("guardrails").optional(),
+  key: z.string().optional(),
+};
 
 export const CapParams = z.object({
   max_amount: z.number().positive(),
   currency: z.string().length(3),
-  scope: z.enum(["per_transaction", "per_day"]),
+  // per_day is per agent (the original meaning). per_day_merchant sums every
+  // agent, which is what "no more than X leaves the business a day" actually
+  // means once there is more than one agent. per_payee_per_day bounds what any
+  // single supplier can receive, whoever asked.
+  scope: z.enum(["per_transaction", "per_day", "per_day_merchant", "per_payee_per_day"]),
   ...actionTypes,
 });
 export type CapParams = z.infer<typeof CapParams>;
@@ -66,6 +76,57 @@ export const CatalogScopeParams = z.object({
 });
 export type CatalogScopeParams = z.infer<typeof CatalogScopeParams>;
 
+/**
+ * Only pay people a human has approved.
+ *
+ * FAIL CLOSED. Every other fact-driven rule here skips when its fact is
+ * missing, because a missing fact usually means a backtest that could not
+ * recover it. For money leaving the business that is the wrong direction: a
+ * payout whose payee could not be resolved must not go, so an absent payee is
+ * treated as an unknown one and blocked.
+ */
+export const WhitelistedPayeeParams = z.object({
+  /** Also require the payee's vendor to be approved, not merely the payee. */
+  require_vendor_approved: z.boolean().default(true),
+  ...actionTypes,
+});
+export type WhitelistedPayeeParams = z.infer<typeof WhitelistedPayeeParams>;
+
+/**
+ * A floor under profit margin, in basis points of the selling price.
+ *
+ * Cost comes from the product record, server-side, never from the caller. When
+ * it is unknown the rule escalates rather than skipping: a margin nobody can
+ * compute is not a margin that passed.
+ */
+export const MinMarginFloorParams = z.object({
+  min_margin_bps: z.number().int().min(0).max(9000),
+  ...actionTypes,
+});
+export type MinMarginFloorParams = z.infer<typeof MinMarginFloorParams>;
+
+/**
+ * Restocking has to be self-funded: over a rolling period, payouts may not
+ * exceed a starting float plus a share of what the business actually sold,
+ * and never more than a hard weekly ceiling.
+ */
+export const PayoutBudgetParams = z
+  .object({
+    currency: z.string().length(3),
+    period_days: z.number().int().positive().max(90).default(7),
+    /** Hard ceiling for the period, paise. */
+    max_amount: z.number().positive().optional(),
+    /** Share of the period's revenue that may be spent on payouts (0-100). */
+    pct_of_revenue: z.number().min(0).max(100).optional(),
+    /** Allowance that exists before any revenue does, paise. */
+    float_amount: z.number().nonnegative().default(0),
+    ...actionTypes,
+  })
+  .refine((v) => v.max_amount !== undefined || v.pct_of_revenue !== undefined, {
+    message: "A payout budget needs max_amount, pct_of_revenue, or both.",
+  });
+export type PayoutBudgetParams = z.infer<typeof PayoutBudgetParams>;
+
 export const RuleParamsByType = {
   cap: CapParams,
   velocity: VelocityParams,
@@ -73,6 +134,9 @@ export const RuleParamsByType = {
   catalog_scope: CatalogScopeParams,
   step_up: StepUpParams,
   trust_floor: TrustFloorParams,
+  whitelisted_payee: WhitelistedPayeeParams,
+  min_margin_floor: MinMarginFloorParams,
+  payout_budget: PayoutBudgetParams,
 } satisfies Record<PolicyRuleType, z.ZodType>;
 
 /** Rule shape the policy engine operates on — a narrowed view of a `policy_rules` row. */
@@ -113,6 +177,14 @@ export interface ActionContext {
    * something nobody knows.
    */
   agentCatalogScope?: string[] | null;
+  /** payout.create: the payee, as the database knows it. Resolved server-side
+   *  from `payeeId`; the caller never states a status. `undefined` for a payout
+   *  means "could not be resolved", which `whitelisted_payee` blocks. */
+  payee?: { id: string; status: "pending" | "active" | "revoked"; vendorStatus: "candidate" | "approved" | "blocked" };
+  /** Sale-side unit economics for order/payment_link/price.change, resolved
+   *  server-side from the product record. `costPaise: null` is a product whose
+   *  cost is unknown. `undefined` is an action that names no product. */
+  economics?: { revenuePaise: number; costPaise: number | null };
 }
 
 export interface RuleMatch {
@@ -128,4 +200,6 @@ export interface EvaluationAggregates {
   velocityCounts: Record<string, number>;
   /** ruleId -> sum of today's amounts for the relevant scope so far (excludes the current one), only needed for cap rules with scope "per_day". */
   dailyAmountSoFar: Record<string, number>;
+  /** ruleId -> payout spend already inside the rule's period, and the period's revenue (paise). Only populated for payout_budget rules. */
+  payoutBudget?: Record<string, { spent: number; revenue: number }>;
 }

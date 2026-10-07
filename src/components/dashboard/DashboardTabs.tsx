@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import type { Agent, Customer, Escalation, Mandate, Merchant, PolicyRule, Product, Trace } from "@/types/db";
+import type { Agent, AgentRun, Customer, Escalation, Merchant, PolicyRule, Product, Trace } from "@/types/db";
 import type { PolicyIssue } from "@/lib/policy/audit";
 import { EscalationsPanel } from "./EscalationsPanel";
 import { AgentTrustPanel } from "./AgentTrustPanel";
@@ -13,9 +13,8 @@ import { CatalogPanel } from "./CatalogPanel";
 import { AgentsPanel } from "./AgentsPanel";
 import { RevenueImpactPanel } from "./RevenueImpactPanel";
 import { TransactionsView } from "./TransactionsView";
-import { MandatesPanel } from "./MandatesPanel";
 
-type Tab = "overview" | "catalog" | "agents" | "transactions" | "policies" | "mandates";
+type Tab = "overview" | "catalog" | "agents" | "transactions" | "policies";
 
 const TABS: { key: Tab; label: string; badge?: (props: Props) => number }[] = [
   { key: "overview", label: "Overview" },
@@ -23,7 +22,6 @@ const TABS: { key: Tab; label: string; badge?: (props: Props) => number }[] = [
   { key: "agents", label: "Agents", badge: (p) => p.agents.filter((a) => a.status === "paused").length },
   { key: "transactions", label: "Transactions", badge: (p) => p.traces.length },
   { key: "policies", label: "Policies", badge: (p) => p.pendingCount + p.deterministicIssues.length },
-  { key: "mandates", label: "Mandates", badge: (p) => p.mandates.filter((m) => m.status === "paused").length },
 ];
 
 interface Props {
@@ -40,7 +38,7 @@ interface Props {
   tracesById: Record<string, Trace>;
   deterministicIssues: PolicyIssue[];
   pendingCount: number;
-  mandates: Mandate[];
+  runs: AgentRun[];
   customers: Customer[];
   products: Product[];
   merchant: Merchant;
@@ -53,7 +51,7 @@ interface Props {
  * instead of stacking everything into one increasingly long scroll.
  */
 export function DashboardTabs(props: Props) {
-  const { agents, allAgents, rules, traces, escalations, tracesById, deterministicIssues, mandates, customers } = props;
+  const { agents, allAgents, rules, traces, escalations, tracesById, deterministicIssues, runs, customers } = props;
   const [tab, setTab] = useState<Tab>("overview");
 
   const [highlightRuleId, setHighlightRuleId] = useState<string | null>(null);
@@ -128,7 +126,7 @@ export function DashboardTabs(props: Props) {
 
       {tab === "catalog" && <CatalogPanel />}
 
-      {tab === "agents" && <AgentsPanel agents={allAgents} rules={rules} mandates={mandates} />}
+      {tab === "agents" && <AgentsPanel agents={allAgents} runs={runs} />}
 
       {tab === "transactions" && <TransactionsView traces={traces} agents={allAgents} customers={customers} rules={rules} onJumpToRule={jumpToRule} />}
 
@@ -142,7 +140,6 @@ export function DashboardTabs(props: Props) {
         </div>
       )}
 
-      {tab === "mandates" && <MandatesPanel mandates={mandates} agents={allAgents} customers={customers} />}
     </div>
   );
 }

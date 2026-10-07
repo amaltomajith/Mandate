@@ -6,7 +6,8 @@ import { requireDashboardUser } from "./authGuard";
 import { getCurrentMerchant } from "@/lib/merchant";
 import { executeRealAction } from "@/lib/razorpay/actions";
 import { ActionInput } from "@/lib/mcp/schemas";
-import { recomputeTrust } from "@/lib/mcp/traceHelpers";
+import { recomputeTrust, updateTraceOutcome } from "@/lib/mcp/traceHelpers";
+import { recheckBeforeApproval } from "@/lib/mcp/tools/actionEvaluator";
 import type { Json } from "@/types/db";
 
 /**
@@ -55,6 +56,10 @@ export async function approveEscalation(escalationId: string) {
     params: rawParams,
   };
   const parsed = ActionInput.parse(candidate);
+  if (!trace.agent_id) throw new Error("This action has no agent behind it, so it cannot be approved.");
+  // Limits are re-checked at approval time; see recheckBeforeApproval.
+  const recheck = await recheckBeforeApproval(merchant.id, trace.agent_id, parsed);
+  if (!recheck.ok) throw new Error(`Can't approve this any more: ${recheck.reasoning}`);
 
   // Claim before executing. The conditional update only succeeds for the one
   // caller that flips `pending` -> `approved`, so two concurrent approvals
@@ -73,7 +78,7 @@ export async function approveEscalation(escalationId: string) {
 
   let razorpayResponse: Json;
   try {
-    razorpayResponse = await executeRealAction(parsed);
+    razorpayResponse = await executeRealAction(parsed, { merchantId: merchant.id, traceId: trace.id, agentId: trace.agent_id });
   } catch (err) {
     await db
       .from("escalations")
@@ -83,7 +88,7 @@ export async function approveEscalation(escalationId: string) {
     throw err;
   }
 
-  await db.from("traces").update({ razorpay_response: razorpayResponse as Json }).eq("id", trace.id);
+  await updateTraceOutcome(merchant.id, trace.id, { razorpayResponse });
   await db
     .from("alerts")
     .insert({ merchant_id: merchant.id, trace_id: trace.id, severity: "info", message: `Escalation approved by ${user.email ?? user.id} — action executed.` });

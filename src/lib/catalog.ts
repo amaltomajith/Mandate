@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * A real product catalog, stored in Supabase (`products` table,
  * migration 0002) — a merchant could edit this without a code deploy. Small
  * on purpose: it's read in full and handed to the LLM as context for
- * cross-sell reasoning (src/lib/demo/crossSell.ts) rather than searched via
+ * reasoning rather than searched via
  * vector/embedding retrieval. That's a right-sized choice, not a shortcut —
  * a full-catalog prompt is exact and cheap at a handful of SKUs; it stops
  * being the right choice once a real catalog runs into the thousands, at
@@ -45,51 +45,23 @@ export interface CatalogItem {
   category: string;
 }
 
-// Seed data only — the live catalog always comes from `fetchCatalog`, reading
-// the `products` table, so an edit here only affects a *fresh* database.
-export const SEED_PRODUCTS: CatalogItem[] = [
-  {
-    sku: "mouse-01",
-    name: "Wireless Mouse",
-    description: "A compact 2.4GHz wireless mouse for everyday desk use.",
-    priceInPaise: 89900,
-    category: "electronics",
-  },
-  {
-    sku: "keyboard-01",
-    name: "Mechanical Keyboard",
-    description: "A tactile mechanical keyboard with per-key backlighting, built for long typing sessions.",
-    priceInPaise: 449900,
-    category: "electronics",
-  },
-  {
-    sku: "stand-01",
-    name: "Laptop Stand",
-    description: "An aluminum laptop stand that raises screen height for better posture.",
-    priceInPaise: 219900,
-    category: "office",
-  },
-  {
-    sku: "hub-01",
-    name: "USB-C Hub",
-    description: "A 6-port USB-C hub adding HDMI, USB-A, and SD card slots to a single laptop port.",
-    priceInPaise: 129900,
-    category: "electronics",
-  },
-  {
-    sku: "desk-01",
-    name: "Premium Standing Desk",
-    description: "A motorized sit-stand desk with programmable height presets.",
-    priceInPaise: 699900,
-    category: "office",
-  },
-  {
-    sku: "yogamat-01",
-    name: "Yoga Mat",
-    description: "A non-slip yoga mat for home workouts.",
-    priceInPaise: 119900,
-    category: "fitness",
-  },
+/** A starting catalog with real unit economics, so a new account has something
+ *  to manage. Costs, stock and lead times are sample values the merchant
+ *  replaces; they are what the margin rule and the runway maths read. */
+export interface SeedProduct extends CatalogItem {
+  costPaise: number;
+  stockQty: number;
+  reorderPoint: number;
+  leadTimeDays: number;
+}
+
+export const SEED_PRODUCTS: SeedProduct[] = [
+  { sku: "mouse-01", name: "Wireless Mouse", description: "A compact 2.4GHz wireless mouse for everyday desk use.", priceInPaise: 89900, category: "electronics", costPaise: 52000, stockQty: 140, reorderPoint: 40, leadTimeDays: 5 },
+  { sku: "keyboard-01", name: "Mechanical Keyboard", description: "A tactile mechanical keyboard with per-key backlighting, built for long typing sessions.", priceInPaise: 449900, category: "electronics", costPaise: 290000, stockQty: 12, reorderPoint: 25, leadTimeDays: 10 },
+  { sku: "stand-01", name: "Laptop Stand", description: "An aluminum laptop stand that raises screen height for better posture.", priceInPaise: 219900, category: "office", costPaise: 125000, stockQty: 90, reorderPoint: 20, leadTimeDays: 7 },
+  { sku: "hub-01", name: "USB-C Hub", description: "A 6-port USB-C hub adding HDMI, USB-A, and SD card slots to a single laptop port.", priceInPaise: 129900, category: "electronics", costPaise: 70000, stockQty: 220, reorderPoint: 30, leadTimeDays: 7 },
+  { sku: "desk-01", name: "Premium Standing Desk", description: "A motorized sit-stand desk with programmable height presets.", priceInPaise: 699900, category: "office", costPaise: 460000, stockQty: 18, reorderPoint: 5, leadTimeDays: 14 },
+  { sku: "yogamat-01", name: "Yoga Mat", description: "A non-slip yoga mat for home workouts.", priceInPaise: 119900, category: "fitness", costPaise: 61000, stockQty: 75, reorderPoint: 30, leadTimeDays: 6 },
 ];
 
 export async function applySeedProducts(
@@ -102,7 +74,18 @@ export async function applySeedProducts(
     if (existing) continue;
     const { error } = await db
       .from("products")
-      .insert({ merchant_id: merchantId, sku: p.sku, name: p.name, description: p.description, price_paise: p.priceInPaise, category: p.category });
+      .insert({
+        merchant_id: merchantId,
+        sku: p.sku,
+        name: p.name,
+        description: p.description,
+        price_paise: p.priceInPaise,
+        category: p.category,
+        cost_price_paise: p.costPaise,
+        stock_qty: p.stockQty,
+        reorder_point: p.reorderPoint,
+        lead_time_days: p.leadTimeDays,
+      });
     if (error) throw error;
     created++;
   }

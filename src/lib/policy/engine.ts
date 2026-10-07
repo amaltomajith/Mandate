@@ -8,6 +8,9 @@ import type {
   CategoryBlockParams,
   StepUpParams,
   TrustFloorParams,
+  WhitelistedPayeeParams,
+  MinMarginFloorParams,
+  PayoutBudgetParams,
 } from "./types";
 
 /** Paise -> a reasoning string a merchant can actually read at a glance. */
@@ -34,7 +37,13 @@ function formatMoney(amountPaise: number, currency: string): string {
  */
 function appliesTo(rule: PolicyRule, actionType: string): boolean {
   const scope = (rule.params as { action_types?: unknown } | null)?.action_types;
-  if (!Array.isArray(scope) || scope.length === 0) return true;
+  if (!Array.isArray(scope) || scope.length === 0) {
+    // A price change is not spend. An unscoped cap, velocity or step-up means
+    // "money going out or coming in", and applying one to "set the price of X
+    // to Y" would read the new price as an amount spent. Rules reach a price
+    // change only by naming it (min_margin_floor does).
+    return actionType !== "price.change";
+  }
   return scope.includes(actionType);
 }
 
@@ -44,7 +53,8 @@ function appliesTo(rule: PolicyRule, actionType: string): boolean {
  * only `enforce_action` goes on to make the real Razorpay call when the result is "allow".
  *
  * Priority order is fixed and documented:
- *   category_block > catalog_scope > cap > velocity > trust_floor > step_up.
+ *   category_block > whitelisted_payee > catalog_scope > cap > payout_budget >
+ *   min_margin_floor > velocity > trust_floor > step_up.
  * First match wins. This ordering is a deliberate policy choice (hard blocks and
  * spend caps are absolute; step-up is the last resort that asks a human instead of
  * refusing outright) — change it here, in one place, if that priority is wrong for
@@ -79,6 +89,34 @@ export function evaluatePolicy(
         rule,
         decision: "block",
         reasoning: `"${context.category}" is on the blocked category list for rule "${rule.name}".`,
+      };
+    }
+  }
+
+  // Money may only go to someone a human approved. No `payee` on a payout is
+  // an unresolved payee, and unresolved is refused -- see WhitelistedPayeeParams.
+  for (const rule of byType("whitelisted_payee")) {
+    const params = rule.params as WhitelistedPayeeParams;
+    const payee = context.payee;
+    if (!payee) {
+      return {
+        rule,
+        decision: "block",
+        reasoning: `This payout names a payee that could not be found, and rule "${rule.name}" only allows payments to approved payees.`,
+      };
+    }
+    if (payee.status !== "active") {
+      return {
+        rule,
+        decision: "block",
+        reasoning: `This payee is ${payee.status}, not approved. Rule "${rule.name}" only allows payments to payees a person has approved.`,
+      };
+    }
+    if ((params.require_vendor_approved ?? true) && payee.vendorStatus !== "approved") {
+      return {
+        rule,
+        decision: "block",
+        reasoning: `The vendor behind this payee is ${payee.vendorStatus}, not approved. Rule "${rule.name}" requires an approved vendor.`,
       };
     }
   }
@@ -136,12 +174,64 @@ export function evaluatePolicy(
       const soFar = aggregates.dailyAmountSoFar[rule.id] ?? 0;
       const projected = soFar + context.amount;
       if (projected > params.max_amount) {
+        const whose =
+          params.scope === "per_day_merchant"
+            ? "the business's total today"
+            : params.scope === "per_payee_per_day"
+              ? "today's total to this payee"
+              : "today's total";
         return {
           rule,
           decision: "block",
-          reasoning: `This would bring today's total to ${formatMoney(projected, context.currency)}, over the daily cap of ${formatMoney(params.max_amount, params.currency)} set by rule "${rule.name}".`,
+          reasoning: `This would bring ${whose} to ${formatMoney(projected, context.currency)}, over the daily cap of ${formatMoney(params.max_amount, params.currency)} set by rule "${rule.name}".`,
         };
       }
+    }
+  }
+
+  // Restocking must be self-funded: payouts inside the period may not exceed the
+  // starting float plus a share of what was actually sold, nor a hard ceiling.
+  for (const rule of byType("payout_budget")) {
+    const params = rule.params as PayoutBudgetParams;
+    if (params.currency !== context.currency) continue;
+    const { spent, revenue } = aggregates.payoutBudget?.[rule.id] ?? { spent: 0, revenue: 0 };
+    let allowance = Infinity;
+    if (params.pct_of_revenue !== undefined) {
+      allowance = (params.float_amount ?? 0) + Math.floor((revenue * params.pct_of_revenue) / 100);
+    }
+    if (params.max_amount !== undefined) allowance = Math.min(allowance, params.max_amount);
+    if (spent + context.amount > allowance) {
+      return {
+        rule,
+        decision: "block",
+        reasoning:
+          `Payouts this ${params.period_days ?? 7}-day period would reach ${formatMoney(spent + context.amount, context.currency)}, ` +
+          `over the ${formatMoney(Math.max(0, allowance), context.currency)} the business can fund right now ` +
+          `(rule "${rule.name}"; ${formatMoney(spent, context.currency)} already paid out).`,
+      };
+    }
+  }
+
+  // Margin floor. A product with no known cost escalates rather than passing: a
+  // margin nobody can compute has not been shown to be safe.
+  for (const rule of byType("min_margin_floor")) {
+    const params = rule.params as MinMarginFloorParams;
+    const e = context.economics;
+    if (!e || e.costPaise === null) {
+      return {
+        rule,
+        decision: "escalate",
+        reasoning: `The cost of what is being sold is unknown, so the margin cannot be checked against the ${(params.min_margin_bps / 100).toFixed(1)}% floor in rule "${rule.name}" — a human needs to confirm.`,
+      };
+    }
+    if (e.revenuePaise <= 0) continue;
+    const marginBps = Math.round(((e.revenuePaise - e.costPaise) / e.revenuePaise) * 10000);
+    if (marginBps < params.min_margin_bps) {
+      return {
+        rule,
+        decision: "block",
+        reasoning: `Selling at ${formatMoney(e.revenuePaise, context.currency)} against a cost of ${formatMoney(e.costPaise, context.currency)} is a ${(marginBps / 100).toFixed(1)}% margin, under the ${(params.min_margin_bps / 100).toFixed(1)}% floor set by rule "${rule.name}".`,
+      };
     }
   }
 

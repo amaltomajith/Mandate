@@ -1,9 +1,9 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { PolicyRule as EngineRule, EvaluationAggregates } from "@/lib/policy/types";
-import type { CapParams, VelocityParams } from "@/lib/policy/types";
+import type { CapParams, VelocityParams, PayoutBudgetParams } from "@/lib/policy/types";
 import { computeTrustScore, TRUST_WINDOW_SIZE } from "@/lib/trust/score";
-import type { Database, Decision, Json, Mandate, TraceMode } from "@/types/db";
+import type { Database, Decision, Json, TraceMode } from "@/types/db";
 
 /**
  * A Supabase `PostgrestError` is a plain object, not an `Error` instance —
@@ -55,7 +55,9 @@ export async function getAggregates(
   agentId: string,
   rules: EngineRule[],
   currency: string,
-  customerId?: string
+  customerId?: string,
+  /** The payee a payout names, for `per_payee_per_day` caps. */
+  payeeId?: string
 ): Promise<EvaluationAggregates> {
   const db = createAdminClient();
   const velocityCounts: Record<string, number> = {};
@@ -108,15 +110,29 @@ export async function getAggregates(
   todayStart.setHours(0, 0, 0, 0);
   for (const rule of capRules) {
     const params = rule.params as CapParams;
-    if (params.scope !== "per_day" || params.currency !== currency) continue;
+    if (params.scope === "per_transaction" || params.currency !== currency) continue;
+    // A price change is not money moving, so it never counts toward a daily
+    // total even under a rule that names no action types.
     let capQuery = db
       .from("traces")
       .select("action_type, params")
       .eq("merchant_id", merchantId)
-      .eq("agent_id", agentId)
       .eq("mode", "enforce")
       .eq("decision", "allow")
+      .neq("action_type", "price.change")
       .gte("created_at", todayStart.toISOString());
+    // per_day is per agent (the original meaning); the other two scopes are
+    // deliberately wider than one agent.
+    if (params.scope === "per_day") capQuery = capQuery.eq("agent_id", agentId);
+    if (params.scope === "per_payee_per_day") {
+      // No payee on this action means there is nothing for the cap to count
+      // against, the same reasoning as the per-customer velocity scope.
+      if (!payeeId) {
+        dailyAmountSoFar[rule.id] = 0;
+        continue;
+      }
+      capQuery = capQuery.eq("params->>payeeId", payeeId);
+    }
     const capScope = scopedActionTypes(rule);
     if (capScope) capQuery = capQuery.in("action_type", capScope);
     const { data, error } = await capQuery;
@@ -128,72 +144,26 @@ export async function getAggregates(
     }, 0);
   }
 
-  return { velocityCounts, dailyAmountSoFar };
-}
+  // Payout budgets read the ledger rather than the traces: a payout that was
+  // escalated and later approved is real money out and only the ledger knows it.
+  const payoutBudget: Record<string, { spent: number; revenue: number }> = {};
+  for (const rule of rules.filter((r) => r.type === "payout_budget")) {
+    const params = rule.params as PayoutBudgetParams;
+    if (params.currency !== currency) continue;
+    const since = new Date(Date.now() - (params.period_days ?? 7) * 86_400_000).toISOString();
+    const [paid, sold] = await Promise.all([
+      db.from("payouts").select("amount_paise").eq("merchant_id", merchantId).in("status", ["queued", "processing", "processed"]).gte("created_at", since),
+      db.from("sales").select("amount_paise").eq("merchant_id", merchantId).gte("captured_at", since),
+    ]);
+    assertNoSupabaseError(paid.error);
+    assertNoSupabaseError(sold.error);
+    payoutBudget[rule.id] = {
+      spent: (paid.data ?? []).reduce((n, r) => n + Number(r.amount_paise), 0),
+      revenue: (sold.data ?? []).reduce((n, r) => n + Number(r.amount_paise), 0),
+    };
+  }
 
-export interface MandateGateResult {
-  blocked: boolean;
-  mandate: Mandate | null;
-  reasoning: string | null;
-}
-
-/**
- * A mandate is a standing authorization for one agent to act on one
- * customer's behalf — the thing "Mandate" is named for. This is a separate,
- * more fundamental gate than the per-transaction policy engine: a merchant
- * revoking (or pausing) an agent's mandate must stop that agent cold on its
- * very next action, regardless of what any cap/velocity/category rule would
- * otherwise have allowed. Only ever checked for actions carrying a
- * `customerId` — an action with no customer to attribute a mandate to
- * simply isn't gated by one.
- */
-export async function checkMandateGate(agentId: string, customerId: string): Promise<MandateGateResult> {
-  const db = createAdminClient();
-  const { data, error } = await db
-    .from("mandates")
-    .select("*")
-    .eq("agent_id", agentId)
-    .eq("customer_id", customerId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  assertNoSupabaseError(error);
-
-  if (!data || data.status === "active") return { blocked: false, mandate: data, reasoning: null };
-
-  const reason =
-    data.status === "revoked"
-      ? "The merchant has revoked this agent's mandate for this customer — no further actions are authorized."
-      : data.status === "paused"
-        ? "The merchant has paused this agent's mandate for this customer — actions are on hold until it's resumed."
-        : "This agent's mandate for this customer has expired.";
-
-  return { blocked: true, mandate: data, reasoning: reason };
-}
-
-/** Called after a real `subscription.create` succeeds — this is what actually
- *  turns a Razorpay subscription into a Mandate row the merchant can see,
- *  pause, or revoke. Silently no-ops without a customerId: a subscription
- *  with nobody to attribute it to isn't a governable mandate. */
-export async function recordMandateFromSubscription(
-  merchantId: string,
-  agentId: string,
-  customerId: string | null | undefined,
-  razorpayRef: string,
-  rawPayload: Json
-): Promise<void> {
-  if (!customerId) return;
-  const db = createAdminClient();
-  const { error } = await db.from("mandates").insert({
-    merchant_id: merchantId,
-    agent_id: agentId,
-    customer_id: customerId,
-    type: "upi_autopay",
-    status: "active",
-    razorpay_ref: razorpayRef,
-    raw_payload: rawPayload,
-  });
-  assertNoSupabaseError(error);
+  return { velocityCounts, dailyAmountSoFar, payoutBudget };
 }
 
 /** Current trust score for an agent, for `trust_floor` rules. Returns
@@ -209,33 +179,40 @@ export async function getAgentTrustScore(agentId: string): Promise<number | unde
 }
 
 /**
- * The two per-agent facts the engine reads, in one round trip.
+ * The per-agent facts the wall reads, in one round trip.
  *
  * Kept together because they are fetched at the same moment for the same
- * decision, and two queries where one will do is two chances for them to
+ * decision, and several queries where one will do is several chances for them to
  * disagree about which agent they are describing.
  *
- * The three-state return is load-bearing. `undefined` for scope means "no agent
+ * The three-state return for scope is load-bearing. `undefined` means "no agent
  * row" -- the engine then skips the rule rather than treating the absence as
  * permission. `null` means the row exists and is explicitly unscoped. Mapping a
  * missing row to `null` would turn "we could not find this agent" into "this
  * agent may buy anything", which is the wrong direction for a failure in the
  * money path.
  */
-export async function getAgentPolicyFacts(
-  agentId: string
-): Promise<{ trustScore?: number; catalogScope?: string[] | null }> {
+export async function getAgentPolicyFacts(agentId: string): Promise<{
+  trustScore?: number;
+  catalogScope?: string[] | null;
+  status?: Database["public"]["Tables"]["agents"]["Row"]["status"];
+  retired?: boolean;
+  kind?: Database["public"]["Tables"]["agents"]["Row"]["kind"];
+}> {
   const db = createAdminClient();
   const { data, error } = await db
     .from("agents")
-    .select("trust_score, catalog_scope")
+    .select("trust_score, catalog_scope, status, retired, kind")
     .eq("id", agentId)
     .maybeSingle();
   if (error || !data) return {};
-  return { trustScore: data.trust_score, catalogScope: data.catalog_scope };
+  return { trustScore: data.trust_score, catalogScope: data.catalog_scope, status: data.status, retired: data.retired, kind: data.kind };
 }
 
 export interface InsertTraceInput {
+  /** Supplied when the caller needs the id before the money moves (it is the
+   *  payout's idempotency key). */
+  id?: string;
   merchantId: string;
   parentTraceId?: string | null;
   mode: TraceMode;
@@ -253,6 +230,7 @@ export async function insertTrace(input: InsertTraceInput) {
   const { data, error } = await db
     .from("traces")
     .insert({
+      ...(input.id ? { id: input.id } : {}),
       merchant_id: input.merchantId,
       parent_trace_id: input.parentTraceId ?? null,
       mode: input.mode,
@@ -268,6 +246,26 @@ export async function insertTrace(input: InsertTraceInput) {
     .single();
   assertNoSupabaseError(error);
   return data;
+}
+
+/** Records what happened after the wall said yes. The trace is written BEFORE
+ *  the money moves, so a crash between the two leaves a record of an allowed
+ *  action rather than money gone with no trace of why. */
+export async function updateTraceOutcome(
+  merchantId: string,
+  traceId: string,
+  patch: { razorpayResponse: Json | null; reasoning?: string }
+) {
+  const db = createAdminClient();
+  const { error } = await db
+    .from("traces")
+    .update({
+      razorpay_response: patch.razorpayResponse,
+      ...(patch.reasoning ? { reasoning: patch.reasoning } : {}),
+    })
+    .eq("id", traceId)
+    .eq("merchant_id", merchantId);
+  assertNoSupabaseError(error);
 }
 
 export async function createEscalationForTrace(merchantId: string, traceId: string) {

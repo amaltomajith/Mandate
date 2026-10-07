@@ -1,10 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PolicyRuleType } from "@/types/db";
 
-// Shared between scripts/seed.ts (CLI) and src/lib/demo/runDemo.ts (the
-// dashboard's one-click "Run demo" button) so the two setup paths can't drift
-// into seeding different rules — and so there's exactly one place that knows
-// how to upsert them, including the one-time rename migration below.
+// Shared between scripts/seed.ts (CLI) and merchant provisioning, so the two
+// setup paths cannot drift into seeding different rules.
 
 export interface SeedRule {
   type: PolicyRuleType;
@@ -13,18 +11,22 @@ export interface SeedRule {
   rationale: string;
 }
 
+/** The actions where money comes in or goes back out to a customer. Payouts to
+ *  suppliers are governed by the Guardrails rules (guardrails.ts) instead. */
+const CUSTOMER_MONEY = ["order.create", "payment_link.create", "refund.create"];
+
 export const SEED_RULES: SeedRule[] = [
   {
     type: "step_up",
     name: "Step-up above ₹5,000",
-    params: { threshold_amount: 500000, currency: "INR" },
-    rationale: "Payouts and orders at or above ₹5,000 need a human's sign-off before they execute.",
+    params: { threshold_amount: 500000, currency: "INR", action_types: CUSTOMER_MONEY },
+    rationale: "Orders, payment links and refunds at or above ₹5,000 need a human's sign-off before they execute.",
   },
   {
     type: "cap",
     name: "Per-transaction cap ₹20,000",
-    params: { max_amount: 2000000, currency: "INR", scope: "per_transaction" },
-    rationale: "No single action should ever exceed ₹20,000 — an absolute ceiling regardless of who approves it.",
+    params: { max_amount: 2000000, currency: "INR", scope: "per_transaction", action_types: CUSTOMER_MONEY },
+    rationale: "No single sale or refund should ever exceed ₹20,000 — an absolute ceiling regardless of who approves it.",
   },
   {
     type: "category_block",
@@ -37,18 +39,16 @@ export const SEED_RULES: SeedRule[] = [
     name: "Rapid-repeat guard: 20 actions / 2 min per agent",
     params: { max_count: 20, window_seconds: 120, scope: "per_agent" },
     rationale:
-      "Amount-blind, like all velocity rules: it's the rate that's suspicious, not any single action's size — this is what catches an agent firing many small actions rapidly instead of one that would have needed approval. Tuned against the simulation's speed settings: Calm and Busy stay comfortably inside it, while Stress deliberately outruns it, so the rate limiter can be seen engaging rather than only described.",
+      "Amount-blind: it is the rate that is suspicious, not any single action's size. This is what catches an agent firing many small actions rapidly instead of one that would have needed approval.",
   },
   {
     type: "trust_floor",
     name: "Hold agents below trust 35",
     params: { min_score: 35, action: "escalate" },
     rationale:
-      "Reputation, made consequential. Every agent starts at a neutral 50 and moves with its own record — an agent that has been blocked repeatedly, or has had forged requests rejected in its name, falls. Below 35 its actions are held for a human regardless of amount, because the problem is the caller, not the transaction. Set below the starting score deliberately: a new agent is unproven, not suspect, and shouldn't be punished for having no history.",
+      "Reputation, made consequential. Every agent starts at a neutral 50 and moves with its own record — blocked actions pull it down. Below 35 its actions are held for a human regardless of amount, because the problem is the caller, not the transaction.",
   },
 ];
-
-export const SEED_CUSTOMER = { name: "Demo Customer", email: "demo-customer@example.com" };
 
 /** Renamed from "Max 5 actions/hour per agent" early in this project — that
  *  limit was tight enough to make the dashboard's repeatable "Run demo"
@@ -76,7 +76,7 @@ const RETIRED_RULE_NAMES = [
   "Rapid-repeat guard: 6 actions / 2 min per agent",
 ];
 
-/** Seeds one merchant's starting policy set and demo customer. Every query is
+/** Seeds one merchant's starting policy set. Every query is
  *  scoped to that merchant: without the scope, a second merchant signing up
  *  would find its seed rules "already existing" because another merchant had
  *  the same rule names, and would end up governed by nothing. */
@@ -111,12 +111,6 @@ export async function applySeedRules(
     });
     if (error) throw error;
     created++;
-  }
-
-  const { data: existingCustomer } = await db.from("customers").select("id").eq("merchant_id", merchantId).eq("name", SEED_CUSTOMER.name).maybeSingle();
-  if (!existingCustomer) {
-    const { error } = await db.from("customers").insert({ ...SEED_CUSTOMER, merchant_id: merchantId });
-    if (error) throw error;
   }
 
   return { created, migrated };

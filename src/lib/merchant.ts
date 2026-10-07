@@ -2,8 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireDashboardUser } from "@/lib/actions/authGuard";
-import { applySeedRules } from "@/lib/policy/seed";
-import { applySeedProducts } from "@/lib/catalog";
+import { ensureWorkspace } from "@/lib/workspace";
 import type { Merchant } from "@/types/db";
 
 /**
@@ -83,12 +82,10 @@ async function provisionMerchant(db: SupabaseClient, clerkUserId: string, email:
     .single();
   if (error) throw new Error(`Could not create a merchant: ${error.message}`);
 
-  // A merchant with no rules governs nothing and a merchant with no catalog has
-  // nothing to sell, so a brand new account would render a dashboard where
-  // every panel is empty and no action is possible. Seeding both is what makes
+  // A merchant with no rules governs nothing, no catalog sells nothing, and no
+  // agents means nobody runs the store. Provisioning all of it is what makes
   // "new account" mean "no activity yet" rather than "nothing works".
-  await applySeedRules(db, data.id);
-  await applySeedProducts(db, data.id);
+  await ensureWorkspace(db, data.id);
   return data;
 }
 

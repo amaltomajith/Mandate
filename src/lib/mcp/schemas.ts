@@ -7,9 +7,21 @@ import { z } from "zod";
  * claim to be a different agent than the one that signed the request.
  */
 
+/**
+ * What a sale is made of. The server resolves each SKU to a product and reads
+ * its cost from the database; the caller never states a cost, so a margin
+ * cannot be argued into passing.
+ */
+export const LineItem = z.object({
+  sku: z.string().min(1),
+  qty: z.number().int().positive().max(100000),
+});
+export type LineItem = z.infer<typeof LineItem>;
+
 export const OrderCreateParams = z.object({
   receipt: z.string().optional(),
   notes: z.record(z.string(), z.string()).optional(),
+  lineItems: z.array(LineItem).min(1).optional(),
 });
 
 export const RefundCreateParams = z.object({
@@ -17,8 +29,8 @@ export const RefundCreateParams = z.object({
 });
 
 /**
- * A payment link is the campaign orchestrator's money action: the agent picks a
- * customer, decides an offer, and creates a link for the discounted amount.
+ * A payment link is how the Selling agent asks a buyer to pay: it names a
+ * buyer, decides an offer, and creates a link for the discounted amount.
  *
  * `discountPaise` is carried alongside rather than folded into `amount`.
  * `amount` stays what it is for every other action -- what the customer is
@@ -28,7 +40,7 @@ export const RefundCreateParams = z.object({
  * at 20,000" silently mean something different for links.
  *
  * `notify` is off by default. Razorpay sends the email/SMS itself when it is
- * on, and a campaign run against synthetic customers should not be mailing
+ * on, and a test run against synthetic customers should not be mailing
  * anyone -- an opt-in flag is the difference between a demo and an incident.
  */
 export const PaymentLinkCreateParams = z.object({
@@ -40,14 +52,26 @@ export const PaymentLinkCreateParams = z.object({
   notify: z.boolean().default(false),
   expiresInHours: z.number().int().positive().max(720).optional(),
   notes: z.record(z.string(), z.string()).optional(),
+  lineItems: z.array(LineItem).min(1).optional(),
 });
 
-export const SubscriptionCreateParams = z.object({
-  planName: z.string(),
-  period: z.enum(["daily", "weekly", "monthly", "yearly"]),
-  interval: z.number().int().positive().default(1),
-  totalCount: z.number().int().positive(),
-  customerNotify: z.boolean().default(false),
+/**
+ * Money out to a supplier. The agent names a payee by id and a purchase order;
+ * it never supplies an account number, UPI id or name. Those live at Razorpay,
+ * attached to a payee record only a human can create and approve.
+ */
+export const PayoutCreateParams = z.object({
+  payeeId: z.string().uuid(),
+  poId: z.string().uuid().optional(),
+  purpose: z.enum(["vendor_advance", "vendor_payment", "refund_to_vendor"]).default("vendor_advance"),
+  note: z.string().max(200).optional(),
+});
+
+/** Change what a product sells for. Gated like money because a price drop is
+ *  money given away. `amount` carries the new price. */
+export const PriceChangeParams = z.object({
+  sku: z.string().min(1),
+  reason: z.string().max(200).optional(),
 });
 
 export const ActionInput = z.discriminatedUnion("actionType", [
@@ -76,12 +100,20 @@ export const ActionInput = z.discriminatedUnion("actionType", [
     params: PaymentLinkCreateParams,
   }),
   z.object({
-    actionType: z.literal("subscription.create"),
+    actionType: z.literal("payout.create"),
     amount: z.number().int().positive(),
     currency: z.string().length(3).default("INR"),
     category: z.string().optional(),
     customerId: z.string().uuid().optional(),
-    params: SubscriptionCreateParams,
+    params: PayoutCreateParams,
+  }),
+  z.object({
+    actionType: z.literal("price.change"),
+    amount: z.number().int().positive(),
+    currency: z.string().length(3).default("INR"),
+    category: z.string().optional(),
+    customerId: z.string().uuid().optional(),
+    params: PriceChangeParams,
   }),
 ]);
 

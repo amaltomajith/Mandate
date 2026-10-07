@@ -29,6 +29,9 @@ const TYPE_LABEL: Record<PolicyRule["type"], string> = {
   catalog_scope: "Catalog scope",
   trust_floor: "Trust floor",
   step_up: "Step-up",
+  whitelisted_payee: "Approved payees only",
+  min_margin_floor: "Margin floor",
+  payout_budget: "Payout budget",
 };
 
 export function PolicyRulesPanel({

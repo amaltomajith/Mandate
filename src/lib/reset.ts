@@ -34,7 +34,7 @@ const TRANSACTION_TABLES = ["escalations", "alerts", "traces"] as const;
 
 /** What the account keeps across a transaction reset. Named so the preview and
  *  the tests read from one list rather than two that can drift. */
-const PRESERVED_TABLES = ["agents", "policy_rules", "products", "customers", "mandates"] as const;
+const PRESERVED_TABLES = ["agents", "policy_rules", "products", "customers"] as const;
 
 export interface ResetCounts {
   /** Rows a transaction reset would delete, by table. */
@@ -125,7 +125,7 @@ export async function resetTrustFor(db: SupabaseClient, merchantId: string): Pro
 }
 
 /**
- * History only. Agents, rules, catalog, customers and mandates all survive.
+ * History only. Agents, rules, catalog and customers all survive.
  *
  * That preservation is the entire point of having this separate from the full
  * reset: re-registering three external keypairs is the slow, error-prone part
@@ -167,8 +167,6 @@ export async function resetEverythingFor(db: SupabaseClient, merchantId: string)
   // History first — traces reference policy_rules.rule_fired_id and agents,
   // so the rules and agents below cannot go until these are gone.
   for (const t of TRANSACTION_TABLES) await deleteScoped(db, t, merchantId);
-
-  await deleteScoped(db, "mandates", merchantId);
 
   const { error: agentError } = await db
     .from("agents")
