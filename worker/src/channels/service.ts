@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Channel, Thread } from "@/types/db";
 import type { ChannelDriver, InboundMessage, SandboxContext } from "./types";
+import { normalizePhone } from "./phone";
 
 const MAX_BODY = 20_000;
 
@@ -233,13 +234,24 @@ export class ChannelService {
         .maybeSingle();
       if (data) return data as Thread;
     }
-    const field = driver.channel === "whatsapp" ? "phone" : "email";
-    const from = msg.from.toLowerCase();
-
-    const { data: vendor } = await db.from("vendors").select("id, status").eq("merchant_id", this.merchantId).ilike(field, from).maybeSingle();
-    if (vendor) return this.openThread(driver.channel, "vendor", { vendorId: vendor.id }, msg);
-    const { data: customer } = await db.from("customers").select("id").eq("merchant_id", this.merchantId).ilike(field, from).maybeSingle();
-    if (customer) return this.openThread(driver.channel, "buyer", { customerId: customer.id }, msg);
+    let vendorId: string | null = null;
+    let customerId: string | null = null;
+    if (driver.channel === "whatsapp") {
+      // Phone numbers are written many ways; compare them in one canonical form.
+      const want = normalizePhone(msg.from);
+      const [vendors, customers] = await Promise.all([
+        db.from("vendors").select("id, phone").eq("merchant_id", this.merchantId).not("phone", "is", null),
+        db.from("customers").select("id, phone").eq("merchant_id", this.merchantId).not("phone", "is", null),
+      ]);
+      vendorId = (vendors.data ?? []).find((v) => normalizePhone(v.phone ?? "") === want)?.id ?? null;
+      customerId = (customers.data ?? []).find((c) => normalizePhone(c.phone ?? "") === want)?.id ?? null;
+    } else {
+      const from = msg.from.toLowerCase();
+      vendorId = (await db.from("vendors").select("id").eq("merchant_id", this.merchantId).ilike("email", from).maybeSingle()).data?.id ?? null;
+      customerId = (await db.from("customers").select("id").eq("merchant_id", this.merchantId).ilike("email", from).maybeSingle()).data?.id ?? null;
+    }
+    if (vendorId) return this.openThread(driver.channel, "vendor", { vendorId }, msg);
+    if (customerId) return this.openThread(driver.channel, "buyer", { customerId }, msg);
     if (driver.channel === "whatsapp") return this.openThread(driver.channel, "buyer", {}, msg);
     return null;
   }

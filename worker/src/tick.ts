@@ -3,6 +3,7 @@ import { getSettings } from "@/lib/settings";
 import { ChannelService } from "./channels/service";
 import { buildDrivers } from "./channels/drivers";
 import { runAgent, type RunResult } from "./runner";
+import { ensureWhatsApp, stopWhatsApp } from "./channels/whatsapp";
 import { runBuyingAgent } from "./agents/buying";
 import { runSellingAgent } from "./agents/selling";
 
@@ -20,6 +21,10 @@ function describe(r: RunResult): string {
 /** One pass over one merchant: pull new messages, then let each agent act. */
 export async function tickMerchant(db: SupabaseClient, merchant: { id: string; slug: string }): Promise<TickReport> {
   const settings = await getSettings(db, merchant.id);
+  // The WhatsApp session is kept alive whenever the merchant has enabled it, even
+  // in sandbox mode, so that pairing (the QR code) works before going live.
+  if (settings.whatsapp_enabled) ensureWhatsApp(db, merchant.id);
+  else await stopWhatsApp(merchant.id);
   const channels = new ChannelService(db, merchant.id, settings.channel_mode, await buildDrivers(db, merchant.id, settings));
   const ingested = await channels.ingest();
 
