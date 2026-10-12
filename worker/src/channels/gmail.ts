@@ -141,6 +141,8 @@ export class GmailDriver implements ChannelDriver {
   readonly channel = "email" as const;
   readonly live = true;
   private token: { value: string; expiresAt: number } | null = null;
+  /** Messages already dealt with this session: not downloaded again. Bounded, oldest dropped first. */
+  private readonly done = new Set<string>();
 
   constructor(private readonly creds: GmailCredentials) {}
 
@@ -162,14 +164,28 @@ export class GmailDriver implements ChannelDriver {
   }
 
   private async api<T>(path: string, init?: RequestInit): Promise<T> {
-    const res = await fetch(`${API}${path}`, {
-      ...init,
-      headers: { authorization: `Bearer ${await this.accessToken()}`, "content-type": "application/json", ...(init?.headers ?? {}) },
-      signal: AbortSignal.timeout(20_000),
-    });
-    const j = (await res.json().catch(() => ({}))) as T & { error?: { message?: string } };
-    if (!res.ok) throw new Error(`Gmail API error: ${j.error?.message ?? res.status}`);
-    return j;
+    // Gmail rate-limits (429) and has brief outages (5xx). Both are worth a short, bounded wait.
+    for (let attempt = 0; ; attempt++) {
+      const res = await fetch(`${API}${path}`, {
+        ...init,
+        headers: { authorization: `Bearer ${await this.accessToken()}`, "content-type": "application/json", ...(init?.headers ?? {}) },
+        signal: AbortSignal.timeout(20_000),
+      });
+      if ((res.status === 429 || res.status >= 500) && attempt < 3) {
+        const asked = Number(res.headers.get("retry-after"));
+        const wait = Number.isFinite(asked) && asked >= 0 ? Math.min(asked * 1000, 10_000) : 500 * 2 ** attempt;
+        await new Promise((r) => setTimeout(r, Math.max(wait, 20)));
+        continue;
+      }
+      const j = (await res.json().catch(() => ({}))) as T & { error?: { message?: string } };
+      if (!res.ok) throw new Error(`Gmail API error: ${j.error?.message ?? res.status}`);
+      return j;
+    }
+  }
+
+  ack(externalId: string): void {
+    this.done.add(externalId);
+    if (this.done.size > 1000) this.done.delete(this.done.values().next().value as string);
   }
 
   async send(message: OutboundMessage): Promise<SendResult> {
@@ -187,17 +203,25 @@ export class GmailDriver implements ChannelDriver {
     );
     const out: InboundMessage[] = [];
     for (const ref of list.messages ?? []) {
+      if (this.done.has(ref.id)) continue; // already filed or deliberately ignored
       const m = await this.api<{ id: string; threadId: string; internalDate?: string; payload?: Part }>(`/messages/${ref.id}?format=full`);
       const headers = m.payload?.headers ?? [];
       const h = (name: string) => headers.find((x) => x.name.toLowerCase() === name)?.value ?? "";
       const from = parseFrom(h("from"));
-      if (!from || from === this.creds.email.toLowerCase()) continue; // our own sent mail
+      if (!from || from === this.creds.email.toLowerCase()) {
+        this.ack(ref.id); // our own sent mail
+        continue;
+      }
       if (!senderAuthenticated(h("authentication-results"), from)) {
         console.warn(`[gmail] ignoring a message claiming to be from ${from}: the sender could not be authenticated`);
+        this.ack(ref.id);
         continue;
       }
       const body = stripQuoted(extractPlainText(m.payload));
-      if (!body) continue;
+      if (!body) {
+        this.ack(ref.id);
+        continue;
+      }
       out.push({
         from,
         subject: h("subject") || undefined,

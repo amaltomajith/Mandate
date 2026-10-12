@@ -9,7 +9,7 @@
 import "./lib/loadEnv";
 import { createAdminClient } from "../src/lib/supabase/admin";
 import { ensureWorkspace } from "../src/lib/workspace";
-import { buildRawMessage, encodeHeader, extractPlainText, parseFrom, stripQuoted } from "../worker/src/channels/gmail";
+import { GmailDriver, buildRawMessage, encodeHeader, extractPlainText, parseFrom, stripQuoted } from "../worker/src/channels/gmail";
 import { fromJid, normalizePhone, toJid } from "../worker/src/channels/phone";
 import { ChannelService } from "../worker/src/channels/service";
 import { SandboxDriver } from "../worker/src/channels/sandbox";
@@ -63,6 +63,53 @@ async function main() {
     const payload = { mimeType: "multipart/alternative", parts: [{ mimeType: "text/html", body: { data: Buffer.from("<p>html</p>").toString("base64url") } }, { mimeType: "text/plain", body: { data: Buffer.from("plain body").toString("base64url") } }] };
     check("plain text is preferred over HTML", extractPlainText(payload) === "plain body");
     check("HTML alone is flattened to text", extractPlainText({ mimeType: "text/html", body: { data: Buffer.from("<p>Hi <b>there</b></p>").toString("base64url") } }) === "Hi there");
+  }
+
+  console.log("the Gmail poll against a stubbed Gmail");
+  {
+    const realFetch = globalThis.fetch;
+    process.env.GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID ?? "id";
+    process.env.GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET ?? "secret";
+    const body = (text: string) => Buffer.from(text, "utf8").toString("base64url");
+    const calls = { list: 0, get: 0, tooMany: 1 };
+    const authed = "mx.google.com; dkim=pass header.i=@acme.in; dmarc=pass";
+    const message = (id: string) => ({
+      id,
+      threadId: `t_${id}`,
+      internalDate: String(Date.now()),
+      payload: { mimeType: "text/plain", body: { data: body(`quote ${id}`) }, headers: [{ name: "From", value: "Sales <sales@acme.in>" }, { name: "Authentication-Results", value: authed }] },
+    });
+    globalThis.fetch = (async (input: unknown) => {
+      const url = String(input);
+      const json = (o: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", ...headers } });
+      if (url.includes("oauth2.googleapis.com")) return json({ access_token: "tok", expires_in: 3600 });
+      if (url.includes("/messages?")) {
+        calls.list++;
+        if (calls.tooMany > 0) {
+          calls.tooMany--;
+          return json({ error: { message: "rate limited" } }, 429, { "retry-after": "0" });
+        }
+        return json({ messages: [{ id: "m1", threadId: "t_m1" }, { id: "m2", threadId: "t_m2" }] });
+      }
+      const id = /\/messages\/(\w+)/.exec(url)?.[1];
+      if (id) {
+        calls.get++;
+        return json(message(id));
+      }
+      return json({}, 404);
+    }) as typeof fetch;
+    try {
+      const gmail = new GmailDriver({ refresh_token: "r", email: "me@shop.in" });
+      const first = await gmail.poll();
+      check("a rate-limited list call is retried instead of failing the poll", first.length === 2 && calls.list === 2, `${first.length} messages, ${calls.list} list calls`);
+      for (const m of first) gmail.ack(m.externalId); // what the service does once a message is filed
+      const fetchedAfterFirst = calls.get;
+      const second = await gmail.poll();
+      check("messages already filed are not downloaded again", calls.get === fetchedAfterFirst, `${calls.get - fetchedAfterFirst} refetched`);
+      check("and are not handed to the service a second time", second.length === 0, `${second.length} returned`);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   }
 
   console.log("phone numbers");
@@ -134,6 +181,55 @@ async function main() {
     check("a customer who did not opt in is not messaged first", blocked);
     await live.send({ kind: "buyer", customerId: optedIn.id, body: "offer" });
     check("one who did opt in is", wa.sent.length === 1 && wa.sent[0].to === "+919000000001");
+
+    console.log("a failed record never causes a second send");
+    {
+      // A database whose writes to `messages` fail a set number of times, so the
+      // email goes out but recording it does not work (yet).
+      const flaky = (failures: number) => {
+        let left = failures;
+        return new Proxy(db, {
+          get(target, prop, receiver) {
+            if (prop !== "from") return Reflect.get(target, prop, receiver);
+            return (table: string) => {
+              const real = target.from(table as never);
+              if (table !== "messages") return real;
+              return new Proxy(real, {
+                get(rt, p2, rr) {
+                  if (p2 !== "insert") return Reflect.get(rt, p2, rr);
+                  return (...args: unknown[]) => {
+                    const row = args[0] as { direction?: string };
+                    if (row?.direction === "out" && left > 0) {
+                      left--;
+                      return { select: () => ({ single: async () => ({ data: null, error: { message: "injected failure" } }) }) };
+                    }
+                    return Reflect.apply(rt.insert as (...a: unknown[]) => unknown, rt, args);
+                  };
+                },
+              });
+            };
+          },
+        });
+      };
+      const sends = email; // same fake as above, so its message ids keep increasing
+      const base = sends.sent.length;
+      const svc = (failures: number) => new ChannelService(flaky(failures) as never, m.id, "live", new Map<Channel, ChannelDriver>([["sandbox", new SandboxDriver()], ["email", sends]]));
+
+      const recovered = await svc(2).send({ kind: "vendor", vendorId: real.id, subject: "Again", body: "second try" });
+      check("a record that fails twice and then works is retried, and the message is sent once", sends.sent.length - base === 1 && !!recovered.messageId, `${sends.sent.length - base} sent`);
+
+      const base2 = sends.sent.length;
+      let threw = false;
+      let result: { messageId: string | null } | null = null;
+      try {
+        result = await svc(99).send({ kind: "vendor", vendorId: real.id, subject: "Third", body: "third try" });
+      } catch {
+        threw = true;
+      }
+      check("a record that never works does not make the send look failed", !threw && result !== null, "the send call threw");
+      check("and the message was still sent only once", sends.sent.length - base2 === 1, `${sends.sent.length} sent`);
+      check("the result says the record is missing", result?.messageId === null);
+    }
 
     console.log("what inbound mail is kept");
     email.queue = [

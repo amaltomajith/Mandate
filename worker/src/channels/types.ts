@@ -38,6 +38,8 @@ export type SandboxContext =
   | { kind: "other"; counterparty: string; round: number };
 
 export interface ChannelDriver {
+  /** Told that a polled message was dealt with (filed or deliberately ignored), so it is not fetched again. */
+  ack?(externalId: string): void;
   channel: Channel;
   /** False for the sandbox: nothing it sends reaches a real person. */
   live: boolean;

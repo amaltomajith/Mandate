@@ -51,7 +51,7 @@ export class ChannelService {
     return d;
   }
 
-  async send(opts: SendOptions): Promise<{ threadId: string; messageId: string; replies: number }> {
+  async send(opts: SendOptions): Promise<{ threadId: string; messageId: string | null; replies: number }> {
     const db = this.db;
     let counterparty: string;
     let address: string;
@@ -148,22 +148,36 @@ export class ChannelService {
       context: opts.sandbox ? ({ ...opts.sandbox, counterparty, notes, round } as SandboxContext) : undefined,
     });
 
-    const { data: out, error: msgError } = await db
-      .from("messages")
-      .insert({
-        merchant_id: this.merchantId,
-        thread_id: thread.id,
-        direction: "out",
-        body: opts.body.slice(0, MAX_BODY),
-        external_id: result.externalId,
-        untrusted: false,
-        handled: true,
-        agent_run_id: opts.runId ?? null,
-        simulated: !driver.live,
-      })
-      .select("id")
-      .single();
-    if (msgError) throw new Error(msgError.message);
+    // The message has now left. Recording it is bookkeeping, and a failure here
+    // must not make the call look as if it failed: the caller would send it again,
+    // and a supplier would get the same email twice. So the record is retried a few
+    // times, and if it still cannot be written the send is reported as done (with
+    // no message id) and the gap is logged loudly.
+    let out: { id: string } | null = null;
+    let lastError = "";
+    for (let attempt = 0; attempt < 3 && !out; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 200 * 4 ** (attempt - 1)));
+      const { data, error: msgError } = await db
+        .from("messages")
+        .insert({
+          merchant_id: this.merchantId,
+          thread_id: thread.id,
+          direction: "out",
+          body: opts.body.slice(0, MAX_BODY),
+          external_id: result.externalId,
+          untrusted: false,
+          handled: true,
+          agent_run_id: opts.runId ?? null,
+          simulated: !driver.live,
+        })
+        .select("id")
+        .single();
+      if (msgError) lastError = msgError.message;
+      else out = data;
+    }
+    if (!out) {
+      console.error(`[channels] a message to ${counterparty} WAS SENT (external id ${result.externalId ?? "none"}) but could not be recorded: ${lastError}`);
+    }
 
     await db
       .from("threads")
@@ -175,7 +189,7 @@ export class ChannelService {
       await this.recordInbound(driver, r, thread);
       replies++;
     }
-    return { threadId: thread.id, messageId: out.id, replies };
+    return { threadId: thread.id, messageId: out?.id ?? null, replies };
   }
 
   /** Stores an inbound message. Always untrusted, always unhandled until an agent acts on it. */
@@ -212,8 +226,12 @@ export class ChannelService {
       }
       for (const msg of inbound) {
         const thread = await this.threadFor(driver, msg);
-        if (!thread) continue;
+        if (!thread) {
+          driver.ack?.(msg.externalId); // a stranger: deliberately ignored, not worth fetching again
+          continue;
+        }
         await this.recordInbound(driver, msg, thread);
+        driver.ack?.(msg.externalId); // only after it is safely filed
         n++;
       }
     }
