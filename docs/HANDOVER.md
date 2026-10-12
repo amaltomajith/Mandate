@@ -266,13 +266,22 @@ npm run verify            # typecheck + lint + everything
 | verify-wall | 43 | signatures, replay, payee/margin/budget/caps, PO and refund ownership, currency, kill switches, dry run, idempotency |
 | verify-worker | 19 | heartbeat vs reaping, prompt shutdown, merchant backoff, worker pulse, log lines (needs the app running) |
 | verify-manual | 30 | queue, wallet moves only on confirm, double-confirm and cross-tenant refused, cancel releases budget |
-| verify-buying | 35 | quote to order to approval to payout to confirmation; hostile and unprofitable suppliers |
+| verify-buying | 40 | quote to order to approval to payout to confirmation; hostile and unprofitable suppliers |
 | verify-selling | 28 | clearance ladder, opt-in only, haggling, links, a buyer pushing the price to Rs 1 |
 | verify-webhook | 18 | signature, idempotency, sales, payout failures, out-of-order events |
 | verify-loop | 13 | slow stock funds the restock end to end |
+| verify-owner | 43 | owner on WhatsApp: spoofed number ignored, approval codes hashed, expiring, single-use, lockout, ceiling, parallel approvals |
+| verify-voice | 44 | voice notes transcribed, injected instructions inert, a quote from a voice note is a draft until confirmed in writing |
+| verify-negotiation | 41 | every outgoing claim checked against the records; one truthful best-and-final round |
+| verify-credit | 39 | khata: per-customer limit and overall cap in SQL under parallel sales, exactly-once payments, credit is not revenue |
+| verify-collections | 26 | polite, rate-limited reminders, then the owner is told once |
+| verify-reconcile | 32 | bank statement parsing, conservative matching, ambiguity never guessed, re-upload idempotent, tenant-isolated |
+| verify-timemachine | 21 | replay of past decisions under draft guardrails, running totals, honest about what cannot be replayed |
+| verify-receiving | 38 | atomic goods-received, short/late/dearer deliveries, scorecard, festival buffer |
+| verify-gst | 29 | tax arithmetic, CSV formula safety, sales and purchase registers |
 
-**Total: 407 checks** (offline 221, online 186). All passing on 2026-10-12 after the hardening pass in
-section 14, together with `tsc` (app and worker), `eslint`, `next build` and `npm audit` (0 vulnerabilities).
+**Total: 725 checks** (offline 534, online 191). All passing on 2026-10-12 after the hardening pass in
+section 14 and the feature phases in section 15, together with `tsc` (app and worker), `eslint`, `next build` and `npm audit` (0 vulnerabilities).
 `.github/workflows/ci.yml` runs typecheck and lint always, and `verify:offline` when the `TEST_SUPABASE_*`
 secrets are set; the online suites stay manual (they need a running app and make real model calls).
 
@@ -293,7 +302,7 @@ secrets are set; the online suites stay manual (they need a running app and make
   registered business account (not available during development, hence manual payout mode).
 - **WhatsApp:** pairing was verified up to a QR from WhatsApp's servers; a full scan, send and receive
   needs a real phone and number. Baileys is unofficial; use a dedicated number.
-- **Manual payouts:** the reference is not verified against any bank.
+- **Manual payouts:** the reference is verified only when a bank statement is uploaded and a line matches (section 15, Phase 5); until then it is the merchant's word.
 - **Free-tier Supabase pauses after a week idle** ("fetch failed" on the dashboard); restore the project.
   Worker polling keeps an active account awake.
 - **Windows:** git needs `-c safe.directory='*'` here; in shell scripts avoid apostrophes in heredocs
@@ -337,3 +346,27 @@ loading skeleton that matches the rail layout, Settings reachable on phones, a f
 on the alerts bell, a skip link, `--muted-2` raised to AA contrast, the refresher paused while the tab is
 hidden, and `optimizePackageImports` for icons and motion. A Supabase query is lazy: it is only sent when
 awaited or `.then`-ed, which is why the worker heartbeat uses `.then(...)`.
+
+## 15. Feature phases 1 to 5 (2026-10-12)
+
+Each began as a failing `scripts/verify-*.ts` check. Migrations 0031 to 0036. Nothing here can bypass the
+Payment Wall: no new money path was added, and credit was deliberately kept out of the wall (below).
+
+| Phase | What it does | Where |
+|---|---|---|
+| 1 Owner on WhatsApp | Only the merchant's own verified number is the owner. Morning briefing; held payouts offered with a 6-digit code (hashed, 10 minutes, once; 5 wrong codes lock the channel 10 minutes); a payout above the owner's ceiling is never offered; approval runs through `approveEscalationCore` under the merchant lock. | 0031, `worker/src/owner/owner.ts`, `channels/service.ts`, Connections tab |
+| 2 Voice notes | WhatsApp audio is transcribed with Groq Whisper (free tier, needs `GROQ_API_KEY`), tagged `[Voice note]`, Hindi kept with an English reading. A quote from a voice note is a draft (`quotes.via_voice`) until the supplier confirms in writing. Owner approvals by voice are refused. | 0032, `worker/src/voice/transcribe.ts`, `agents/quotes.ts`, `buying.ts` |
+| 3 No-lie negotiation | `checkClaims` gates every message to a supplier: a claimed competing offer must match a real, lower, usable quote; amounts and percentages must match; no other supplier is named; pressure phrases are refused. One best-and-final round per product (14-day repeat). | `worker/src/agents/claims.ts`, `mcp/channels.ts`, `buying.ts` |
+| 4 Khata | Credit extended only by the merchant, never an agent. Per-customer limit and overall cap enforced in SQL under row locks. A credit sale lowers stock but is not wallet money or revenue (`credit_` payment ids are excluded from revenue); the payment becomes a wallet credit. Reminders: at most 3, 3 days apart, then the owner is told once. | 0033, `src/lib/credit.ts`, `agents/collections.ts`, Sales tab |
+| 5a Bank reconciliation | Upload a bank CSV; payouts are marked verified only on a reference-plus-amount or unique amount-and-date match; ambiguity is reported; unseen confirmed payouts alert once; never auto-confirms. | 0034, `src/lib/reconcile.ts` |
+| 5b Policy time machine | Replays the last 30 days of recorded decisions under draft guardrails with the real evaluator; payout budget, margin, trust, payee and catalog rules are named as not replayed. | `src/lib/policy/timeMachine.ts`, Guardrails tab |
+| 5c Goods received | `receive_purchase_order` records what arrived atomically; scores the delivery and moves `vendors.reliability` (already the Buying agent's tie-break); optional festival lead-time buffer. | 0035, `src/lib/receiving.ts`, `festivals.ts` |
+| 5d GST registers | Sales (prices GST-inclusive) and purchases (prices excluding GST) CSV by period in India time; flags missing rate, HSN or GSTIN instead of guessing. | 0036, `src/lib/gst.ts`, `/api/export/gst` |
+
+**Deviation from the plan:** credit is not a wall rule. Action and rule types are fixed in the database and read
+in many places, so a new type would have touched the whole money path. Credit is instead gated by SQL
+functions the agents cannot call, and only a signed-in person can extend it.
+
+**Not verified:** real Groq transcription and real WhatsApp voice-note download (stubbed), live Gmail,
+WhatsApp and RazorpayX, reduced-motion emulation. Festival dates are approximate and need extending yearly.
+The best-and-final recording check once failed on a reworded message and was made independent of wording.
