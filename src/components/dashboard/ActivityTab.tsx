@@ -10,7 +10,32 @@ import { Drawer, Segmented } from "./motion";
 import { TimeAgo } from "./TimeAgo";
 import { TransactionsView } from "./TransactionsView";
 
-type View = "decisions" | "conversations";
+type View = "decisions" | "conversations" | "changes";
+
+const FIELD_LABEL: Record<string, string> = {
+  agents_enabled: "Team switch",
+  dry_run: "Dry run",
+  channel_mode: "Sandbox or live",
+  payout_mode: "How suppliers are paid",
+  whatsapp_enabled: "WhatsApp",
+  max_single_payout_paise: "Largest single payout",
+  approval_threshold_paise: "Approval amount",
+  min_margin_bps: "Minimum margin",
+  weekly_payout_budget_paise: "Weekly restock budget",
+  payout_budget_pct: "Share of sales to spend",
+  starting_float_paise: "Starting float",
+  require_approved_vendors: "Only approved suppliers",
+};
+
+function showValue(field: string, v: string | null): string {
+  if (v === null) return "not set";
+  if (field.endsWith("_paise")) return `₹${(Number(v) / 100).toLocaleString("en-IN")}`;
+  if (field === "min_margin_bps") return `${Number(v) / 100}%`;
+  if (field === "payout_budget_pct") return `${v}%`;
+  if (v === "true") return "on";
+  if (v === "false") return "off";
+  return v;
+}
 
 /**
  * Everything the team did, with nothing hidden: every proposed action and what
@@ -51,6 +76,7 @@ export function ActivityTab({
           options={[
             { value: "decisions", label: "Decisions", count: traces.length },
             { value: "conversations", label: "Conversations", count: coo.threads.length },
+            { value: "changes", label: "Changes", count: coo.configEvents.length },
           ]}
         />
         <a
@@ -62,7 +88,31 @@ export function ActivityTab({
         </a>
       </div>
 
-      {view === "decisions" ? (
+      {view === "changes" ? (
+        <section className="surface p-7">
+          {coo.configEvents.length === 0 ? (
+            <EmptyState text="No changes yet." hint="Every change to a limit or switch is recorded here, with who made it." />
+          ) : (
+            <ul className="divide-y" style={{ borderColor: "var(--hairline)" }}>
+              {coo.configEvents.map((e) => (
+                <li key={e.id} className="flex flex-wrap items-center justify-between gap-3 py-4">
+                  <div>
+                    <p className="text-[16px] font-medium">{FIELD_LABEL[e.field] ?? e.field}</p>
+                    <p className="mt-0.5 text-[14px]" style={{ color: "var(--muted)" }}>
+                      {showValue(e.field, e.old_value)} to {showValue(e.field, e.new_value)}
+                    </p>
+                  </div>
+                  <p className="text-right text-[13px]" style={{ color: "var(--muted-2)" }}>
+                    {e.actor}
+                    <br />
+                    <TimeAgo iso={e.created_at} />
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : view === "decisions" ? (
         <TransactionsView traces={traces} agents={agents} customers={customers} rules={rules} onJumpToRule={onJumpToRule} />
       ) : (
         <section className="surface p-7">

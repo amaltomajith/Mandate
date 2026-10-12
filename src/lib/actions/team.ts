@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireDashboardUser } from "./authGuard";
 import { getCurrentMerchant } from "@/lib/merchant";
 import { getSettings } from "@/lib/settings";
+import { changedFields, logConfigChange } from "@/lib/configLog";
 import { applyGuardrails } from "@/lib/policy/guardrails";
 import { clearSampleStore, loadSampleStore } from "@/lib/sample";
 import { simulateSandboxPayment } from "@/lib/sales";
@@ -18,8 +19,24 @@ import { simulateSandboxPayment } from "@/lib/sales";
  */
 
 async function scope() {
-  await requireDashboardUser();
-  return { merchant: await getCurrentMerchant(), db: createAdminClient() };
+  const user = await requireDashboardUser();
+  return { user, merchant: await getCurrentMerchant(), db: createAdminClient() };
+}
+
+/**
+ * Updates merchant_settings and records who changed what. One path for every
+ * setting that bounds the team, so none of them can change without a record.
+ */
+async function updateSettings(patch: Record<string, unknown>): Promise<{ merchantId: string; db: ReturnType<typeof createAdminClient> }> {
+  const { user, merchant, db } = await scope();
+  const before = (await getSettings(db, merchant.id)) as unknown as Record<string, unknown>;
+  const { error } = await db
+    .from("merchant_settings")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq("merchant_id", merchant.id);
+  if (error) throw new Error(error.message);
+  await logConfigChange(db as never, merchant.id, user.email, changedFields(before, { ...before, ...patch }, Object.keys(patch)));
+  return { merchantId: merchant.id, db };
 }
 
 const Rupees = z.number().finite().min(0).max(10_000_000_000);
@@ -40,65 +57,49 @@ export type GuardrailInput = z.infer<typeof GuardrailInput>;
  * them. The numbers are the whole interface: no rule types, no JSON.
  */
 export async function updateGuardrails(input: GuardrailInput): Promise<void> {
-  const { merchant, db } = await scope();
   const v = GuardrailInput.parse(input);
   if (v.approvalThresholdRupees > v.maxSinglePayoutRupees) {
     // An approval threshold above the hard cap would never fire: every payout big
     // enough to need approval would already be refused outright.
     throw new Error("The approval amount can't be higher than the largest single payout, or it would never ask you.");
   }
-  const { error } = await db
-    .from("merchant_settings")
-    .update({
-      max_single_payout_paise: Math.round(v.maxSinglePayoutRupees * 100),
-      approval_threshold_paise: Math.round(v.approvalThresholdRupees * 100),
-      min_margin_bps: Math.round(v.minMarginPercent * 100),
-      weekly_payout_budget_paise: Math.round(v.weeklyBudgetRupees * 100),
-      payout_budget_pct: Math.round(v.budgetPercentOfRevenue),
-      starting_float_paise: Math.round(v.startingFloatRupees * 100),
-      require_approved_vendors: v.requireApprovedVendors,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("merchant_id", merchant.id);
-  if (error) throw new Error(error.message);
-  await applyGuardrails(db, merchant.id, await getSettings(db, merchant.id));
+  const { merchantId, db } = await updateSettings({
+    max_single_payout_paise: Math.round(v.maxSinglePayoutRupees * 100),
+    approval_threshold_paise: Math.round(v.approvalThresholdRupees * 100),
+    min_margin_bps: Math.round(v.minMarginPercent * 100),
+    weekly_payout_budget_paise: Math.round(v.weeklyBudgetRupees * 100),
+    payout_budget_pct: Math.round(v.budgetPercentOfRevenue),
+    starting_float_paise: Math.round(v.startingFloatRupees * 100),
+    require_approved_vendors: v.requireApprovedVendors,
+  });
+  await applyGuardrails(db, merchantId, await getSettings(db, merchantId));
   revalidatePath("/dashboard");
 }
 
 export async function setTeamEnabled(enabled: boolean): Promise<void> {
-  const { merchant, db } = await scope();
-  const { error } = await db.from("merchant_settings").update({ agents_enabled: enabled, updated_at: new Date().toISOString() }).eq("merchant_id", merchant.id);
-  if (error) throw new Error(error.message);
+  await updateSettings({ agents_enabled: enabled });
   revalidatePath("/dashboard");
 }
 
 export async function setDryRun(on: boolean): Promise<void> {
-  const { merchant, db } = await scope();
-  const { error } = await db.from("merchant_settings").update({ dry_run: on, updated_at: new Date().toISOString() }).eq("merchant_id", merchant.id);
-  if (error) throw new Error(error.message);
+  await updateSettings({ dry_run: on });
   revalidatePath("/dashboard");
 }
 
 export async function setChannelMode(rawMode: "sandbox" | "live"): Promise<void> {
   const mode = parse(ChannelModeSchema, rawMode, "The mode");
-  const { merchant, db } = await scope();
-  const { error } = await db.from("merchant_settings").update({ channel_mode: mode, updated_at: new Date().toISOString() }).eq("merchant_id", merchant.id);
-  if (error) throw new Error(error.message);
+  await updateSettings({ channel_mode: mode });
   revalidatePath("/dashboard");
 }
 
 export async function setPayoutMode(rawMode: "auto" | "manual"): Promise<void> {
   const mode = parse(PayoutModeSchema, rawMode, "The payout mode");
-  const { merchant, db } = await scope();
-  const { error } = await db.from("merchant_settings").update({ payout_mode: mode, updated_at: new Date().toISOString() }).eq("merchant_id", merchant.id);
-  if (error) throw new Error(error.message);
+  await updateSettings({ payout_mode: mode });
   revalidatePath("/dashboard");
 }
 
 export async function setWhatsAppEnabled(on: boolean): Promise<void> {
-  const { merchant, db } = await scope();
-  const { error } = await db.from("merchant_settings").update({ whatsapp_enabled: on, updated_at: new Date().toISOString() }).eq("merchant_id", merchant.id);
-  if (error) throw new Error(error.message);
+  await updateSettings({ whatsapp_enabled: on });
   revalidatePath("/dashboard");
 }
 

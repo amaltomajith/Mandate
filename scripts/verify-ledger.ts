@@ -13,6 +13,7 @@ import { ensureWorkspace } from "../src/lib/workspace";
 import { walletBalancePaise } from "../src/lib/ledger";
 import { recordCapturedPayment } from "../src/lib/sales";
 import { getCooData } from "../src/lib/cooData";
+import { changedFields, logConfigChange } from "../src/lib/configLog";
 import { cancelManualPayout, confirmManualPayout } from "../src/lib/manualPayouts";
 
 const db = createAdminClient() as unknown as SupabaseClient;
@@ -129,6 +130,20 @@ async function main() {
       const mine = coo.payees.filter((p) => p.display_name === "Leak Co");
       check("the payee is there for the dashboard", mine.length === 1);
       check("but its encrypted payment details are not", JSON.stringify(coo).includes("CIPHERTEXT-MUST-NOT-LEAVE-THE-SERVER") === false);
+    }
+
+    console.log("configuration changes are recorded");
+    {
+      const diff = changedFields({ a: 1, b: "x", c: true }, { a: 2, b: "x", c: false }, ["a", "b", "c"]);
+      check("only fields that changed are listed", diff.length === 2 && diff.map((d) => d.field).join() === "a,c", JSON.stringify(diff));
+      check("with the old and new value", diff[0].from === "1" && diff[0].to === "2");
+      check("nothing changed means nothing to record", changedFields({ a: 1 }, { a: 1 }, ["a"]).length === 0);
+      await logConfigChange(db, m.id, "owner@shop.in", diff);
+      await logConfigChange(db, m.id, "owner@shop.in", []);
+      const { data: events } = await db.from("config_events").select("*").eq("merchant_id", m.id).order("field");
+      check("each change is stored with who made it", (events ?? []).length === 2 && events![0].actor === "owner@shop.in" && events![0].field === "a" && events![0].old_value === "1" && events![0].new_value === "2", JSON.stringify(events));
+      const { data: theirs } = await db.from("config_events").select("id").eq("merchant_id", other!.id);
+      check("and are not visible under another merchant", (theirs ?? []).length === 0);
     }
 
     console.log("paying by hand, confirmed twice at once");

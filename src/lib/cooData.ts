@@ -39,6 +39,15 @@ export interface Kpis {
   openApprovals: number;
 }
 
+export interface ConfigEventRow {
+  id: string;
+  actor: string;
+  field: string;
+  old_value: string | null;
+  new_value: string | null;
+  created_at: string;
+}
+
 export interface CooData {
   settings: MerchantSettings;
   insights: ProductInsight[];
@@ -54,6 +63,8 @@ export interface CooData {
   messages: Message[];
   runs: AgentRun[];
   connections: SafeConnection[];
+  /** Who changed which setting, newest first. */
+  configEvents: ConfigEventRow[];
   kpis: Kpis;
   /** When an agent last ran, as a heartbeat for the worker. Null if never. */
   lastRunAt: string | null;
@@ -93,6 +104,15 @@ export async function getCooData(db: SupabaseClient, merchantId: string): Promis
     : { data: [], error: null };
   if (messages.error) throw new Error(messages.error.message);
 
+  // The changes log is untyped in the generated database types, so read it untyped.
+  const configEvents = await (db as unknown as SupabaseClient)
+    .from("config_events")
+    .select("id, actor, field, old_value, new_value, created_at")
+    .eq("merchant_id", merchantId)
+    .order("created_at", { ascending: false })
+    .limit(60);
+  if (configEvents.error) throw new Error(configEvents.error.message);
+
   // Real sales only: sample sales never fund anything, so they are not "earned".
   const real = (sales.data ?? []).filter((s) => !(s.razorpay_payment_id ?? "").startsWith("sample_"));
   const earned7d = real.filter((s) => s.captured_at >= since7).reduce((n, s) => n + Number(s.amount_paise), 0);
@@ -124,6 +144,7 @@ export async function getCooData(db: SupabaseClient, merchantId: string): Promis
     connections: (connections.data ?? []) as SafeConnection[],
     lastRunAt: runs.data?.[0]?.started_at ?? null,
     workerIdle: !runs.data?.[0] || Date.now() - new Date(runs.data[0].started_at).getTime() > 15 * 60_000,
+    configEvents: (configEvents.data ?? []) as ConfigEventRow[],
     kpis: {
       walletPaise: balance,
       earned7dPaise: earned7d,
