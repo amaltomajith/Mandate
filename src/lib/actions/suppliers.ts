@@ -9,7 +9,9 @@ import { createFundAccount, maskPayee, validatePayeeDetails, type PayeeDetails }
 import type { Channel } from "@/types/db";
 import { getSettings } from "@/lib/settings";
 import { encryptJson } from "@/lib/secrets";
-import { IdSchema, PayeeNameSchema, VendorInputSchema, VendorStatusSchema, parse } from "./schemas";
+import { z } from "zod";
+import { receivePurchaseOrder } from "@/lib/receiving";
+import { IdSchema, PayeeNameSchema, ReceiveSchema, VendorInputSchema, VendorStatusSchema, parse } from "./schemas";
 
 /**
  * Suppliers and who may be paid.
@@ -175,29 +177,15 @@ export async function revokePayee(rawId: string): Promise<void> {
   revalidatePath("/dashboard");
 }
 
-/** Goods arrived: add the ordered quantities to stock and close the order. */
-export async function markPurchaseOrderReceived(rawPoId: string): Promise<void> {
-  const poId = parse(IdSchema, rawPoId, "The order id");
-  const { merchant, db } = await scope();
-  const { data: po } = await db.from("purchase_orders").select("id, status").eq("id", poId).eq("merchant_id", merchant.id).maybeSingle();
-  if (!po) throw new Error("Unknown purchase order.");
-  if (po.status !== "paid" && po.status !== "approved") throw new Error("Only an order that has been paid for can be marked received.");
-
-  // Claim first, then add stock, so a double click cannot add it twice.
-  const { data: claimed } = await db
-    .from("purchase_orders")
-    .update({ status: "received", received_at: new Date().toISOString() })
-    .eq("id", poId)
-    .eq("merchant_id", merchant.id)
-    .in("status", ["paid", "approved"])
-    .select("id");
-  if (!claimed?.length) return;
-
-  const { data: lines } = await db.from("po_lines").select("product_id, qty").eq("po_id", poId).eq("merchant_id", merchant.id);
-  for (const l of lines ?? []) {
-    const { data: p } = await db.from("products").select("stock_qty").eq("id", l.product_id).eq("merchant_id", merchant.id).single();
-    if (p) await db.from("products").update({ stock_qty: p.stock_qty + l.qty }).eq("id", l.product_id).eq("merchant_id", merchant.id);
-  }
+/**
+ * Goods arrived. Records what actually came (default: all of it, at the agreed
+ * price), adds that to stock atomically, and scores the supplier on it.
+ */
+export async function markPurchaseOrderReceived(raw: z.infer<typeof ReceiveSchema> | string): Promise<void> {
+  const v = parse(ReceiveSchema, typeof raw === "string" ? { poId: raw } : raw, "The delivery");
+  const { user, merchant, db } = await scope();
+  const r = await receivePurchaseOrder(db as never, merchant.id, v.poId, v.lines ?? [], user.email, v.note);
+  if (!r.ok && r.reason !== "already_received") throw new Error(r.message);
   revalidatePath("/dashboard");
 }
 
@@ -210,6 +198,15 @@ export async function cancelPurchaseOrder(rawPoId: string): Promise<void> {
     .eq("id", poId)
     .eq("merchant_id", merchant.id)
     .in("status", ["draft", "quoting", "awaiting_approval"]);
+  if (error) throw new Error(error.message);
+  revalidatePath("/dashboard");
+}
+
+/** Allow extra lead-time days around major festivals, when suppliers run slow. */
+export async function setFestivalBuffer(on: boolean): Promise<void> {
+  const { merchant, db } = await scope();
+  if (typeof on !== "boolean") throw new Error("That was not a yes or no.");
+  const { error } = await db.from("merchant_settings").update({ festival_buffer: on, updated_at: new Date().toISOString() }).eq("merchant_id", merchant.id);
   if (error) throw new Error(error.message);
   revalidatePath("/dashboard");
 }

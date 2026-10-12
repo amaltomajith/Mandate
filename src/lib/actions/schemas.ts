@@ -50,6 +50,16 @@ export const CreditPaymentSchema = z.object({
   ref: z.string().trim().max(80).optional(),
 });
 
+export const ReceiveSchema = z.object({
+  poId: z.uuid(),
+  /** Left out, everything arrived as ordered. */
+  lines: z
+    .array(z.object({ productId: z.uuid(), receivedQty: z.number().int().min(0).max(1_000_000), unitPricePaise: z.number().int().min(1).max(100_000_000_00).optional() }))
+    .max(200)
+    .optional(),
+  note: z.string().trim().max(500).optional(),
+});
+
 const optionalText = (max: number) => z.string().trim().max(max).optional();
 
 export const VendorInputSchema = z.object({

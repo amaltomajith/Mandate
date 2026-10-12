@@ -743,6 +743,7 @@ export interface Database {
           payout_budget_pct: number;
           starting_float_paise: number;
           payout_mode: "auto" | "manual";
+          festival_buffer: boolean;
           require_approved_vendors: boolean;
           agents_enabled: boolean;
           dry_run: boolean;
@@ -765,6 +766,7 @@ export interface Database {
           payout_budget_pct?: number;
           starting_float_paise?: number;
           payout_mode?: "auto" | "manual";
+          festival_buffer?: boolean;
           require_approved_vendors?: boolean;
           agents_enabled?: boolean;
           dry_run?: boolean;

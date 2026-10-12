@@ -12,6 +12,7 @@ import {
   deleteVendor,
   markPurchaseOrderReceived,
   revokePayee,
+  setFestivalBuffer,
   saveVendor,
   setVendorStatus,
 } from "@/lib/actions/suppliers";
@@ -55,6 +56,16 @@ export function SuppliersTab({ coo }: { coo: CooData }) {
   const [adding, setAdding] = useState(false);
   const [payeeFor, setPayeeFor] = useState<string | null>(null);
   const [showQuotes, setShowQuotes] = useState(false);
+  const [receiving, setReceiving] = useState<string | null>(null);
+  const [rf, setRf] = useState<Record<string, { qty: string; price: string }>>({});
+  const [rnote, setRnote] = useState("");
+  const receivingLines = receiving ? coo.poLines.filter((l) => l.po_id === receiving) : [];
+  const startReceiving = (poId: string) => {
+    clear();
+    setRnote("");
+    setRf(Object.fromEntries(coo.poLines.filter((l) => l.po_id === poId).map((l) => [l.product_id, { qty: String(l.qty), price: "" }])));
+    setReceiving(poId);
+  };
 
   const candidates = coo.vendors.filter((v) => v.status === "candidate");
   const vendors = coo.vendors.filter((v) => v.status !== "candidate");
@@ -245,7 +256,7 @@ export function SuppliersTab({ coo }: { coo: CooData }) {
                     )}
                     <span className="ml-auto flex gap-3">
                       {(po.status === "paid" || po.status === "approved") && (
-                        <SuccessButton disabled={pending} onClick={() => run(() => markPurchaseOrderReceived(po.id))}>
+                        <SuccessButton disabled={pending} onClick={() => startReceiving(po.id)}>
                           Mark received
                         </SuccessButton>
                       )}
@@ -309,6 +320,99 @@ export function SuppliersTab({ coo }: { coo: CooData }) {
           </div>
         )}
       </section>
+
+      <Panel
+        title="How suppliers have delivered"
+        description="Built from the deliveries you record. A supplier who is short or late loses ties to one who is not."
+        icon={<Icons.CheckCircle />}
+        accent="var(--entity-agent)"
+        action={
+          <GhostButton disabled={pending} onClick={() => run(() => setFestivalBuffer(!coo.settings.festival_buffer))}>
+            {coo.settings.festival_buffer ? "Festival buffer: on" : "Festival buffer: off"}
+          </GhostButton>
+        }
+      >
+        {coo.festivalNote && (
+          <p className="mb-4 rounded-[12px] bg-white/[0.04] px-4 py-3 text-[14px] leading-6" style={{ color: "var(--muted)" }}>
+            {coo.festivalNote}. Lead times are being lengthened, so restocks are asked for earlier.
+          </p>
+        )}
+        {coo.scorecards.length === 0 ? (
+          <EmptyState text="No deliveries recorded yet." hint="Mark an order received and the supplier's record starts here." />
+        ) : (
+          <Table head={["Supplier", "Orders", "On time", "Arrived", "Price vs agreed", "Score"]}>
+            {coo.scorecards.map((c) => (
+              <tr key={c.vendorId}>
+                <td className="text-[15px] font-medium">{c.name}</td>
+                <td className="num">{c.orders}</td>
+                <td className="num">{c.onTimePct}%</td>
+                <td className="num">{c.fillPct}%</td>
+                <td className="num" style={{ color: c.avgDriftBps > 200 ? "var(--decision-block)" : undefined }}>
+                  {c.avgDriftBps === 0 ? "as agreed" : `${c.avgDriftBps > 0 ? "+" : ""}${(c.avgDriftBps / 100).toFixed(1)}%`}
+                </td>
+                <td>
+                  <Pill color={c.reliability >= 70 ? "var(--decision-allow)" : c.reliability >= 45 ? "var(--decision-escalate)" : "var(--decision-block)"}>{c.reliability}</Pill>
+                </td>
+              </tr>
+            ))}
+          </Table>
+        )}
+      </Panel>
+
+      <Drawer
+        open={receiving !== null}
+        onClose={() => setReceiving(null)}
+        title="Record the delivery"
+        description="Type what actually arrived. Only that is added to your stock."
+        footer={
+          <div className="flex gap-3">
+            <SuccessButton
+              disabled={pending}
+              onClick={() =>
+                run(async () => {
+                  if (!receiving) return;
+                  await markPurchaseOrderReceived({
+                    poId: receiving,
+                    lines: receivingLines.map((l) => {
+                      const row = rf[l.product_id] ?? { qty: String(l.qty), price: "" };
+                      const price = Math.round(parseFloat(row.price) * 100);
+                      return { productId: l.product_id, receivedQty: Math.max(0, Math.floor(Number(row.qty) || 0)), ...(Number.isFinite(price) && price > 0 ? { unitPricePaise: price } : {}) };
+                    }),
+                    note: rnote || undefined,
+                  });
+                  setReceiving(null);
+                })
+              }
+            >
+              {pending ? "Saving…" : "Add to stock"}
+            </SuccessButton>
+            <GhostButton onClick={() => setReceiving(null)}>Cancel</GhostButton>
+          </div>
+        }
+      >
+        <ErrorLine error={error} />
+        <div className="space-y-5">
+          {receivingLines.map((l) => (
+            <div key={l.id} className="surface-tile p-5">
+              <p className="text-[15px] font-medium">{productName(l.product_id)}</p>
+              <p className="mb-3 text-[13px]" style={{ color: "var(--muted-2)" }}>
+                Ordered {l.qty} at {rupees(Number(l.unit_price_paise))}
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Arrived">
+                  <input className={inputClass} style={inputStyle} inputMode="numeric" value={rf[l.product_id]?.qty ?? ""} onChange={(e) => setRf({ ...rf, [l.product_id]: { qty: e.target.value.replace(/[^0-9]/g, ""), price: rf[l.product_id]?.price ?? "" } })} />
+                </Field>
+                <Field label="Invoice price each" hint="Only if it differs">
+                  <input className={inputClass} style={inputStyle} inputMode="decimal" placeholder={String(Number(l.unit_price_paise) / 100)} value={rf[l.product_id]?.price ?? ""} onChange={(e) => setRf({ ...rf, [l.product_id]: { qty: rf[l.product_id]?.qty ?? "", price: e.target.value } })} />
+                </Field>
+              </div>
+            </div>
+          ))}
+          <Field label="Note" hint="Optional, e.g. two boxes were damaged">
+            <input className={inputClass} style={inputStyle} maxLength={500} value={rnote} onChange={(e) => setRnote(e.target.value)} />
+          </Field>
+        </div>
+      </Drawer>
 
       <Drawer
         open={adding}

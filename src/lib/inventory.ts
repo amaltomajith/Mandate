@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { festivalBufferDays } from "@/lib/festivals";
 
 /**
  * Inventory economics: how fast things sell, how long stock lasts, what is
@@ -60,7 +61,9 @@ export function floorPrice(costPaise: number, minMarginBps: number): number {
 export async function getInventoryInsights(
   db: SupabaseClient,
   merchantId: string,
-  minMarginBps: number
+  minMarginBps: number,
+  /** Lengthen supplier lead times around festivals: the merchant's switch. */
+  opts: { festivalBuffer?: boolean; now?: Date } = {}
 ): Promise<ProductInsight[]> {
   const [products, stats, inbound] = await Promise.all([
     db.from("products").select("*").eq("merchant_id", merchantId).order("name"),
@@ -72,6 +75,7 @@ export async function getInventoryInsights(
 
   const statsById = new Map((stats.data ?? []).map((s) => [s.product_id as string, s]));
   const now = Date.now();
+  const buffer = opts.festivalBuffer ? festivalBufferDays(opts.now ?? new Date()).days : 0;
 
   return (products.data ?? []).map((p) => {
     const s = statsById.get(p.id);
@@ -91,16 +95,16 @@ export async function getInventoryInsights(
     if (p.stock_qty === 0) status = "stockout";
     else if (units30d === 0 && (daysSinceLastSale === null || daysSinceLastSale >= DEAD_AFTER_DAYS)) status = "dead";
     else if (cover > OVERSTOCK_COVER_DAYS) status = velocityPerDay === 0 ? "dead" : "overstock";
-    else if (velocityPerDay > 0 && cover < p.lead_time_days + SAFETY_DAYS) status = "low";
+    else if (velocityPerDay > 0 && cover < p.lead_time_days + buffer + SAFETY_DAYS) status = "low";
     else status = "healthy";
 
     const covered = velocityPerDay > 0 ? (p.stock_qty + inboundQty) / velocityPerDay : Infinity;
     const needsRestock =
       p.active &&
       velocityPerDay > 0 &&
-      (covered < p.lead_time_days + SAFETY_DAYS || p.stock_qty + inboundQty <= p.reorder_point);
+      (covered < p.lead_time_days + buffer + SAFETY_DAYS || p.stock_qty + inboundQty <= p.reorder_point);
     const reorderQty = needsRestock
-      ? Math.max(1, Math.ceil(velocityPerDay * (p.lead_time_days + RESTOCK_COVER_DAYS)) - p.stock_qty - inboundQty)
+      ? Math.max(1, Math.ceil(velocityPerDay * (p.lead_time_days + buffer + RESTOCK_COVER_DAYS)) - p.stock_qty - inboundQty)
       : 0;
 
     return {

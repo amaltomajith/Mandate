@@ -1,6 +1,8 @@
 import "server-only";
 import { getReceivables, type Receivable } from "@/lib/credit";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { getScorecards, type Scorecard } from "@/lib/receiving";
+import { festivalBufferDays } from "@/lib/festivals";
 import { deadStockValue, getInventoryInsights, type ProductInsight } from "@/lib/inventory";
 import { getSettings } from "@/lib/settings";
 import { walletBalancePaise } from "@/lib/ledger";
@@ -85,6 +87,9 @@ export interface CooData {
   creditCustomers: CreditCustomer[];
   /** Who owes what on credit. */
   receivables: Receivable[];
+  scorecards: Scorecard[];
+  /** Why restock timing is being lengthened right now, if it is. */
+  festivalNote: string | null;
   /** What the owner channel has sent, newest first; undelivered ones were only recorded (sandbox). */
   ownerMessages: OwnerMessageRow[];
   kpis: Kpis;
@@ -101,7 +106,7 @@ export async function getCooData(db: SupabaseClient, merchantId: string): Promis
   const since7 = new Date(Date.now() - 7 * DAY).toISOString();
 
   const [insights, vendors, payees, quotes, pos, lines, payouts, sales, wallet, threads, runs, connections, balance] = await Promise.all([
-    getInventoryInsights(db, merchantId, settings.min_margin_bps),
+    getInventoryInsights(db, merchantId, settings.min_margin_bps, { festivalBuffer: settings.festival_buffer }),
     db.from("vendors").select("*").eq("merchant_id", merchantId).order("created_at", { ascending: false }),
     db.from("payees").select("id, merchant_id, vendor_id, kind, display_name, masked_identifier, razorpay_contact_id, razorpay_fund_account_id, status, approved_by, approved_at, simulated, created_at").eq("merchant_id", merchantId).order("created_at", { ascending: false }),
     db.from("quotes").select("*").eq("merchant_id", merchantId).order("created_at", { ascending: false }).limit(60),
@@ -149,6 +154,7 @@ export async function getCooData(db: SupabaseClient, merchantId: string): Promis
   const customerRows = await db.from("customers").select("id, name, credit_limit_paise, credit_terms_days").eq("merchant_id", merchantId).order("name").limit(300);
   if (customerRows.error) throw new Error(customerRows.error.message);
   const receivables = await getReceivables(db, merchantId);
+  const scorecards = await getScorecards(db as unknown as SupabaseClient, merchantId);
 
   // Real sales only: sample sales never fund anything, so they are not "earned".
   // Sample sales fund nothing, and a sale on credit is not revenue until it is paid.
@@ -186,6 +192,8 @@ export async function getCooData(db: SupabaseClient, merchantId: string): Promis
     ownerMessages: (ownerMessages.data ?? []) as OwnerMessageRow[],
     creditCustomers: (customerRows.data ?? []).map((r) => ({ id: r.id, name: r.name, limitPaise: Number(r.credit_limit_paise), termsDays: r.credit_terms_days })),
     receivables,
+    scorecards,
+    festivalNote: settings.festival_buffer ? festivalBufferDays(new Date()).reason : null,
     kpis: {
       walletPaise: balance,
       earned7dPaise: earned7d,

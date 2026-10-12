@@ -63,7 +63,7 @@ export function createStoreServer(ctx: McpContext): McpServer {
   const server = new McpServer({ name: "store", version: "0.3.0" });
   const insights = async () => {
     const settings = await getSettings(ctx.db, ctx.merchantId);
-    return { settings, items: await getInventoryInsights(ctx.db, ctx.merchantId, settings.min_margin_bps) };
+    return { settings, items: await getInventoryInsights(ctx.db, ctx.merchantId, settings.min_margin_bps, { festivalBuffer: settings.festival_buffer }) };
   };
 
   server.registerTool(
