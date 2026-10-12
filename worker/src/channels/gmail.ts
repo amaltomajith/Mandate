@@ -100,13 +100,32 @@ export function stripQuoted(text: string): string {
 }
 
 /**
- * Whether Gmail itself verified the sender. A From header is just text anyone
- * can write; a message only counts as coming from a supplier if the receiving
- * server authenticated it (DKIM or DMARC pass). Without this, a forged email
- * "from" an approved supplier would be filed as that supplier's quote.
+ * Whether Gmail itself verified that the sender really is the address on the From
+ * line. A From header is just text anyone can write; a message only counts as
+ * coming from a supplier if the receiving server authenticated it.
+ *
+ * `dmarc=pass` is enough on its own: DMARC only passes when a DKIM or SPF
+ * identity is ALIGNED with the From domain. A bare `dkim=pass` is not: it only
+ * says some domain signed the message, and an attacker can sign with their own
+ * domain while putting an approved supplier's address in From. So a DKIM pass
+ * counts only when its signing domain aligns with the From domain (the same
+ * domain, or one a subdomain of the other, and never a bare top-level domain).
  */
-export function senderAuthenticated(authenticationResults: string): boolean {
-  return /\b(?:dmarc|dkim)=pass\b/i.test(authenticationResults);
+export function senderAuthenticated(authenticationResults: string, fromAddress?: string): boolean {
+  if (/\bdmarc=pass\b/i.test(authenticationResults)) return true;
+  const fromDomain = fromAddress?.split("@").pop()?.trim().toLowerCase();
+  if (!fromDomain) return false;
+  for (const m of authenticationResults.matchAll(/\bdkim=pass\b[^;]*/gi)) {
+    const id = /header\.(?:d|i)=(?:[^@\s;]*@)?([^\s;]+)/i.exec(m[0]);
+    const signer = id?.[1].toLowerCase();
+    if (signer && domainsAlign(signer, fromDomain)) return true;
+  }
+  return false;
+}
+
+function domainsAlign(a: string, b: string): boolean {
+  if (!a.includes(".") || !b.includes(".")) return false;
+  return a === b || a.endsWith(`.${b}`) || b.endsWith(`.${a}`);
 }
 
 export function parseFrom(header: string): string {
@@ -173,7 +192,7 @@ export class GmailDriver implements ChannelDriver {
       const h = (name: string) => headers.find((x) => x.name.toLowerCase() === name)?.value ?? "";
       const from = parseFrom(h("from"));
       if (!from || from === this.creds.email.toLowerCase()) continue; // our own sent mail
-      if (!senderAuthenticated(h("authentication-results"))) {
+      if (!senderAuthenticated(h("authentication-results"), from)) {
         console.warn(`[gmail] ignoring a message claiming to be from ${from}: the sender could not be authenticated`);
         continue;
       }

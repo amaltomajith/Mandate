@@ -67,7 +67,12 @@ async function main() {
 
   console.log("mail sender authentication");
   {
-    check("DKIM pass is accepted", senderAuthenticated("mx.google.com; dkim=pass header.i=@acme.in; spf=pass"));
+    check("DKIM pass is accepted when it aligns with the From domain", senderAuthenticated("mx.google.com; dkim=pass header.i=@acme.in; spf=pass", "sales@acme.in"));
+    check("DKIM pass for a subdomain of the From domain aligns", senderAuthenticated("mx.google.com; dkim=pass header.d=mail.acme.in", "sales@acme.in"));
+    check("DKIM pass from ANOTHER domain is not enough (spoofed From)", !senderAuthenticated("mx.google.com; dkim=pass header.i=@attacker.example; spf=pass", "sales@acme.in"));
+    check("DKIM pass with no From to align against is not enough", !senderAuthenticated("mx.google.com; dkim=pass header.i=@acme.in"));
+    check("a lookalike domain does not align", !senderAuthenticated("mx.google.com; dkim=pass header.d=notacme.in", "sales@acme.in"));
+    check("a bare top-level domain does not align", !senderAuthenticated("mx.google.com; dkim=pass header.d=in", "sales@acme.in"));
     check("DMARC pass is accepted", senderAuthenticated("mx.google.com; spf=fail; dmarc=pass (p=REJECT)"));
     check("an SPF-only pass is not enough", !senderAuthenticated("mx.google.com; spf=pass smtp.mailfrom=acme.in"));
     check("a failure is rejected", !senderAuthenticated("mx.google.com; dkim=fail; dmarc=fail"));
