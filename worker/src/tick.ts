@@ -31,7 +31,7 @@ export async function tickMerchant(db: SupabaseClient, merchant: { id: string; s
   const drivers = await buildDrivers(db, merchant.id, settings);
   const channels = new ChannelService(db, merchant.id, settings.channel_mode, drivers);
   const whatsapp = drivers.get("whatsapp");
-  const ingested = await channels.ingest({ isOwner: (from) => isOwner(settings, from), handle: (text) => handleOwnerMessage(db, merchant.id, settings, whatsapp, text) });
+  const ingested = await channels.ingest({ isOwner: (from) => isOwner(settings, from), handle: (text, voice) => handleOwnerMessage(db, merchant.id, settings, whatsapp, text, voice) });
   // The owner channel: offer new held payouts and send the morning briefing. A failure here must not stop the agents.
   try {
     await offerHeldPayouts(db, merchant.id, settings, whatsapp);

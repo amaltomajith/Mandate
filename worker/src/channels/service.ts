@@ -8,7 +8,7 @@ const MAX_BODY = 20_000;
 /** Lets the worker route the owner's own messages elsewhere. */
 export interface OwnerRoute {
   isOwner(from: string): boolean;
-  handle(text: string): Promise<unknown>;
+  handle(text: string, voice?: boolean): Promise<unknown>;
 }
 
 export interface SendOptions {
@@ -233,7 +233,7 @@ export class ChannelService {
       for (const msg of inbound) {
         // The owner's own number is never a supplier or a buyer: it goes to the owner handler and is not filed.
         if (owner && driver.channel === "whatsapp" && owner.isOwner(msg.from)) {
-          await owner.handle(msg.body);
+          await owner.handle(msg.body, msg.voice);
           driver.ack?.(msg.externalId);
           continue;
         }

@@ -523,6 +523,8 @@ export interface Database {
           valid_until: string | null;
           raw_excerpt: string | null;
           status: "open" | "accepted" | "expired" | "rejected";
+          via_voice: boolean;
+          voice_confirmed_at: string | null;
           created_at: string;
         };
         Insert: {
@@ -537,6 +539,8 @@ export interface Database {
           valid_until?: string | null;
           raw_excerpt?: string | null;
           status?: "open" | "accepted" | "expired" | "rejected";
+          via_voice?: boolean;
+          voice_confirmed_at?: string | null;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["quotes"]["Insert"]>;

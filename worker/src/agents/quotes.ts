@@ -99,6 +99,25 @@ export async function parseQuote(text: string, productName: string): Promise<Par
   return fromRegex;
 }
 
+/**
+ * Whether a typed reply is the supplier confirming what we read from their voice
+ * note. Deliberately strict: it must say yes in so many words, carry no rupee
+ * amount of its own (a different price is a new quote, not a confirmation), and
+ * not contain a no or a correction.
+ */
+export function isWrittenConfirmation(text: string): boolean {
+  const t = text.trim();
+  if (t.length === 0 || t.length > 300) return false;
+  if (/₹|\brs\.?\s*\d|\binr\b|\d{3,}/i.test(t)) return false;
+  if (/\b(no|not|wrong|incorrect|actually|instead|change|changed|but|however|nahi|galat)\b/i.test(t)) return false;
+  return /\b(yes|yep|correct|confirmed?|right|agreed?|ok(?:ay)?|haan|ha|theek|sahi)\b/i.test(t);
+}
+
+/** A quote from a voice note is only a draft until the supplier has confirmed it in writing. */
+export function usableQuote(q: { via_voice?: boolean | null; voice_confirmed_at?: string | null }): boolean {
+  return !q.via_voice || !!q.voice_confirmed_at;
+}
+
 /** A message asking to change where money goes. Never acted on; always flagged. */
 export function asksToChangePaymentDetails(text: string): boolean {
   return /(bank account|account number|a\/c\b|ifsc|upi id|new account|changed (?:our )?(?:bank|account|upi)|update (?:our )?(?:bank|payment) details)/i.test(text);

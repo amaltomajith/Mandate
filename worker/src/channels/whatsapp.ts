@@ -10,6 +10,7 @@ import type {
 import { decryptSecret, encryptSecret } from "@/lib/secrets";
 import type { ChannelDriver, InboundMessage, OutboundMessage, SendResult } from "./types";
 import { fromJid, normalizePhone, toJid } from "./phone";
+import { transcribeAudio, voiceBody } from "../voice/transcribe";
 
 /**
  * WhatsApp through Baileys: the same linked-device protocol as WhatsApp Web.
@@ -112,6 +113,17 @@ async function dbAuthState(db: SupabaseClient, merchantId: string): Promise<{ st
   return { state, save };
 }
 
+/** The bytes of a media message, or null if WhatsApp will not give them. */
+async function downloadOf(m: import("@whiskeysockets/baileys").WAMessage, sock: WASocket | null): Promise<Uint8Array | null> {
+  try {
+    const { downloadMediaMessage } = await loadBaileys();
+    const buf = await downloadMediaMessage(m, "buffer", {}, { logger, reuploadRequest: sock?.updateMediaMessage ?? (async (x) => x) });
+    return buf as Uint8Array;
+  } catch {
+    return null;
+  }
+}
+
 /** One merchant's WhatsApp session, held for the life of the worker. */
 export class WhatsAppSession {
   private sock: WASocket | null = null;
@@ -163,7 +175,11 @@ export class WhatsAppSession {
           const key = m.key as { remoteJid?: string | null; remoteJidAlt?: string | null; id?: string | null };
           const phone = fromJid(key.remoteJidAlt) ?? fromJid(key.remoteJid);
           const text = m.message?.conversation ?? m.message?.extendedTextMessage?.text;
-          if (!phone || !text || !key.id) continue; // groups, broadcasts, media-only
+          if (phone && !text && m.message?.audioMessage && key.id) {
+            void this.takeVoice(m, phone, key.id).catch((e) => console.warn("[whatsapp] voice note failed:", e instanceof Error ? e.message : e));
+            continue;
+          }
+          if (!phone || !text || !key.id) continue; // groups, broadcasts, other media
           this.inbound.push({
             from: `+${phone}`,
             body: text,
@@ -175,6 +191,24 @@ export class WhatsAppSession {
     } finally {
       this.starting = false;
     }
+  }
+
+  /** A voice note: downloaded, turned into text, and filed like any other message, tagged as voice. */
+  private async takeVoice(m: Parameters<typeof downloadOf>[0], phone: string, id: string): Promise<void> {
+    const audio = (m.message as { audioMessage?: { mimetype?: string; seconds?: number } } | null | undefined)?.audioMessage;
+    let transcript = null;
+    // Long recordings are not a supplier's quick answer, and they cost free-tier quota.
+    if (audio && (audio.seconds ?? 0) <= 180) {
+      const buf = await downloadOf(m, this.sock);
+      if (buf) transcript = await transcribeAudio(buf, audio.mimetype ?? "audio/ogg");
+    }
+    this.inbound.push({
+      from: `+${phone}`,
+      body: await voiceBody(transcript),
+      externalId: id,
+      voice: true,
+      at: m.messageTimestamp ? new Date(Number(m.messageTimestamp) * 1000) : undefined,
+    });
   }
 
   private async onConnection(u: { connection?: string; qr?: string; lastDisconnect?: { error?: unknown } }) {

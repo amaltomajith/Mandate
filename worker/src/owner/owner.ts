@@ -133,12 +133,14 @@ async function recentBadAttempts(db: SupabaseClient, merchantId: string): Promis
  * to say nothing. Never throws on bad input: a stranger's or a mistyped message
  * is answered, not escalated.
  */
-export async function handleOwnerMessage(db: SupabaseClient, merchantId: string, settings: MerchantSettings, driver: ChannelDriver | undefined, text: string): Promise<string | null> {
+export async function handleOwnerMessage(db: SupabaseClient, merchantId: string, settings: MerchantSettings, driver: ChannelDriver | undefined, text: string, voice = false): Promise<string | null> {
   const reply = async (body: string) => {
     await sendToOwner(db, merchantId, settings, driver, "reply", body);
     return body;
   };
   if (!settings.owner_approvals_enabled) return null;
+  // A spoken "yes" is never an approval: speech is easy to mishear and to fake. It must be typed.
+  if (voice) return reply("For safety, approvals must be typed, not sent as a voice note. Type YES or NO and the 6-digit code.");
   if ((await recentBadAttempts(db, merchantId)) >= MAX_BAD_ATTEMPTS) return reply("Too many wrong codes. Try again in a few minutes, or use the dashboard.");
 
   const parsed = parseOwnerReply(text);

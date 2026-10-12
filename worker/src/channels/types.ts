@@ -17,6 +17,8 @@ export interface InboundMessage {
   externalId: string;
   threadExternalId?: string;
   at?: Date;
+  /** The body is a transcript of a voice note. */
+  voice?: boolean;
 }
 
 export interface SendResult {

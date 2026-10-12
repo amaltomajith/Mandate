@@ -1,7 +1,8 @@
 import type { Session } from "../session";
 import { toolLoop, llmAvailable } from "../lib/llm";
-import { asksToChangePaymentDetails, parseQuote, pickBestQuote, sanityCheck } from "./quotes";
-import { money, polish, poConfirmationMessage, rfqMessage } from "./messages";
+import { asksToChangePaymentDetails, isWrittenConfirmation, usableQuote, parseQuote, pickBestQuote, sanityCheck } from "./quotes";
+import { money, polish, poConfirmationMessage, rfqMessage, voiceConfirmMessage } from "./messages";
+import { isVoiceBody } from "../voice/transcribe";
 
 /**
  * The Buying agent: keeps bestsellers in stock.
@@ -69,7 +70,7 @@ export async function runBuyingAgent(s: Session): Promise<string> {
 // Replies -> quotes
 // --------------------------------------------------------------------------
 
-async function processVendorReplies(s: Session): Promise<string[]> {
+export async function processVendorReplies(s: Session): Promise<string[]> {
   const out: string[] = [];
   const { data: threads } = await s.db.from("threads").select("*").eq("merchant_id", s.merchant.id).eq("kind", "vendor");
   for (const thread of threads ?? []) {
@@ -93,6 +94,24 @@ async function processVendorReplies(s: Session): Promise<string[]> {
       if (asksToChangePaymentDetails(msg.body)) {
         await alert(s, "high", `${who} wrote about changing payment details. Nothing was changed. Verify by phone before updating any account.`);
         out.push(`Flagged a payment-details request from ${who}.`);
+      }
+
+      // A typed "yes" to a quote we only heard in a voice note makes that quote usable.
+      // Anything with a price of its own, or a "but", is not a confirmation and is read as a new quote.
+      if (rfq && vendor && !isVoiceBody(msg.body) && isWrittenConfirmation(msg.body)) {
+        const { data: confirmed } = await s.db
+          .from("quotes")
+          .update({ voice_confirmed_at: new Date().toISOString() })
+          .eq("merchant_id", s.merchant.id)
+          .eq("thread_id", thread.id)
+          .eq("via_voice", true)
+          .is("voice_confirmed_at", null)
+          .select("id");
+        if ((confirmed ?? []).length > 0) {
+          out.push(`${who} confirmed their voice-note quote in writing.`);
+          await s.call("channels_mark_handled", { message_id: msg.id });
+          continue;
+        }
       }
 
       if (rfq && vendor) {
@@ -120,8 +139,18 @@ async function processVendorReplies(s: Session): Promise<string[]> {
               valid_until: new Date(Date.now() + (parsed.validDays ?? 7) * 86_400_000).toISOString(),
               raw_excerpt: msg.body.slice(0, 800),
               status: sane.ok ? "open" : "rejected",
+              via_voice: isVoiceBody(msg.body),
             });
             if (error) throw new Error(error.message);
+            if (isVoiceBody(msg.body) && sane.ok) {
+              // Voice-to-paper: not usable until the supplier says yes in writing.
+              const ask = voiceConfirmMessage({ vendor: who, store: await storeName(s), name: product.name, unitPaise: parsed.unitPricePaise, moq: parsed.moq });
+              try {
+                await s.call("channels_send_message_to_vendor", { vendor_id: vendor.id, subject: `Please confirm: ${product.name}`, body: ask.text, sku: rfq.sku, qty: rfq.qty });
+              } catch (err) {
+                out.push(`Could not ask ${who} to confirm in writing: ${err instanceof Error ? err.message : String(err)}`);
+              }
+            }
             out.push(
               sane.ok
                 ? `Quote from ${who}: ${money(parsed.unitPricePaise)}/unit for ${product.name}.`
@@ -329,6 +358,8 @@ async function restockProduct(s: Session, store: string, item: InventoryItem): P
   const reliability = new Map((vendors ?? []).map((v) => [v.id, Number(v.reliability)]));
   const candidates = (quotes ?? [])
     .filter((q) => suitable.some((v) => v.id === q.vendor_id))
+    // A quote that came from a voice note is only a draft until the supplier confirms it in writing.
+    .filter(usableQuote)
     .map((q) => ({ id: q.id, vendorId: q.vendor_id, unitPricePaise: q.unit_price_paise, moq: q.moq, leadTimeDays: q.lead_time_days, reliability: reliability.get(q.vendor_id) ?? 50 }));
 
   // Wait for more answers if suppliers were asked and fewer than two replied,

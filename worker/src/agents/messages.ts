@@ -51,6 +51,14 @@ export function rfqMessage(p: { vendor: string; store: string; name: string; sku
   return { text, facts: { required: [p.name, String(p.qty)] } };
 }
 
+export function voiceConfirmMessage(p: { vendor: string; store: string; name: string; unitPaise: number; moq: number }): { text: string; facts: Facts } {
+  const text =
+    `Hello ${p.vendor},\n\n` +
+    `Thank you for your voice note. So that it is on record, this is what we understood: ${p.name} at ${money(p.unitPaise)} per unit, minimum order ${p.moq}. ` +
+    `Please reply YES in writing if that is correct, or send the correct details.\n\nThank you,\n${p.store}`;
+  return { text, facts: { required: [p.name, money(p.unitPaise), String(p.moq)] } };
+}
+
 export function poConfirmationMessage(p: {
   vendor: string;
   store: string;
