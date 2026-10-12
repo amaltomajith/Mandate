@@ -9,6 +9,7 @@ import { ErrorLine, Pill, rupees, rupeesShort, useRunner } from "./kit";
 import { AnimatedNumber, Reveal, Sparkline } from "./motion";
 import { TimeAgo } from "./TimeAgo";
 import { KhataPanel } from "./KhataPanel";
+import { BankStatementPanel } from "./BankStatementPanel";
 import { cumulative, dailyTotals } from "./trend";
 
 /**
@@ -181,6 +182,7 @@ export function SalesTab({ coo, traces }: { coo: CooData; traces: Trace[] }) {
       </div>
 
       <KhataPanel coo={coo} />
+      <BankStatementPanel coo={coo} />
 
       <Panel title="Wallet" description="Everything that moved money in or out." icon={<Icons.Bell />} accent="var(--entity-customer)" bodyClassName="max-h-[560px] overflow-y-auto fade-mask-y">
         {coo.wallet.length === 0 ? (

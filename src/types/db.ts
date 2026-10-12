@@ -624,6 +624,8 @@ export interface Database {
           paid_ref: string | null;
           paid_at: string | null;
           confirmed_by: string | null;
+          bank_verified_at: string | null;
+          bank_row_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -640,6 +642,8 @@ export interface Database {
           paid_ref?: string | null;
           paid_at?: string | null;
           confirmed_by?: string | null;
+          bank_verified_at?: string | null;
+          bank_row_id?: string | null;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["payouts"]["Insert"]>;

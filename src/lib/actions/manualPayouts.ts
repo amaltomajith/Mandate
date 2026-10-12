@@ -10,6 +10,7 @@ import {
   getPayoutInstructions,
   type PayoutInstructions,
 } from "@/lib/manualPayouts";
+import { reconcileStatement, type ReconcileSummary } from "@/lib/reconcile";
 
 /**
  * The merchant's side of paying a supplier by hand. Each action resolves the
@@ -40,4 +41,14 @@ export async function cancelPayout(payoutId: string): Promise<void> {
   const r = await cancelManualPayout(db, merchant.id, payoutId, user.email);
   if (!r.confirmed) throw new Error(r.reason ?? "Could not cancel that payment.");
   revalidatePath("/dashboard");
+}
+
+/** A bank statement CSV, tied to the payouts and customer payments it proves. */
+export async function uploadBankStatement(csv: string): Promise<ReconcileSummary> {
+  const { user, merchant, db } = await scope();
+  if (typeof csv !== "string" || csv.length === 0) throw new Error("Choose a statement file first.");
+  if (csv.length > 900_000) throw new Error("That file is too large. Export a shorter date range from your bank.");
+  const summary = await reconcileStatement(db, merchant.id, csv, user.email);
+  revalidatePath("/dashboard");
+  return summary;
 }
