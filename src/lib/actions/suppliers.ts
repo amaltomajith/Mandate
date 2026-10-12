@@ -9,6 +9,7 @@ import { createFundAccount, maskPayee, validatePayeeDetails, type PayeeDetails }
 import type { Channel } from "@/types/db";
 import { getSettings } from "@/lib/settings";
 import { encryptJson } from "@/lib/secrets";
+import { IdSchema, PayeeNameSchema, VendorInputSchema, VendorStatusSchema, parse } from "./schemas";
 
 /**
  * Suppliers and who may be paid.
@@ -35,10 +36,11 @@ export interface VendorInput {
   notes?: string;
 }
 
-export async function saveVendor(id: string | null, input: VendorInput): Promise<void> {
+export async function saveVendor(rawId: string | null, rawInput: VendorInput): Promise<void> {
   const { merchant, db } = await scope();
-  const name = input.name.trim();
-  if (name.length < 2) throw new Error("Give the supplier a name.");
+  const id = rawId === null ? null : parse(IdSchema, rawId, "The supplier id");
+  const input = parse(VendorInputSchema, rawInput, "The supplier");
+  const name = input.name;
   if (input.channel === "email" && !input.email) throw new Error("An email supplier needs an email address.");
   if (input.channel === "whatsapp" && !input.phone) throw new Error("A WhatsApp supplier needs a phone number.");
   // A person can only add real suppliers here. The sandbox channel is reserved
@@ -66,8 +68,10 @@ export async function saveVendor(id: string | null, input: VendorInput): Promise
   revalidatePath("/dashboard");
 }
 
-export async function setVendorStatus(id: string, status: "approved" | "blocked" | "candidate"): Promise<void> {
+export async function setVendorStatus(rawId: string, rawStatus: "approved" | "blocked" | "candidate"): Promise<void> {
   const { merchant, db } = await scope();
+  const id = parse(IdSchema, rawId, "The supplier id");
+  const status = parse(VendorStatusSchema, rawStatus, "The supplier status");
   const { error } = await db.from("vendors").update({ status }).eq("id", id).eq("merchant_id", merchant.id);
   if (error) throw new Error(error.message);
   if (status === "blocked") {
@@ -78,8 +82,9 @@ export async function setVendorStatus(id: string, status: "approved" | "blocked"
   revalidatePath("/dashboard");
 }
 
-export async function deleteVendor(id: string): Promise<void> {
+export async function deleteVendor(rawId: string): Promise<void> {
   const { merchant, db } = await scope();
+  const id = parse(IdSchema, rawId, "The supplier id");
   const { count } = await db.from("purchase_orders").select("id", { count: "exact", head: true }).eq("merchant_id", merchant.id).eq("vendor_id", id);
   if ((count ?? 0) > 0) throw new Error("This supplier has purchase orders on record. Block it instead of deleting.");
   const { error } = await db.from("vendors").delete().eq("id", id).eq("merchant_id", merchant.id);
@@ -98,8 +103,13 @@ export interface PayeeInput {
  * {@link approvePayee}, which is a separate, deliberate step: adding payment
  * details and trusting them are two different decisions.
  */
-export async function addPayee(input: PayeeInput): Promise<void> {
+export async function addPayee(rawInput: PayeeInput): Promise<void> {
   const { merchant, db } = await scope();
+  const input: PayeeInput = {
+    ...rawInput,
+    vendorId: parse(IdSchema, rawInput.vendorId, "The supplier id"),
+    displayName: parse(PayeeNameSchema, rawInput.displayName, "The account holder name"),
+  };
   validatePayeeDetails(input.details);
   const { data: vendor } = await db.from("vendors").select("id, name, status").eq("id", input.vendorId).eq("merchant_id", merchant.id).maybeSingle();
   if (!vendor) throw new Error("Unknown supplier.");
@@ -141,7 +151,8 @@ export async function addPayee(input: PayeeInput): Promise<void> {
   revalidatePath("/dashboard");
 }
 
-export async function approvePayee(id: string): Promise<void> {
+export async function approvePayee(rawId: string): Promise<void> {
+  const id = parse(IdSchema, rawId, "The payee id");
   const { user, merchant, db } = await scope();
   const { data: payee } = await db.from("payees").select("id, vendor_id, status").eq("id", id).eq("merchant_id", merchant.id).maybeSingle();
   if (!payee) throw new Error("Unknown payee.");
@@ -156,7 +167,8 @@ export async function approvePayee(id: string): Promise<void> {
   revalidatePath("/dashboard");
 }
 
-export async function revokePayee(id: string): Promise<void> {
+export async function revokePayee(rawId: string): Promise<void> {
+  const id = parse(IdSchema, rawId, "The payee id");
   const { merchant, db } = await scope();
   const { error } = await db.from("payees").update({ status: "revoked" }).eq("id", id).eq("merchant_id", merchant.id);
   if (error) throw new Error(error.message);
@@ -164,7 +176,8 @@ export async function revokePayee(id: string): Promise<void> {
 }
 
 /** Goods arrived: add the ordered quantities to stock and close the order. */
-export async function markPurchaseOrderReceived(poId: string): Promise<void> {
+export async function markPurchaseOrderReceived(rawPoId: string): Promise<void> {
+  const poId = parse(IdSchema, rawPoId, "The order id");
   const { merchant, db } = await scope();
   const { data: po } = await db.from("purchase_orders").select("id, status").eq("id", poId).eq("merchant_id", merchant.id).maybeSingle();
   if (!po) throw new Error("Unknown purchase order.");
@@ -188,7 +201,8 @@ export async function markPurchaseOrderReceived(poId: string): Promise<void> {
   revalidatePath("/dashboard");
 }
 
-export async function cancelPurchaseOrder(poId: string): Promise<void> {
+export async function cancelPurchaseOrder(rawPoId: string): Promise<void> {
+  const poId = parse(IdSchema, rawPoId, "The order id");
   const { merchant, db } = await scope();
   const { error } = await db
     .from("purchase_orders")

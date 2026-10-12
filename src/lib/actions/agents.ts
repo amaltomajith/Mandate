@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { AgentStatusSchema, IdSchema, parse } from "./schemas";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireDashboardUser } from "./authGuard";
 import { getCurrentMerchant } from "@/lib/merchant";
@@ -39,7 +40,9 @@ async function merchantScope() {
  * enforcement: to actually prevent an agent acting, pause or revoke its
  * mandate, which runs inside the request path where compliance is not required.
  */
-export async function setAgentStatus(agentId: string, status: "active" | "paused") {
+export async function setAgentStatus(rawAgentId: string, rawStatus: "active" | "paused") {
+  const agentId = parse(IdSchema, rawAgentId, "The agent id");
+  const status = parse(AgentStatusSchema, rawStatus, "The agent status");
   const { merchant, db } = await merchantScope();
   const { error } = await db
     .from("agents")

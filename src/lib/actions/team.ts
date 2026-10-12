@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { ChannelModeSchema, PayoutModeSchema, parse } from "./schemas";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireDashboardUser } from "./authGuard";
@@ -78,15 +79,16 @@ export async function setDryRun(on: boolean): Promise<void> {
   revalidatePath("/dashboard");
 }
 
-export async function setChannelMode(mode: "sandbox" | "live"): Promise<void> {
+export async function setChannelMode(rawMode: "sandbox" | "live"): Promise<void> {
+  const mode = parse(ChannelModeSchema, rawMode, "The mode");
   const { merchant, db } = await scope();
   const { error } = await db.from("merchant_settings").update({ channel_mode: mode, updated_at: new Date().toISOString() }).eq("merchant_id", merchant.id);
   if (error) throw new Error(error.message);
   revalidatePath("/dashboard");
 }
 
-export async function setPayoutMode(mode: "auto" | "manual"): Promise<void> {
-  if (mode !== "auto" && mode !== "manual") throw new Error("Unknown payout mode.");
+export async function setPayoutMode(rawMode: "auto" | "manual"): Promise<void> {
+  const mode = parse(PayoutModeSchema, rawMode, "The payout mode");
   const { merchant, db } = await scope();
   const { error } = await db.from("merchant_settings").update({ payout_mode: mode, updated_at: new Date().toISOString() }).eq("merchant_id", merchant.id);
   if (error) throw new Error(error.message);

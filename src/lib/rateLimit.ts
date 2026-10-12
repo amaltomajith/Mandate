@@ -50,3 +50,12 @@ export function clientIp(headers: Headers): string {
   const fwd = headers.get("x-forwarded-for");
   return fwd ? fwd.split(",").pop()!.trim() : "unknown";
 }
+
+/**
+ * A brake on the dashboard's own server actions, per signed-in person. A real
+ * person clicking cannot come near 240 a minute; a script hammering an action
+ * (to probe it, or to fill a table) can. Same in-process scope as above.
+ */
+export function allowDashboardAction(userId: string): boolean {
+  return allow(`ui:${userId}`, 240, 60_000);
+}

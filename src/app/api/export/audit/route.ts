@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentMerchant } from "@/lib/merchant";
+import { allow } from "@/lib/rateLimit";
 
 /**
  * The merchant's audit trail as a CSV: every action an agent proposed, what the
@@ -19,6 +20,8 @@ function cell(value: unknown): string {
 
 export async function GET() {
   const merchant = await getCurrentMerchant();
+  // The export reads up to 5000 rows and several tables: cap how often it can be asked for.
+  if (!allow(`export:${merchant.id}`, 10, 60_000)) return NextResponse.json({ error: "rate_limited" }, { status: 429, headers: { "retry-after": "30" } });
   const db = createAdminClient();
   const [{ data: traces, error }, { data: agents }, { data: rules }, { data: escalations }] = await Promise.all([
     db.from("traces").select("*").eq("merchant_id", merchant.id).order("created_at", { ascending: false }).limit(5000),
@@ -57,6 +60,8 @@ export async function GET() {
       "content-type": "text/csv; charset=utf-8",
       "content-disposition": `attachment; filename="mandate-audit-${merchant.slug}.csv"`,
       "cache-control": "no-store",
+      // The export holds the newest 5000 decisions. Say so rather than truncate silently.
+      "x-rows-truncated": String((traces ?? []).length >= 5000),
     },
   });
 }
