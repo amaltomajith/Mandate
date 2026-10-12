@@ -86,6 +86,9 @@ export function DashboardTabs(props: Props) {
 
   return (
     <ActiveTabContext.Provider value={tab}>
+      <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[70] focus:rounded-[12px] focus:bg-[#5227ff] focus:px-4 focus:py-3 focus:text-white">
+        Skip to content
+      </a>
       <LayoutGroup id="rail">
         <aside className="glass fixed inset-y-0 left-0 z-30 hidden w-[76px] flex-col gap-1 rounded-none border-y-0 border-l-0 px-3 py-5 lg:flex xl:w-[248px] xl:px-4">
           <div className="mb-6 flex items-center gap-3 px-2.5">
@@ -140,7 +143,7 @@ export function DashboardTabs(props: Props) {
           </div>
         </aside>
 
-        <nav className="glass fixed inset-x-0 bottom-0 z-30 flex gap-1 overflow-x-auto rounded-none border-x-0 border-b-0 px-2 py-2 lg:hidden" aria-label="Sections">
+        <nav className="glass fixed inset-x-0 bottom-0 z-30 flex gap-1 overflow-x-auto rounded-none border-x-0 border-b-0 px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:hidden" aria-label="Sections">
           {TABS.map((t) => {
             const active = tab === t.key;
             return (
@@ -158,6 +161,10 @@ export function DashboardTabs(props: Props) {
               </button>
             );
           })}
+          <Link href="/dashboard/settings" className="focus-ring flex min-w-[68px] shrink-0 flex-col items-center gap-1 rounded-[12px] px-2 py-2 text-[11px] font-medium" style={{ color: "var(--muted)" }}>
+            <GearSix size={22} />
+            Settings
+          </Link>
         </nav>
       </LayoutGroup>
 
@@ -189,7 +196,7 @@ export function DashboardTabs(props: Props) {
           </div>
         </div>
 
-        <main className="mx-auto w-full max-w-[1360px] flex-1 px-5 py-10 sm:px-8">
+        <main id="main" tabIndex={-1} className="mx-auto w-full max-w-[1360px] flex-1 px-5 py-10 outline-none sm:px-8">
           <motion.header key={tab} className="mb-10" initial={reduce ? { opacity: 0 } : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={reduce ? { duration: 0.15 } : spring}>
             <h1 className="text-[40px] font-semibold leading-[44px] tracking-[-0.03em]">{current.title}</h1>
             <p className="mt-2 max-w-2xl text-[17px] leading-7" style={{ color: "var(--muted)" }}>

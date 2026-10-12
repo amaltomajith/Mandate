@@ -34,11 +34,11 @@ function FixCard({ fix, onApplied }: { fix: FixSuggestion; onApplied: () => void
 
   return (
     <div className="mt-2 rounded-lg border px-3 py-2.5" style={{ borderColor: "var(--panel-border-strong)", background: "var(--panel)" }}>
-      <p className="text-[12px] font-semibold">{fix.ruleName}</p>
-      <p className="mt-1 text-[11px] leading-relaxed" style={{ color: "var(--muted)" }}>
+      <p className="text-[13px] font-semibold">{fix.ruleName}</p>
+      <p className="mt-1 text-[13px] leading-relaxed" style={{ color: "var(--muted)" }}>
         {fix.rationale}
       </p>
-      <div className="mt-2 grid grid-cols-2 gap-2 font-mono text-[10px]">
+      <div className="mt-2 grid grid-cols-2 gap-2 font-mono text-[12px]">
         <div className="rounded px-2 py-1.5" style={{ background: "color-mix(in srgb, var(--decision-block) 10%, transparent)" }}>
           <p className="mb-0.5 opacity-60">before</p>
           {JSON.stringify(fix.currentParams)}
@@ -49,7 +49,7 @@ function FixCard({ fix, onApplied }: { fix: FixSuggestion; onApplied: () => void
         </div>
       </div>
       {error && (
-        <p className="mt-2 text-[11px]" style={{ color: "var(--decision-block)" }}>
+        <p className="mt-2 text-[13px]" style={{ color: "var(--decision-block)" }}>
           {error}
         </p>
       )}
@@ -84,17 +84,17 @@ function IssueRow({ issue, onRefresh }: { issue: Issue; onRefresh: () => void })
   return (
     <div className="rounded-lg border-l-2 px-3 py-2.5" style={{ borderColor: color, background: "var(--panel-2)" }}>
       <div className="flex items-center gap-2">
-        <p className="text-[13px] font-medium">{issue.title}</p>
-        <span className="rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide" style={{ background: `${color}26`, color }}>
+        <p className="text-[14px] font-medium">{issue.title}</p>
+        <span className="rounded px-1.5 py-0.5 text-[12px] font-semibold uppercase tracking-wide" style={{ background: `${color}26`, color }}>
           {issue.certain ? issue.severity : "worth reviewing"}
         </span>
       </div>
-      <p className="mt-1 text-[12px] leading-relaxed" style={{ color: "var(--muted)" }}>
+      <p className="mt-1 text-[13px] leading-relaxed" style={{ color: "var(--muted)" }}>
         {issue.explanation}
       </p>
 
       {issue.affectedRuleIds.length > 0 && !fixes && (
-        <GhostButton disabled={isPending} onClick={suggestFix} className="mt-2 py-1! px-2.5! text-[11px]!">
+        <GhostButton disabled={isPending} onClick={suggestFix} className="mt-2 ">
           <span className="flex items-center justify-center gap-1.5">
             {isPending && <Spinner />}
             {isPending ? "Thinking…" : "Suggest a fix"}
@@ -103,13 +103,13 @@ function IssueRow({ issue, onRefresh }: { issue: Issue; onRefresh: () => void })
       )}
 
       {error && (
-        <p className="mt-2 text-[11px]" style={{ color: "var(--decision-block)" }}>
+        <p className="mt-2 text-[13px]" style={{ color: "var(--decision-block)" }}>
           {error}
         </p>
       )}
 
       {fixes && fixes.length === 0 && (
-        <p className="mt-2 text-[11px]" style={{ color: "var(--muted-2)" }}>
+        <p className="mt-2 text-[13px]" style={{ color: "var(--muted-2)" }}>
           No confident fix to propose here — this one&apos;s worth a manual look.
         </p>
       )}
@@ -168,7 +168,7 @@ export function PolicyHealthPanel({ deterministicIssues }: { deterministicIssues
       )}
 
       <div className="flex items-center justify-between border-t pt-3" style={{ borderColor: "var(--panel-border)" }}>
-        <p className="text-[11px]" style={{ color: "var(--muted-2)" }}>
+        <p className="text-[13px]" style={{ color: "var(--muted-2)" }}>
           Want a second, judgment-call pass? Ask the LLM to review coverage.
         </p>
         <GhostButton onClick={runAudit} disabled={isPending} className="shrink-0">

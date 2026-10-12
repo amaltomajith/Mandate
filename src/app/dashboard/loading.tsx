@@ -4,103 +4,69 @@ import { MandateMark } from "@/components/brand/MandateMark";
  * Shown the instant someone clicks through to the dashboard.
  *
  * Without this file the route had no Suspense boundary, so Next held the old
- * page on screen until every server query in `getDashboardData` had returned —
- * around a second of a click doing visibly nothing, which reads as a dead
- * button rather than as a page loading. A `loading.tsx` makes the navigation
- * commit immediately and streams the real page in behind it.
+ * page on screen until every server query had returned: a click that visibly did
+ * nothing. A `loading.tsx` makes the navigation commit immediately and streams
+ * the real page in behind it. `/dashboard` is `force-dynamic`, and Next only
+ * prefetches the static shell of a dynamic route, which is exactly this file.
  *
- * It also earns its keep before the click: `/dashboard` is `force-dynamic`, and
- * Next will only prefetch the static shell of a dynamic route — which is
- * exactly this file. With no loading boundary there was nothing for the
- * landing page's <Link> to prefetch at all.
- *
- * The skeleton deliberately mirrors the real header and tab strip rather than
- * being a centred spinner. The chrome here is identical to what lands, so the
- * page appears to fill in rather than to be replaced, and nothing jumps when
- * the data arrives. No shader: this is on screen for a moment, and paying to
- * spin up a WebGL context that is about to be torn down and recreated by the
- * real page would make the thing it is meant to speed up slower.
+ * It mirrors the real layout (left rail, slim bar, page title, a row of numbers)
+ * so the page fills in rather than being replaced, and nothing jumps when the
+ * data arrives. No shader: paying for a WebGL context that is about to be torn
+ * down by the real page would slow the thing this is meant to speed up.
  */
 
-const TABS = ["Overview", "Catalog", "Agents", "Transactions", "Policies", "Mandates"];
+const RAIL = ["Today", "Inventory", "Suppliers", "Sales", "Guardrails", "Activity", "Team", "Connections"];
 
-function Shimmer({ className, style }: { className?: string; style?: React.CSSProperties }) {
-  return <div className={`skeleton-shimmer rounded-md ${className ?? ""}`} style={style} />;
+function Shimmer({ className }: { className?: string }) {
+  return <div className={`skeleton-shimmer rounded-[14px] ${className ?? ""}`} aria-hidden="true" />;
 }
 
 export default function DashboardLoading() {
   return (
-    <div className="relative flex min-h-screen flex-col bg-[var(--background-2)]">
-      {/* A flat stand-in for the gradient band, so the top of the page is the
-          right colour and depth before the shader mounts. */}
-      <div
-        className="pointer-events-none absolute inset-x-0 top-0 h-[168px]"
-        style={{
-          background:
-            "linear-gradient(to bottom, rgba(82,39,255,0.28) 0%, rgba(8,8,12,0.55) 45%, var(--background-2) 100%)",
-        }}
-      />
-
-      <header
-        className="panel-glass sticky top-0 z-20 flex items-center justify-between px-6 py-3.5"
-        style={{ borderTop: "none", borderLeft: "none", borderRight: "none" }}
-      >
-        <div className="flex items-center gap-3">
-          {/* Real, not a placeholder — it is already here and its absence would
-              be the one obvious difference between this and the loaded page. */}
-          <MandateMark size={28} />
-          <div>
-            <h1 className="text-[15px] font-semibold tracking-tight">Mandate</h1>
-            <p className="text-[11px] leading-none" style={{ color: "var(--muted-2)" }}>
-              control plane
+    <div className="relative flex min-h-screen bg-[var(--background-2)]" role="status" aria-label="Loading your dashboard">
+      <aside className="glass fixed inset-y-0 left-0 z-30 hidden w-[76px] flex-col gap-1 rounded-none border-y-0 border-l-0 px-3 py-5 lg:flex xl:w-[248px] xl:px-4">
+        <div className="mb-6 flex items-center gap-3 px-2.5">
+          <MandateMark size={32} />
+          <div className="hidden xl:block">
+            <p className="text-[17px] font-semibold leading-5 tracking-[-0.01em]">Mandate</p>
+            <p className="text-[12px] leading-4" style={{ color: "var(--muted)" }}>
+              store manager
             </p>
           </div>
-          <div className="ml-6 hidden items-center gap-4 border-l pl-6 sm:flex" style={{ borderColor: "var(--panel-border)" }}>
-            {["agents", "active rules", "pending"].map((label) => (
-              <div key={label} className="flex flex-col gap-1">
-                <Shimmer className="h-3.5 w-7" />
-                <span className="text-[10px] leading-none" style={{ color: "var(--muted-2)" }}>
-                  {label}
-                </span>
-              </div>
+        </div>
+        {RAIL.map((label, i) => (
+          <div key={label} className="flex min-h-[46px] items-center gap-3.5 rounded-[12px] px-3.5" style={{ background: i === 0 ? "rgba(124,92,255,0.18)" : "transparent" }}>
+            <div className="skeleton-shimmer h-[22px] w-[22px] shrink-0 rounded-md" aria-hidden="true" />
+            <span className="hidden text-[15px] font-medium xl:inline" style={{ color: i === 0 ? "var(--foreground)" : "var(--muted-2)" }}>
+              {label}
+            </span>
+          </div>
+        ))}
+      </aside>
+
+      <div className="flex min-h-screen flex-1 flex-col lg:pl-[76px] xl:pl-[248px]">
+        <div className="glass sticky top-0 z-20 flex h-[64px] items-center justify-between rounded-none border-x-0 border-t-0 px-5 sm:px-8">
+          <div className="flex items-center gap-3 lg:hidden">
+            <MandateMark size={28} />
+            <span className="text-[17px] font-semibold tracking-[-0.01em]">Mandate</span>
+          </div>
+          <Shimmer className="hidden h-5 w-40 lg:block" />
+          <Shimmer className="h-7 w-24" />
+        </div>
+
+        <main className="mx-auto w-full max-w-[1360px] flex-1 px-5 py-10 sm:px-8">
+          <div className="mb-10">
+            <Shimmer className="h-10 w-48" />
+            <Shimmer className="mt-3 h-5 w-80 max-w-full" />
+          </div>
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+            {[0, 1, 2, 3].map((i) => (
+              <Shimmer key={i} className="h-[168px] rounded-[20px]" />
             ))}
           </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 text-[11px]" style={{ color: "var(--muted)" }}>
-            <span className="live-dot h-1.5 w-1.5 rounded-full" style={{ background: "var(--decision-allow)" }} />
-            live
-          </div>
-          <Shimmer className="h-6 w-20" />
-          <Shimmer className="h-6 w-6 rounded-full" />
-        </div>
-      </header>
-
-      <div className="relative z-10 flex flex-1 flex-col gap-5 p-5">
-        <div className="flex gap-1.5">
-          {TABS.map((t, i) => (
-            <div
-              key={t}
-              className="rounded-lg px-3 py-1.5 text-[12.5px] font-medium"
-              style={{
-                color: i === 0 ? "var(--foreground)" : "var(--muted-2)",
-                background: i === 0 ? "var(--panel-2)" : "transparent",
-              }}
-            >
-              {t}
-            </div>
-          ))}
-        </div>
-
-        {/* The Overview shape: a tall graph panel with a sidebar beside it. */}
-        <div className="grid flex-1 gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <Shimmer className="min-h-[420px] rounded-2xl" />
-          <div className="flex flex-col gap-5">
-            <Shimmer className="h-40 rounded-2xl" />
-            <Shimmer className="h-56 rounded-2xl" />
-          </div>
-        </div>
+          <Shimmer className="mt-8 h-[320px] rounded-[20px]" />
+          <Shimmer className="mt-8 h-[420px] rounded-[20px]" />
+        </main>
       </div>
     </div>
   );

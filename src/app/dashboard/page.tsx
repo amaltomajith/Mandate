@@ -88,10 +88,7 @@ export default async function DashboardPage() {
             className="mx-8 mt-6 rounded-2xl border px-5 py-4 text-[14px] lg:ml-[calc(76px+2rem)] xl:ml-[calc(248px+2rem)]"
             style={{ borderColor: "var(--decision-block)", color: "var(--decision-block)", background: "color-mix(in srgb, var(--decision-block) 10%, transparent)" }}
           >
-            <strong>Couldn&apos;t load live data from Supabase:</strong> {loadError}. The panels below
-            may be showing stale or empty data. This is usually a network/TLS issue between this
-            server and Supabase, not an app bug — check the terminal running <code>npm run dev</code>{" "}
-            for the full error.
+            <strong>Some live data could not be loaded.</strong> What you see may be out of date, and it usually clears in a moment. ({loadError})
           </div>
         )}
 

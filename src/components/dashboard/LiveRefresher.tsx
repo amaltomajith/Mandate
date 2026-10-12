@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
-const POLL_MS = 4000;
+const POLL_MS = 5000;
 
 /**
  * Keeps the dashboard fresh with a short poll instead of a client-side Supabase
@@ -19,8 +19,17 @@ export function LiveRefresher() {
   const router = useRouter();
 
   useEffect(() => {
-    const interval = setInterval(() => router.refresh(), POLL_MS);
-    return () => clearInterval(interval);
+    // Refresh only while the tab is visible: a hidden tab re-runs every server
+    // query (and a Clerk lookup) for nobody. Coming back refreshes at once.
+    const tick = () => {
+      if (document.visibilityState === "visible") router.refresh();
+    };
+    const interval = setInterval(tick, POLL_MS);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", tick);
+    };
   }, [router]);
 
   return null;

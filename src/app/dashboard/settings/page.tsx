@@ -40,32 +40,30 @@ export default async function SettingsPage() {
   }
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-[var(--background-2)]">
-      <header
-        className="panel-glass sticky top-0 z-20 flex items-center justify-between px-6 py-3.5"
-        style={{ borderTop: "none", borderLeft: "none", borderRight: "none" }}
-      >
+    <div className="min-h-screen bg-[var(--background-2)]">
+      <header className="glass sticky top-0 z-20 flex h-[64px] items-center justify-between rounded-none border-x-0 border-t-0 px-5 sm:px-8">
         <div className="flex items-center gap-3">
           <MandateMark size={28} />
-          <div>
-            <h1 className="text-[15px] font-semibold tracking-tight">Mandate</h1>
-            <p className="text-[11px] leading-none" style={{ color: "var(--muted-2)" }}>
-              settings
-            </p>
-          </div>
+          <span className="text-[17px] font-semibold tracking-[-0.01em]">Mandate</span>
         </div>
         <Link
           href="/dashboard"
-          className="rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-colors hover:bg-[var(--panel-2)]"
+          className="focus-ring inline-flex min-h-[44px] items-center rounded-[12px] px-4 text-[15px] font-medium transition-colors hover:bg-white/[0.06]"
           style={{ color: "var(--muted)" }}
         >
-          ← Dashboard
+          Back to the dashboard
         </Link>
       </header>
 
-      <div className="relative z-10 flex flex-1 flex-col gap-5 p-5">
+      <main className="mx-auto flex w-full max-w-[920px] flex-col gap-8 px-5 py-10 sm:px-8">
+        <div>
+          <h1 className="text-[40px] font-semibold leading-[44px] tracking-[-0.03em]">Settings</h1>
+          <p className="mt-2 text-[17px] leading-7" style={{ color: "var(--muted)" }}>
+            Your account, and the controls you do not want one click away.
+          </p>
+        </div>
         <SettingsPanel initial={initial} initialError={initialError} />
-      </div>
+      </main>
     </div>
   );
 }

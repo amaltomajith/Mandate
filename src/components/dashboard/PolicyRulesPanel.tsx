@@ -90,7 +90,7 @@ export function PolicyRulesPanel({
 
       {pendingReview.length > 0 && (
         <div className="mb-4 space-y-2.5">
-          <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--entity-rule)" }}>
+          <p className="text-[13px] font-semibold uppercase tracking-wide" style={{ color: "var(--entity-rule)" }}>
             Pending review
           </p>
           {pendingReview.map((rule) => {
@@ -104,19 +104,19 @@ export function PolicyRulesPanel({
             return (
               <div
                 key={rule.id}
-                className="rounded-xl border p-3.5"
+                className="surface-tile p-4.5"
                 style={{ borderColor: "var(--panel-border)", background: "var(--panel-2)" }}
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium">{rule.name}</span>
                   <span
-                    className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
+                    className="shrink-0 rounded-md px-1.5 py-0.5 text-[12px] font-semibold"
                     style={{ background: "color-mix(in srgb, var(--entity-rule) 15%, transparent)", color: "var(--entity-rule)" }}
                   >
                     {TYPE_LABEL[rule.type]} · {rule.source}
                   </span>
                 </div>
-                <p className="mt-1.5 font-mono text-[11px]" style={{ color: "var(--muted)" }}>
+                <p className="mt-1.5 font-mono text-[13px]" style={{ color: "var(--muted)" }}>
                   <ParamsLine rule={rule} />
                 </p>
                 {rule.rationale && (
@@ -127,11 +127,11 @@ export function PolicyRulesPanel({
 
                 {conflicts.length > 0 && (
                   <div className="mt-3 rounded-lg border px-2.5 py-2" style={{ borderColor: "var(--decision-escalate)", background: "color-mix(in srgb, var(--decision-escalate) 8%, transparent)" }}>
-                    <p className="mb-1.5 text-[11px] font-semibold" style={{ color: "var(--decision-escalate)" }}>
+                    <p className="mb-1.5 text-[13px] font-semibold" style={{ color: "var(--decision-escalate)" }}>
                       Conflicts with {conflicts.length} existing {TYPE_LABEL[rule.type].toLowerCase()} rule{conflicts.length > 1 ? "s" : ""} — your call:
                     </p>
                     {conflicts.map((c) => (
-                      <label key={c.id} className="flex cursor-pointer items-center gap-2 py-1 text-[12px]">
+                      <label key={c.id} className="flex cursor-pointer items-center gap-2 py-1 text-[13px]">
                         <input
                           type="checkbox"
                           checked={chosen.has(c.id)}
@@ -143,7 +143,7 @@ export function PolicyRulesPanel({
                         </span>
                       </label>
                     ))}
-                    <p className="mt-1 text-[11px]" style={{ color: "var(--muted-2)" }}>
+                    <p className="mt-1 text-[13px]" style={{ color: "var(--muted-2)" }}>
                       Leave unchecked to keep both active at once.
                     </p>
                   </div>
@@ -179,7 +179,7 @@ export function PolicyRulesPanel({
         </div>
       )}
 
-      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--muted-2)" }}>
+      <p className="mb-2 text-[13px] font-semibold uppercase tracking-wide" style={{ color: "var(--muted-2)" }}>
         Active ({active.length})
       </p>
       {active.length === 0 && <EmptyState text="No active rules yet — click Run demo, it seeds them." />}
@@ -199,13 +199,12 @@ export function PolicyRulesPanel({
               </span>
               <span className="flex shrink-0 items-center gap-2">
                 <span className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                  <GhostButton disabled={rowBusy} onClick={() => act(rule.id, "update", () => deactivatePolicyRule(rule.id))} className="py-1! px-2! text-[10px]!">
+                  <GhostButton disabled={rowBusy} onClick={() => act(rule.id, "update", () => deactivatePolicyRule(rule.id))}>
                     {busy ? "…" : "Deactivate"}
                   </GhostButton>
                   <GhostButton
                     disabled={rowBusy}
                     onClick={() => actWithConfirm(rule.id, "delete", `Permanently delete "${rule.name}"? This can't be undone — if it's ever fired, this will fail and tell you to deactivate instead.`, () => deletePolicyRule(rule.id))}
-                    className="py-1! px-2! text-[10px]!"
                   >
                     {busy ? "…" : "Delete"}
                   </GhostButton>
@@ -219,7 +218,7 @@ export function PolicyRulesPanel({
 
       {inactive.length > 0 && (
         <>
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--muted-2)" }}>
+          <p className="mb-2 text-[13px] font-semibold uppercase tracking-wide" style={{ color: "var(--muted-2)" }}>
             Inactive ({inactive.length})
           </p>
           <div className="space-y-1">
@@ -241,13 +240,12 @@ export function PolicyRulesPanel({
                     </span>
                   </span>
                   <span className="flex shrink-0 gap-1">
-                    <GhostButton disabled={rowBusy} onClick={() => act(rule.id, "update", () => reactivatePolicyRule(rule.id))} className="py-1! px-2! text-[10px]!">
+                    <GhostButton disabled={rowBusy} onClick={() => act(rule.id, "update", () => reactivatePolicyRule(rule.id))}>
                       {busy ? "…" : "Reactivate"}
                     </GhostButton>
                     <GhostButton
                       disabled={rowBusy}
                       onClick={() => actWithConfirm(rule.id, "delete", `Permanently delete "${rule.name}"? This can't be undone.`, () => deletePolicyRule(rule.id))}
-                      className="py-1! px-2! text-[10px]!"
                     >
                       {busy ? "…" : "Delete"}
                     </GhostButton>

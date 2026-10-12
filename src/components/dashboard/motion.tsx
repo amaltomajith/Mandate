@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { AnimatePresence, animate, motion, useInView, useMotionValue, useReducedMotion, useTransform } from "motion/react";
 import { X } from "@phosphor-icons/react";
 
@@ -129,7 +129,21 @@ export function Segmented<T extends string>({
 }) {
   const group = useId();
   return (
-    <div role="tablist" aria-label={label} className="inline-flex rounded-full border p-1" style={{ borderColor: "var(--hairline-strong)", background: "rgba(255,255,255,0.03)" }}>
+    <div
+      role="tablist"
+      aria-label={label}
+      className="inline-flex rounded-full border p-1"
+      style={{ borderColor: "var(--hairline-strong)", background: "rgba(255,255,255,0.03)" }}
+      onKeyDown={(e) => {
+        // Arrow keys, Home and End move between options, as a tab list should.
+        const i = options.findIndex((o) => o.value === value);
+        const next = e.key === "ArrowRight" ? (i + 1) % options.length : e.key === "ArrowLeft" ? (i - 1 + options.length) % options.length : e.key === "Home" ? 0 : e.key === "End" ? options.length - 1 : -1;
+        if (next < 0) return;
+        e.preventDefault();
+        onChange(options[next].value);
+        (e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')[next] as HTMLElement | undefined)?.focus();
+      }}
+    >
       {options.map((o) => {
         const active = o.value === value;
         return (
@@ -137,6 +151,7 @@ export function Segmented<T extends string>({
             key={o.value}
             role="tab"
             aria-selected={active}
+            tabIndex={active ? 0 : -1}
             type="button"
             onClick={() => onChange(o.value)}
             className="focus-ring relative rounded-full px-4 py-2 text-[14px] font-medium transition-colors"
@@ -185,11 +200,33 @@ export function Drawer({
   const panel = useRef<HTMLDivElement>(null);
   const opener = useRef<Element | null>(null);
 
+  const titleId = useId();
+
   useEffect(() => {
     if (!open) return;
     opener.current = document.activeElement;
     panel.current?.focus();
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") return onClose();
+      if (e.key !== "Tab") return;
+      // Keep Tab inside the sheet: the page behind it is not reachable while it is open.
+      const nodes = panel.current?.querySelectorAll<HTMLElement>(FOCUSABLE);
+      if (!nodes || nodes.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || active === panel.current)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
     window.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -218,7 +255,7 @@ export function Drawer({
             tabIndex={-1}
             role="dialog"
             aria-modal="true"
-            aria-label={title}
+            aria-labelledby={titleId}
             className="glass absolute inset-y-0 right-0 flex max-w-full flex-col outline-none"
             style={{ width, borderRadius: "28px 0 0 28px" }}
             initial={reduce ? { opacity: 0 } : { x: "100%" }}
@@ -234,7 +271,7 @@ export function Drawer({
           >
             <header className="flex items-start justify-between gap-4 px-8 pb-4 pt-8">
               <div>
-                <h2 className="text-[24px] font-semibold leading-[30px] tracking-tight">{title}</h2>
+                <h2 id={titleId} className="text-[24px] font-semibold leading-[30px] tracking-tight">{title}</h2>
                 {description && (
                   <p className="mt-1.5 text-[15px] leading-6" style={{ color: "var(--muted)" }}>
                     {description}
@@ -272,7 +309,6 @@ export function ConfirmSheet({
   onClose: () => void;
   danger?: boolean;
 }) {
-  const [busy, setBusy] = useState(false);
   return (
     <Drawer
       open={open}
@@ -286,11 +322,9 @@ export function ConfirmSheet({
           </button>
           <button
             type="button"
-            disabled={busy}
+            // The sheet closes (and unmounts) on this press, so it cannot be pressed twice.
             onClick={() => {
-              setBusy(true);
               onConfirm();
-              setBusy(false);
               onClose();
             }}
             className="focus-ring rounded-[12px] px-5 py-3 text-[15px] font-semibold text-white transition-transform active:scale-[0.97]"

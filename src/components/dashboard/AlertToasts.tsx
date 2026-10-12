@@ -99,53 +99,42 @@ export function AlertToasts({ alerts }: { alerts: Alert[] }) {
 
   if (toasts.length === 0) return null;
 
+  // A live region: a screen reader announces a new alert without being moved to it.
   return (
-    <div className="pointer-events-none fixed right-4 top-20 z-50 flex w-80 flex-col gap-2">
+    <div role="status" aria-live="polite" className="pointer-events-none fixed right-4 top-[76px] z-50 flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-3">
       {toasts.map((toast) => {
         const meta = SEVERITY_META[toast.severity];
         return (
-          <div
-            key={toast.key}
-            className="toast-in pointer-events-auto flex items-start gap-2.5 rounded-xl border p-3 shadow-2xl backdrop-blur-md"
-            style={{
-              borderLeft: `3px solid ${meta.color}`,
-              borderTop: "1px solid var(--panel-border)",
-              borderRight: "1px solid var(--panel-border)",
-              borderBottom: "1px solid var(--panel-border)",
-              background: "color-mix(in srgb, var(--panel) 96%, transparent)",
-            }}
-          >
+          <div key={toast.key} className="toast-in glass pointer-events-auto flex items-start gap-3 rounded-[16px] p-4" style={{ borderLeft: `3px solid ${meta.color}` }}>
             <span className="mt-0.5 shrink-0" style={{ color: meta.color }}>
-              <meta.Icon size={16} />
+              <meta.Icon size={20} />
             </span>
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: meta.color }}>
+              <div className="flex items-center gap-2">
+                <p className="text-[13px] font-semibold" style={{ color: meta.color }}>
                   {meta.label}
                 </p>
                 {toast.count > 1 && (
-                  <span
-                    className="rounded-full px-1.5 py-0.5 text-[9px] font-bold"
-                    style={{ background: `color-mix(in srgb, ${meta.color} 20%, transparent)`, color: meta.color }}
-                  >
-                    ×{toast.count}
+                  <span className="num rounded-full px-2 py-0.5 text-[12px] font-bold" style={{ background: `color-mix(in srgb, ${meta.color} 20%, transparent)`, color: meta.color }}>
+                    x{toast.count}
                   </span>
                 )}
-                <span className="ml-auto text-[10px]" style={{ color: "var(--muted-2)" }}>
+                <span className="ml-auto text-[12px]" style={{ color: "var(--muted-2)" }}>
                   <TimeAgo iso={toast.latestCreatedAt} />
                 </span>
               </div>
-              <p className="mt-0.5 line-clamp-2 text-[12px] leading-snug" style={{ color: "var(--foreground)" }}>
+              <p className="mt-1 line-clamp-3 text-[14px] leading-5" style={{ color: "var(--foreground)" }}>
                 {toast.message}
               </p>
             </div>
             <button
+              type="button"
               onClick={() => dismiss(toast.key)}
-              className="shrink-0 rounded-md p-1 opacity-50 transition-opacity hover:opacity-100"
-              style={{ color: "var(--muted)" }}
               aria-label="Dismiss"
+              className="focus-ring -mr-2 -mt-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-white/[0.08]"
+              style={{ color: "var(--muted)" }}
             >
-              <Icons.X size={12} />
+              <Icons.X size={18} />
             </button>
           </div>
         );

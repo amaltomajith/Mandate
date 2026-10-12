@@ -21,11 +21,11 @@ import { DangerButton, GhostButton, Icons, Panel, Spinner } from "./ui";
 function CountRow({ label, value, dim }: { label: string; value: number; dim?: boolean }) {
   return (
     <div className="flex items-baseline justify-between py-1">
-      <span className="text-[12px]" style={{ color: "var(--muted-2)" }}>
+      <span className="text-[13px]" style={{ color: "var(--muted-2)" }}>
         {label}
       </span>
       <span
-        className="text-[13px] font-semibold tabular-nums"
+        className="text-[14px] font-semibold tabular-nums"
         style={{ color: dim || value === 0 ? "var(--muted-2)" : "var(--foreground)" }}
       >
         {value.toLocaleString()}
@@ -114,21 +114,21 @@ export function SettingsPanel({ initial, initialError }: { initial: ResetPreview
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
       <Panel title="Account" icon={<Icons.Shield />} accent="var(--entity-agent)">
         {loadError ? (
-          <p className="text-[12px]" style={{ color: "var(--decision-block)" }}>
+          <p className="text-[13px]" style={{ color: "var(--decision-block)" }}>
             {loadError}
           </p>
         ) : !preview ? (
-          <div className="flex items-center gap-2 text-[12px]" style={{ color: "var(--muted-2)" }}>
+          <div className="flex items-center gap-2 text-[13px]" style={{ color: "var(--muted-2)" }}>
             <Spinner /> Reading the account…
           </div>
         ) : (
           <div className="flex items-end justify-between gap-4">
             <div>
               <p className="text-[15px] font-semibold tracking-tight">{preview.merchantName}</p>
-              <p className="mt-0.5 font-mono text-[11.5px]" style={{ color: "var(--muted-2)" }}>
+              <p className="mt-0.5 font-mono text-[13px]" style={{ color: "var(--muted-2)" }}>
                 {preview.merchantSlug}
               </p>
-              <p className="mt-2 text-[11.5px]" style={{ color: "var(--muted-2)" }}>
+              <p className="mt-2 text-[13px]" style={{ color: "var(--muted-2)" }}>
                 Every action on this page applies to this account only, resolved from your session.
               </p>
             </div>
@@ -155,17 +155,17 @@ export function SettingsPanel({ initial, initialError }: { initial: ResetPreview
           >
             <Icons.AlertTriangle />
           </span>
-          <h2 className="text-[13px] font-semibold tracking-tight" style={{ color: "var(--decision-block)" }}>
+          <h2 className="text-[14px] font-semibold tracking-tight" style={{ color: "var(--decision-block)" }}>
             Danger zone
           </h2>
         </div>
-        <p className="mb-4 text-[11.5px]" style={{ color: "var(--muted-2)" }}>
+        <p className="mb-4 text-[13px]" style={{ color: "var(--muted-2)" }}>
           Both actions are immediate and cannot be undone. Neither touches any other account.
         </p>
 
         {error && (
           <p
-            className="mb-3 rounded-lg border px-3 py-2 text-[12px]"
+            className="mb-3 rounded-lg border px-3 py-2 text-[13px]"
             style={{
               borderColor: "var(--decision-block)",
               color: "var(--decision-block)",
@@ -177,7 +177,7 @@ export function SettingsPanel({ initial, initialError }: { initial: ResetPreview
         )}
         {done && (
           <p
-            className="mb-3 rounded-lg border px-3 py-2 text-[12px]"
+            className="mb-3 rounded-lg border px-3 py-2 text-[13px]"
             style={{
               borderColor: "var(--decision-allow)",
               color: "var(--decision-allow)",
@@ -190,8 +190,8 @@ export function SettingsPanel({ initial, initialError }: { initial: ResetPreview
 
         {/* ---- Reset transactions ---- */}
         <div className="rounded-xl border p-4" style={{ borderColor: "var(--panel-border-strong)", background: "var(--panel)" }}>
-          <h3 className="text-[13px] font-semibold">Clear history</h3>
-          <p className="mt-1 text-[11.5px]" style={{ color: "var(--muted-2)" }}>
+          <h3 className="text-[14px] font-semibold">Clear history</h3>
+          <p className="mt-1 text-[13px]" style={{ color: "var(--muted-2)" }}>
             Clears what has happened: conversations, agent runs, quotes, purchase orders, payouts, sales, the
             wallet and the audit trail. Your products, suppliers and their approved payment details,
             customers, guardrails, agents and connections stay, so nothing has to be set up again.
@@ -199,20 +199,20 @@ export function SettingsPanel({ initial, initialError }: { initial: ResetPreview
 
           <div className="mt-3 grid gap-x-8 gap-y-0 sm:grid-cols-2">
             <div>
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--decision-block)" }}>
+              <p className="mb-1 text-[12px] font-semibold uppercase tracking-wider" style={{ color: "var(--decision-block)" }}>
                 Will be deleted
               </p>
               {preview
                 ? Object.entries(preview.transactions).map(([t, n]) => <CountRow key={t} label={t} value={n} />)
-                : <p className="py-1 text-[12px]" style={{ color: "var(--muted-2)" }}>…</p>}
+                : <p className="py-1 text-[13px]" style={{ color: "var(--muted-2)" }}>…</p>}
             </div>
             <div>
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--decision-allow)" }}>
+              <p className="mb-1 text-[12px] font-semibold uppercase tracking-wider" style={{ color: "var(--decision-allow)" }}>
                 Kept
               </p>
               {preview
                 ? Object.entries(preview.preserved).map(([t, n]) => <CountRow key={t} label={t} value={n} dim />)
-                : <p className="py-1 text-[12px]" style={{ color: "var(--muted-2)" }}>…</p>}
+                : <p className="py-1 text-[13px]" style={{ color: "var(--muted-2)" }}>…</p>}
             </div>
           </div>
 
@@ -247,17 +247,17 @@ export function SettingsPanel({ initial, initialError }: { initial: ResetPreview
             background: "var(--panel)",
           }}
         >
-          <h3 className="text-[13px] font-semibold" style={{ color: "var(--decision-block)" }}>
+          <h3 className="text-[14px] font-semibold" style={{ color: "var(--decision-block)" }}>
             Reset everything
           </h3>
-          <p className="mt-1 text-[11.5px]" style={{ color: "var(--muted-2)" }}>
+          <p className="mt-1 text-[13px]" style={{ color: "var(--muted-2)" }}>
             Everything above, plus your products, suppliers (and their payment details), customers and rules.
             The starting catalog, rules and guardrails are restored, exactly as a new sign-up gets them.
             Your Gmail, WhatsApp and Razorpay connections and your two agents are kept, because linking
             them again is the slow part.
           </p>
 
-          <label className="mt-3 block text-[11.5px]" style={{ color: "var(--muted-2)" }}>
+          <label className="mt-3 block text-[13px]" style={{ color: "var(--muted-2)" }}>
             Type <span className="font-mono" style={{ color: "var(--foreground)" }}>{preview?.merchantSlug ?? "…"}</span> to
             confirm:
           </label>
@@ -267,7 +267,7 @@ export function SettingsPanel({ initial, initialError }: { initial: ResetPreview
             placeholder={preview?.merchantSlug ?? ""}
             spellCheck={false}
             autoComplete="off"
-            className="mt-1.5 w-full rounded-lg border px-3 py-2 font-mono text-[12px] outline-none transition-colors focus:border-[var(--decision-block)]"
+            className="mt-1.5 w-full rounded-lg border px-3 py-2 font-mono text-[13px] outline-none transition-colors focus:border-[var(--decision-block)]"
             style={{ borderColor: "var(--panel-border-strong)", background: "var(--panel-2)", color: "var(--foreground)" }}
           />
 
@@ -290,7 +290,7 @@ export function SettingsPanel({ initial, initialError }: { initial: ResetPreview
             {busy === "everything" ? "Resetting…" : "Reset everything"}
           </DangerButton>
           {!slugMatches && typedSlug.length > 0 && (
-            <p className="mt-1.5 text-[11px]" style={{ color: "var(--muted-2)" }}>
+            <p className="mt-1.5 text-[13px]" style={{ color: "var(--muted-2)" }}>
               Doesn&apos;t match yet.
             </p>
           )}

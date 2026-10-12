@@ -81,7 +81,7 @@ export function AgentTrustPanel({ agents, rules }: { agents: Agent[]; rules: Pol
             return (
               <div
                 key={agent.id}
-                className="rounded-xl border p-3 transition-colors"
+                className="surface-tile p-4 transition-colors"
                 style={{
                   borderColor: expanded ? "color-mix(in srgb, var(--entity-agent) 45%, transparent)" : "var(--panel-border)",
                   background: "var(--panel-2)",
@@ -94,9 +94,9 @@ export function AgentTrustPanel({ agents, rules }: { agents: Agent[]; rules: Pol
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate text-[13px] font-semibold">{agent.name}</p>
+                      <p className="truncate text-[14px] font-semibold">{agent.name}</p>
                       <span
-                        className="mt-1 inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider"
+                        className="mt-1 inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[12px] font-bold uppercase tracking-wider"
                         style={{ background: `color-mix(in srgb, ${state.color} 16%, transparent)`, color: state.color }}
                       >
                         <span className="h-1 w-1 rounded-full" style={{ background: state.color }} />
@@ -107,7 +107,7 @@ export function AgentTrustPanel({ agents, rules }: { agents: Agent[]; rules: Pol
                       <p className="text-[22px] font-semibold leading-none tabular-nums" style={{ color: state.color }}>
                         {agent.trust_score.toFixed(0)}
                       </p>
-                      <p className="mt-1 text-[9px] uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
+                      <p className="mt-1 text-[12px] uppercase tracking-wider" style={{ color: "var(--muted-2)" }}>
                         of 100
                       </p>
                     </div>
@@ -134,18 +134,18 @@ export function AgentTrustPanel({ agents, rules }: { agents: Agent[]; rules: Pol
                   </div>
 
                   <div className="mt-1.5 flex items-center justify-between gap-2">
-                    <p className="truncate text-[10px]" style={{ color: "var(--muted-2)" }}>
+                    <p className="truncate text-[12px]" style={{ color: "var(--muted-2)" }}>
                       {state.note}
                     </p>
                     {trustFloor !== null && (
-                      <p className="shrink-0 text-[10px] tabular-nums" style={{ color: "var(--muted-2)" }}>
+                      <p className="shrink-0 text-[12px] tabular-nums" style={{ color: "var(--muted-2)" }}>
                         floor {trustFloor}
                       </p>
                     )}
                   </div>
 
                   {explainable && components && (
-                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]" style={{ color: "var(--muted-2)" }}>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]" style={{ color: "var(--muted-2)" }}>
                       <Stat value={components.approvals} label="allowed" color="var(--decision-allow)" />
                       <Stat value={components.escalations} label="escalated" color="var(--decision-escalate)" />
                       <Stat value={components.blocks} label="blocked" color="var(--decision-block)" />
@@ -159,7 +159,7 @@ export function AgentTrustPanel({ agents, rules }: { agents: Agent[]; rules: Pol
                 {expanded && components && <TrustBreakdown components={components} />}
 
                 {!explainable && (
-                  <p className="mt-2 text-[10px]" style={{ color: "var(--muted-2)" }}>
+                  <p className="mt-2 text-[12px]" style={{ color: "var(--muted-2)" }}>
                     No decisions yet — still at the starting score.
                   </p>
                 )}
@@ -169,7 +169,7 @@ export function AgentTrustPanel({ agents, rules }: { agents: Agent[]; rules: Pol
         </div>
       )}
 
-      <p className="mt-3 shrink-0 text-[10.5px] leading-relaxed" style={{ color: "var(--muted-2)" }}>
+      <p className="mt-3 shrink-0 text-[12px] leading-relaxed" style={{ color: "var(--muted-2)" }}>
         Every agent starts at 50 and moves with its own recent record. Below the floor, its actions
         are held for a human regardless of amount.
       </p>

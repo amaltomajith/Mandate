@@ -20,7 +20,8 @@
   --panel-border: rgba(255, 255, 255, 0.08);
   --panel-border-strong: rgba(255, 255, 255, 0.16);
   --muted: #9a96b2;
-  --muted-2: #625e79;
+  /* Was #625e79 (about 3.1:1 on the card colour, below AA for text). */
+  --muted-2: #8a86a3;
 
   /* The three shader colors are the brand. Nothing else needs to be. */
   --brand-violet: #7c5cff;
