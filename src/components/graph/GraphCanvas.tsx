@@ -16,6 +16,27 @@ import { ENTITY_COLORS, PAYEE_COLORS, PO_COLORS, STOCK_COLORS, VENDOR_COLORS, tr
 import { actionTypeLabel, formatMoney } from "@/lib/format";
 
 /**
+ * Dev only. drei's <Html> (the labels and the hover card below) renders its DOM
+ * through its own React root and unmounts that root from a layout-effect cleanup.
+ * React 19 reports exactly that as "Attempted to synchronously unmount a root
+ * while React was already rendering" through console.error, which Next's dev
+ * overlay counts as an issue, a dozen times on every load. It is a known false
+ * positive in a third-party library (the unmount is safe), and React only
+ * checks for it in development. This drops that one message and nothing else.
+ */
+if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
+  const w = window as unknown as { __mandateHtmlNoiseFilter?: boolean };
+  if (!w.__mandateHtmlNoiseFilter) {
+    w.__mandateHtmlNoiseFilter = true;
+    const original = console.error;
+    console.error = (...args: unknown[]) => {
+      if (typeof args[0] === "string" && args[0].includes("Attempted to synchronously unmount a root while React was already rendering")) return;
+      original.apply(console, args as []);
+    };
+  }
+}
+
+/**
  * Frames the whole cluster on first load, once. Re-framing while someone is
  * orbiting would yank the view out from under them, and the point of the scene
  * is that it can be inspected by hand.
