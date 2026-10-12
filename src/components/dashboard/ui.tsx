@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { Bell, CheckCircle, Info, ShieldCheck, Sparkle, Warning, WarningCircle, X as XIcon, XCircle } from "@phosphor-icons/react/dist/ssr";
+import { Bell, CheckCircle, ShieldCheck, Sparkle, Warning, WarningCircle, X as XIcon, XCircle } from "@phosphor-icons/react/dist/ssr";
 
 /**
  * The card every section sits in. `bodyClassName` lets a card own a scroll
@@ -182,5 +182,4 @@ export const Icons = {
   AlertTriangle: ({ size = 18 }: IconProps) => <WarningCircle size={size} weight={W} />,
   XCircle: ({ size = 18 }: IconProps) => <XCircle size={size} weight={W} />,
   X: ({ size = 18 }: IconProps) => <XIcon size={size} weight={W} />,
-  Info: ({ size = 18 }: IconProps) => <Info size={size} weight={W} />,
 };

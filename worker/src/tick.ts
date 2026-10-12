@@ -4,6 +4,7 @@ import { ChannelService } from "./channels/service";
 import { buildDrivers } from "./channels/drivers";
 import { runAgent, type RunResult } from "./runner";
 import { backoffMs } from "./lifecycle";
+import { log } from "./log";
 import { ensureWhatsApp, stopWhatsApp } from "./channels/whatsapp";
 import { runBuyingAgent } from "./agents/buying";
 import { runSellingAgent } from "./agents/selling";
@@ -53,6 +54,7 @@ export async function tick(db: SupabaseClient, only?: string, passMs = 60_000): 
   for (const m of merchants ?? []) {
     const state = failing.get(m.slug);
     if (state && Date.now() < state.until) continue;
+    const began = Date.now();
     try {
       const report = await tickMerchant(db, m);
       reports.push(report);
@@ -62,12 +64,12 @@ export async function tick(db: SupabaseClient, only?: string, passMs = 60_000): 
       } else {
         failing.delete(m.slug);
       }
-      console.log(`[worker] ${m.slug}\n  buying : ${describe(report.buying)}\n  selling: ${describe(report.selling)}`);
+      log.info("merchant pass", { merchant: m.slug, ms: Date.now() - began, ingested: report.ingested, buying: describe(report.buying), selling: describe(report.selling) });
     } catch (err) {
       // One merchant's failure must not stop the others.
       const failures = (state?.failures ?? 0) + 1;
       failing.set(m.slug, { failures, until: Date.now() + backoffMs(failures, passMs) });
-      console.error(`[worker] ${m.slug} failed (${failures} in a row, next try in ${Math.round(backoffMs(failures, passMs) / 1000)}s):`, err instanceof Error ? err.message : err);
+      log.error("merchant pass failed", { merchant: m.slug, failures, retry_in_s: Math.round(backoffMs(failures, passMs) / 1000), ms: Date.now() - began, err: err instanceof Error ? err.message : String(err) });
     }
   }
   return reports;

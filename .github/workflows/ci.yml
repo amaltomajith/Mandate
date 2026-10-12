@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [master, pivot/coo]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Needs no secrets: types and lint for the app and the worker.
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+
+  # The suites that only need the database (engine, hardening, inventory, channels,
+  # reset, ledger, concurrency). They create and delete their own merchants, so
+  # point the secrets at a TEST Supabase project, never production. Skipped when
+  # the secrets are not configured (for example on a fork's pull request).
+  offline:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.TEST_SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.TEST_SUPABASE_SERVICE_ROLE_KEY }}
+      MANDATE_SECRET_KEY: ${{ secrets.TEST_MANDATE_SECRET_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.SUPABASE_SERVICE_ROLE_KEY != ''
+      - uses: actions/setup-node@v4
+        if: env.SUPABASE_SERVICE_ROLE_KEY != ''
+        with:
+          node-version: 22
+          cache: npm
+      - if: env.SUPABASE_SERVICE_ROLE_KEY != ''
+        run: npm ci
+      - if: env.SUPABASE_SERVICE_ROLE_KEY != ''
+        run: npm run verify:offline
+      - if: env.SUPABASE_SERVICE_ROLE_KEY == ''
+        run: echo "TEST_SUPABASE_* secrets are not set; skipping the database suites."
+
+  # The online suites (wall, manual, buying, selling, webhook, loop) need a running
+  # app and make real model calls, so they stay a manual step: npm run verify:online.

@@ -14,7 +14,6 @@ import { X } from "@phosphor-icons/react";
 
 export const spring = { type: "spring", bounce: 0, duration: 0.45 } as const;
 export const springSnappy = { type: "spring", bounce: 0, duration: 0.3 } as const;
-export const springFlick = { type: "spring", bounce: 0.18, duration: 0.45 } as const;
 
 /** Fades and lifts its children in once, staggered by `index`. */
 export function Reveal({ children, index = 0, className }: { children: ReactNode; index?: number; className?: string }) {
@@ -167,11 +166,6 @@ export function Segmented<T extends string>({
       })}
     </div>
   );
-}
-
-/** A flat shimmer block for loading states. */
-export function Skeleton({ className }: { className?: string }) {
-  return <div className={`skeleton-shimmer rounded-[14px] ${className ?? ""}`} aria-hidden="true" />;
 }
 
 /**

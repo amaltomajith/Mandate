@@ -12,6 +12,7 @@ import { createAdminClient } from "../src/lib/supabase/admin";
 import { ensureWorkspace } from "../src/lib/workspace";
 import { runAgent } from "../worker/src/runner";
 import { backoffMs, createStopSignal, reportAlive } from "../worker/src/lifecycle";
+import { formatLog } from "../worker/src/log";
 
 const db = createAdminClient() as unknown as SupabaseClient;
 let passed = 0;
@@ -93,6 +94,18 @@ async function main() {
       check("the first failure waits one pass", backoffMs(1, 60_000) === 60_000);
       check("it doubles each time", backoffMs(2, 60_000) === 120_000 && backoffMs(3, 60_000) === 240_000);
       check("and is capped at fifteen minutes", backoffMs(20, 60_000) === 15 * 60_000);
+    }
+
+    console.log("log lines");
+    {
+      const text = formatLog("info", "pass finished", { merchant: "demo-shop", ms: 1520 }, false);
+      check("a text line is readable and carries its fields", text.includes("INFO") && text.includes("pass finished") && text.includes("merchant=demo-shop") && text.includes("ms=1520"), text);
+      const json = JSON.parse(formatLog("error", "pass failed", { merchant: "demo-shop", err: "boom" }, true));
+      check("a JSON line parses and carries level, message and fields", json.level === "error" && json.msg === "pass failed" && json.merchant === "demo-shop" && json.err === "boom" && typeof json.time === "string");
+      const tricky = JSON.parse(formatLog("warn", "x", { note: 'has "quotes" and' + String.fromCharCode(10) + 'newlines' }, true));
+      check("awkward characters survive", tricky.note.includes("quotes") && tricky.note.includes("newlines"));
+      const secretish = formatLog("info", "x", { key: "sk_live_abcdefghijklmnop1234", password: "hunter2" }, false);
+      check("secret-looking fields are redacted", !secretish.includes("sk_live_abcdefghijklmnop1234") && !secretish.includes("hunter2"), secretish);
     }
 
     console.log("the worker says it is alive");
