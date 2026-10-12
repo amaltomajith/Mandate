@@ -12,6 +12,7 @@ import { createAdminClient } from "../src/lib/supabase/admin";
 import { ensureWorkspace } from "../src/lib/workspace";
 import { walletBalancePaise } from "../src/lib/ledger";
 import { recordCapturedPayment } from "../src/lib/sales";
+import { getCooData } from "../src/lib/cooData";
 import { cancelManualPayout, confirmManualPayout } from "../src/lib/manualPayouts";
 
 const db = createAdminClient() as unknown as SupabaseClient;
@@ -118,6 +119,16 @@ async function main() {
       check("one wallet debit", (await walletBalancePaise(m.id)) === w1 - rupees(400), String((await walletBalancePaise(m.id)) - w1));
       const noWallet = await db.rpc("record_payout", { p_merchant: m.id, p_trace: null, p_payee: pe3!.id, p_po: po3!.id, p_amount: 0, p_status: "processing", p_razorpay_payout_id: "x", p_simulated: false, p_note: "bad" });
       check("a booking that cannot be completed leaves no payout row behind", !!noWallet.error && (await count("payouts", m.id, { razorpay_payout_id: "x" })) === 0, JSON.stringify(noWallet.error));
+    }
+
+    console.log("what is sent to the browser");
+    {
+      const { data: v4 } = await db.from("vendors").insert({ merchant_id: m.id, name: `Leak Co ${rnd}`, status: "approved", channel: "sandbox", simulated: true }).select("id").single();
+      await db.from("payees").insert({ merchant_id: m.id, vendor_id: v4!.id, kind: "upi", display_name: "Leak Co", masked_identifier: "le••@okhdfc", details_enc: "CIPHERTEXT-MUST-NOT-LEAVE-THE-SERVER", status: "active", approved_by: "v", approved_at: new Date().toISOString(), simulated: false });
+      const coo = await getCooData(db, m.id);
+      const mine = coo.payees.filter((p) => p.display_name === "Leak Co");
+      check("the payee is there for the dashboard", mine.length === 1);
+      check("but its encrypted payment details are not", JSON.stringify(coo).includes("CIPHERTEXT-MUST-NOT-LEAVE-THE-SERVER") === false);
     }
 
     console.log("paying by hand, confirmed twice at once");

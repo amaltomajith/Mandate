@@ -70,7 +70,7 @@ export async function getCooData(db: SupabaseClient, merchantId: string): Promis
   const [insights, vendors, payees, quotes, pos, lines, payouts, sales, wallet, threads, runs, connections, balance] = await Promise.all([
     getInventoryInsights(db, merchantId, settings.min_margin_bps),
     db.from("vendors").select("*").eq("merchant_id", merchantId).order("created_at", { ascending: false }),
-    db.from("payees").select("*").eq("merchant_id", merchantId).order("created_at", { ascending: false }),
+    db.from("payees").select("id, merchant_id, vendor_id, kind, display_name, masked_identifier, razorpay_contact_id, razorpay_fund_account_id, status, approved_by, approved_at, simulated, created_at").eq("merchant_id", merchantId).order("created_at", { ascending: false }),
     db.from("quotes").select("*").eq("merchant_id", merchantId).order("created_at", { ascending: false }).limit(60),
     db.from("purchase_orders").select("*").eq("merchant_id", merchantId).order("created_at", { ascending: false }).limit(40),
     db.from("po_lines").select("*").eq("merchant_id", merchantId).limit(200),
@@ -108,7 +108,10 @@ export async function getCooData(db: SupabaseClient, merchantId: string): Promis
     settings,
     insights,
     vendors: vendors.data ?? [],
-    payees: payees.data ?? [],
+    // `details_enc` (a manual-payout payee's encrypted account details) is never
+    // selected: this object goes to client components, and the one place those
+    // details are read is getPayoutInstructions, for one payout at a time.
+    payees: (payees.data ?? []).map((p) => ({ ...p, details_enc: null })),
     quotes: quotes.data ?? [],
     purchaseOrders: pos.data ?? [],
     poLines: lines.data ?? [],
