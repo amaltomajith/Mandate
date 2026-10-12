@@ -1,0 +1,15 @@
+# Mandate worker on Fly.io. No HTTP service: it only makes outbound calls.
+# Secrets are set with `fly secrets set`, see docs/DEPLOY.md.
+app = "mandate-worker"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  LOG_JSON = "1"
+  WORKER_TICK_SECONDS = "60"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

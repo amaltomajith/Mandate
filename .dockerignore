@@ -1,0 +1,11 @@
+node_modules
+.next
+.git
+.vercel
+.env*
+docs
+scripts
+public
+supabase
+*.tsbuildinfo
+buyer
