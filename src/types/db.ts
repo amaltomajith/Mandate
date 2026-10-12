@@ -736,6 +736,11 @@ export interface Database {
           dry_run: boolean;
           channel_mode: "sandbox" | "live";
           whatsapp_enabled: boolean;
+          owner_phone: string | null;
+          owner_approvals_enabled: boolean;
+          owner_approval_max_paise: number;
+          owner_briefing_enabled: boolean;
+          owner_briefing_sent_on: string | null;
           updated_at: string;
         };
         Insert: {
@@ -752,6 +757,11 @@ export interface Database {
           dry_run?: boolean;
           channel_mode?: "sandbox" | "live";
           whatsapp_enabled?: boolean;
+          owner_phone?: string | null;
+          owner_approvals_enabled?: boolean;
+          owner_approval_max_paise?: number;
+          owner_briefing_enabled?: boolean;
+          owner_briefing_sent_on?: string | null;
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["merchant_settings"]["Insert"]>;

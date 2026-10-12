@@ -5,6 +5,12 @@ import { normalizePhone } from "./phone";
 
 const MAX_BODY = 20_000;
 
+/** Lets the worker route the owner's own messages elsewhere. */
+export interface OwnerRoute {
+  isOwner(from: string): boolean;
+  handle(text: string): Promise<unknown>;
+}
+
 export interface SendOptions {
   kind: "vendor" | "buyer";
   vendorId?: string;
@@ -213,7 +219,7 @@ export class ChannelService {
   }
 
   /** Pulls new messages from every live driver and files them. Returns how many were new. */
-  async ingest(): Promise<number> {
+  async ingest(owner?: OwnerRoute): Promise<number> {
     let n = 0;
     for (const driver of this.drivers.values()) {
       if (!driver.live) continue;
@@ -225,6 +231,12 @@ export class ChannelService {
         continue;
       }
       for (const msg of inbound) {
+        // The owner's own number is never a supplier or a buyer: it goes to the owner handler and is not filed.
+        if (owner && driver.channel === "whatsapp" && owner.isOwner(msg.from)) {
+          await owner.handle(msg.body);
+          driver.ack?.(msg.externalId);
+          continue;
+        }
         const thread = await this.threadFor(driver, msg);
         if (!thread) {
           driver.ack?.(msg.externalId); // a stranger: deliberately ignored, not worth fetching again

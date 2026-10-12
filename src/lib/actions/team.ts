@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { ChannelModeSchema, PayoutModeSchema, parse } from "./schemas";
+import { ChannelModeSchema, OwnerChannelSchema, PayoutModeSchema, parse } from "./schemas";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireDashboardUser } from "./authGuard";
@@ -100,6 +100,22 @@ export async function setPayoutMode(rawMode: "auto" | "manual"): Promise<void> {
 
 export async function setWhatsAppEnabled(on: boolean): Promise<void> {
   await updateSettings({ whatsapp_enabled: on });
+  revalidatePath("/dashboard");
+}
+
+/**
+ * The owner's own WhatsApp: a morning briefing and approving a held payout with a
+ * one-time code. It must be a different number from the one the team sends from.
+ */
+export async function saveOwnerChannel(raw: z.infer<typeof OwnerChannelSchema>): Promise<void> {
+  const v = parse(OwnerChannelSchema, raw, "The owner settings");
+  if ((v.approvals || v.briefing) && !v.phone) throw new Error("Add your WhatsApp number first.");
+  await updateSettings({
+    owner_phone: v.phone || null,
+    owner_approvals_enabled: v.approvals,
+    owner_briefing_enabled: v.briefing,
+    owner_approval_max_paise: Math.round(v.maxRupees * 100),
+  });
   revalidatePath("/dashboard");
 }
 

@@ -5,10 +5,73 @@ import { Bank, CreditCard, EnvelopeSimple, GlobeSimple, WhatsappLogo, Flask, Lig
 import type { ConnectionKind } from "@/types/db";
 import type { CooData, SafeConnection } from "@/lib/cooData";
 import { connectRazorpay, connectRazorpayX, connectSearch, disconnect, connectServerRazorpayKeys } from "@/lib/actions/connections";
-import { setChannelMode, setPayoutMode, setWhatsAppEnabled } from "@/lib/actions/team";
+import { saveOwnerChannel, setChannelMode, setPayoutMode, setWhatsAppEnabled } from "@/lib/actions/team";
 import { GhostButton, PrimaryButton } from "./ui";
 import { ErrorLine, Field, Pill, inputClass, inputStyle, useRunner } from "./kit";
 import { ConfirmSheet, Reveal } from "./motion";
+import { TimeAgo } from "./TimeAgo";
+
+/** The owner's own WhatsApp: a briefing each morning, and answering a held payout with a code. */
+function OwnerPanel({ coo, pending, run }: { coo: CooData; pending: boolean; run: (fn: () => Promise<unknown>) => void }) {
+  const s = coo.settings;
+  const [phone, setPhone] = useState(s.owner_phone ?? "");
+  const [approvals, setApprovals] = useState(s.owner_approvals_enabled);
+  const [briefing, setBriefing] = useState(s.owner_briefing_enabled);
+  const [max, setMax] = useState(String(Math.round(Number(s.owner_approval_max_paise) / 100)));
+  const maxNum = Number(max);
+  const valid = Number.isFinite(maxNum) && maxNum >= 1 && (phone.trim() !== "" || (!approvals && !briefing));
+  return (
+    <div>
+      <p className="mb-5 max-w-3xl text-[15px] leading-6" style={{ color: "var(--muted)" }}>
+        Get a short briefing each morning, and answer a held payout from your phone by replying with a one-time code. Use your own personal number, not the one your team sends from. Only that number is ever treated as you. A code works once, expires in 10 minutes, and payouts above your ceiling can only be approved here on the dashboard.
+      </p>
+      <div className="flex flex-wrap items-end gap-5">
+        <div className="w-64 max-w-full">
+          <Field label="Your WhatsApp number">
+            <input className={inputClass} style={inputStyle} inputMode="tel" placeholder="+91 98765 43210" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          </Field>
+        </div>
+        <div className="w-56 max-w-full">
+          <Field label="Approve by reply up to (Rs)">
+            <input className={inputClass} style={inputStyle} inputMode="numeric" value={max} onChange={(e) => setMax(e.target.value.replace(/[^0-9]/g, ""))} />
+          </Field>
+        </div>
+      </div>
+      <div className="mt-5 flex flex-wrap gap-x-8 gap-y-3">
+        <label className="flex cursor-pointer items-center gap-3 text-[15px]">
+          <input type="checkbox" className="h-5 w-5 accent-[#7c5cff]" checked={briefing} onChange={(e) => setBriefing(e.target.checked)} />
+          Morning briefing
+        </label>
+        <label className="flex cursor-pointer items-center gap-3 text-[15px]">
+          <input type="checkbox" className="h-5 w-5 accent-[#7c5cff]" checked={approvals} onChange={(e) => setApprovals(e.target.checked)} />
+          Approve held payouts by reply
+        </label>
+      </div>
+      <div className="mt-5">
+        <PrimaryButton disabled={pending || !valid} className="px-6" onClick={() => run(() => saveOwnerChannel({ phone: phone.trim(), approvals, briefing, maxRupees: maxNum }))}>
+          Save
+        </PrimaryButton>
+      </div>
+      {coo.ownerMessages.length > 0 && (
+        <div className="mt-7">
+          <p className="mb-3 text-[13px] font-medium" style={{ color: "var(--muted)" }}>
+            Recent messages to you
+          </p>
+          <ul className="space-y-2.5">
+            {coo.ownerMessages.map((m) => (
+              <li key={m.id} className="surface-tile p-4">
+                <p className="whitespace-pre-line text-[14px] leading-6">{m.body}</p>
+                <p className="mt-1.5 text-[12px]" style={{ color: "var(--muted-2)" }}>
+                  {m.delivered ? "Sent to your phone" : "Not sent (sandbox, or WhatsApp not connected)"}, <TimeAgo iso={m.created_at} />
+                </p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Tile({ title, icon, connected, children, wide, index }: { title: string; icon: ReactNode; connected: boolean; children: ReactNode; wide?: boolean; index: number }) {
   return (
@@ -273,7 +336,11 @@ export function ConnectionsTab({
           )}
         </Tile>
 
-        <Tile index={6} title="Web search" icon={<GlobeSimple size={26} />} connected={on("search")} wide>
+        <Tile index={6} title="You, on WhatsApp" icon={<WhatsappLogo size={26} />} connected={!!coo.settings.owner_phone && (coo.settings.owner_approvals_enabled || coo.settings.owner_briefing_enabled)} wide>
+          <OwnerPanel coo={coo} pending={pending} run={run} />
+        </Tile>
+
+        <Tile index={7} title="Web search" icon={<GlobeSimple size={26} />} connected={on("search")} wide>
           <p className={`mb-5 max-w-3xl ${copy}`} style={{ color: "var(--muted)" }}>
             How the buying agent finds new suppliers. It works without a key using a free search, but a Brave or Tavily key gives better results.
           </p>

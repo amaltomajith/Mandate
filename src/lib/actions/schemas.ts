@@ -16,6 +16,17 @@ export const PayoutModeSchema = z.enum(["auto", "manual"]);
 export const VendorStatusSchema = z.enum(["approved", "blocked", "candidate"]);
 export const PayeeNameSchema = z.string().trim().min(1).max(120);
 
+export const OwnerChannelSchema = z.object({
+  phone: z
+    .string()
+    .trim()
+    .max(20)
+    .regex(/^(\+?[0-9][0-9 ()-]{8,18})?$/,"A phone number is digits, with an optional + and country code."),
+  approvals: z.boolean(),
+  briefing: z.boolean(),
+  maxRupees: z.number().finite().min(1).max(10_000_000),
+});
+
 const optionalText = (max: number) => z.string().trim().max(max).optional();
 
 export const VendorInputSchema = z.object({

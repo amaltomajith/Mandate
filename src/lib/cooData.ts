@@ -48,6 +48,14 @@ export interface ConfigEventRow {
   created_at: string;
 }
 
+export interface OwnerMessageRow {
+  id: string;
+  kind: "briefing" | "approval" | "reply";
+  body: string;
+  delivered: boolean;
+  created_at: string;
+}
+
 export interface CooData {
   settings: MerchantSettings;
   insights: ProductInsight[];
@@ -65,6 +73,8 @@ export interface CooData {
   connections: SafeConnection[];
   /** Who changed which setting, newest first. */
   configEvents: ConfigEventRow[];
+  /** What the owner channel has sent, newest first; undelivered ones were only recorded (sandbox). */
+  ownerMessages: OwnerMessageRow[];
   kpis: Kpis;
   /** When an agent last ran, as a heartbeat for the worker. Null if never. */
   lastRunAt: string | null;
@@ -117,6 +127,13 @@ export async function getCooData(db: SupabaseClient, merchantId: string): Promis
     .order("created_at", { ascending: false })
     .limit(60);
   if (configEvents.error) throw new Error(configEvents.error.message);
+  const ownerMessages = await (db as unknown as SupabaseClient)
+    .from("owner_messages")
+    .select("id, kind, body, delivered, created_at")
+    .eq("merchant_id", merchantId)
+    .order("created_at", { ascending: false })
+    .limit(8);
+  if (ownerMessages.error) throw new Error(ownerMessages.error.message);
 
   // Real sales only: sample sales never fund anything, so they are not "earned".
   const real = (sales.data ?? []).filter((s) => !(s.razorpay_payment_id ?? "").startsWith("sample_"));
@@ -150,6 +167,7 @@ export async function getCooData(db: SupabaseClient, merchantId: string): Promis
     lastRunAt: runs.data?.[0]?.started_at ?? null,
     workerIdle: lastBeat !== null ? Date.now() - lastBeat > 3 * 60_000 : !runs.data?.[0] || Date.now() - new Date(runs.data[0].started_at).getTime() > 15 * 60_000,
     configEvents: (configEvents.data ?? []) as ConfigEventRow[],
+    ownerMessages: (ownerMessages.data ?? []) as OwnerMessageRow[],
     kpis: {
       walletPaise: balance,
       earned7dPaise: earned7d,

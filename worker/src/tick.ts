@@ -6,6 +6,7 @@ import { runAgent, type RunResult } from "./runner";
 import { backoffMs } from "./lifecycle";
 import { log } from "./log";
 import { ensureWhatsApp, stopWhatsApp } from "./channels/whatsapp";
+import { handleOwnerMessage, isOwner, offerHeldPayouts, sendBriefingIfDue } from "./owner/owner";
 import { runBuyingAgent } from "./agents/buying";
 import { runSellingAgent } from "./agents/selling";
 
@@ -27,8 +28,17 @@ export async function tickMerchant(db: SupabaseClient, merchant: { id: string; s
   // in sandbox mode, so that pairing (the QR code) works before going live.
   if (settings.whatsapp_enabled) ensureWhatsApp(db, merchant.id);
   else await stopWhatsApp(merchant.id);
-  const channels = new ChannelService(db, merchant.id, settings.channel_mode, await buildDrivers(db, merchant.id, settings));
-  const ingested = await channels.ingest();
+  const drivers = await buildDrivers(db, merchant.id, settings);
+  const channels = new ChannelService(db, merchant.id, settings.channel_mode, drivers);
+  const whatsapp = drivers.get("whatsapp");
+  const ingested = await channels.ingest({ isOwner: (from) => isOwner(settings, from), handle: (text) => handleOwnerMessage(db, merchant.id, settings, whatsapp, text) });
+  // The owner channel: offer new held payouts and send the morning briefing. A failure here must not stop the agents.
+  try {
+    await offerHeldPayouts(db, merchant.id, settings, whatsapp);
+    await sendBriefingIfDue(db, merchant.id, settings, whatsapp);
+  } catch (err) {
+    log.warn("owner channel failed", { merchant: merchant.slug, err: err instanceof Error ? err.message : String(err) });
+  }
 
   // Buying first: it frees up the replies that the selling side may be waiting on
   // and it is the more time-sensitive of the two (stock-outs lose sales).
