@@ -159,7 +159,9 @@ export async function getAggregates(
         .select("amount_paise")
         .eq("merchant_id", merchantId)
         .gte("captured_at", since)
-        .or("razorpay_payment_id.is.null,razorpay_payment_id.not.like.sample_%"),
+        .or("razorpay_payment_id.is.null,razorpay_payment_id.not.like.sample_%")
+        // A sale on credit is not revenue until the customer pays (see credit.ts).
+        .or("razorpay_payment_id.is.null,razorpay_payment_id.not.like.credit_%"),
     ]);
     assertNoSupabaseError(paid.error);
     assertNoSupabaseError(sold.error);

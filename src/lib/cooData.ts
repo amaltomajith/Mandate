@@ -136,7 +136,8 @@ export async function getCooData(db: SupabaseClient, merchantId: string): Promis
   if (ownerMessages.error) throw new Error(ownerMessages.error.message);
 
   // Real sales only: sample sales never fund anything, so they are not "earned".
-  const real = (sales.data ?? []).filter((s) => !(s.razorpay_payment_id ?? "").startsWith("sample_"));
+  // Sample sales fund nothing, and a sale on credit is not revenue until it is paid.
+  const real = (sales.data ?? []).filter((s) => !/^(sample_|credit_)/.test(s.razorpay_payment_id ?? ""));
   const earned7d = real.filter((s) => s.captured_at >= since7).reduce((n, s) => n + Number(s.amount_paise), 0);
   const paid7d = (payouts.data ?? [])
     .filter((p) => p.created_at >= since7 && ["queued", "processing", "processed"].includes(p.status))

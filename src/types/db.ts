@@ -70,6 +70,8 @@ export interface Database {
           phone: string | null;
           /** The Selling agent may only contact customers who opted in. */
           marketing_opt_in: boolean;
+          credit_limit_paise: number;
+          credit_terms_days: number;
           created_at: string;
         };
         Insert: {
@@ -80,6 +82,8 @@ export interface Database {
           razorpay_contact_id?: string | null;
           phone?: string | null;
           marketing_opt_in?: boolean;
+          credit_limit_paise?: number;
+          credit_terms_days?: number;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["customers"]["Insert"]>;
@@ -745,6 +749,7 @@ export interface Database {
           owner_approval_max_paise: number;
           owner_briefing_enabled: boolean;
           owner_briefing_sent_on: string | null;
+          credit_exposure_cap_paise: number;
           updated_at: string;
         };
         Insert: {
@@ -766,6 +771,7 @@ export interface Database {
           owner_approval_max_paise?: number;
           owner_briefing_enabled?: boolean;
           owner_briefing_sent_on?: string | null;
+          credit_exposure_cap_paise?: number;
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["merchant_settings"]["Insert"]>;

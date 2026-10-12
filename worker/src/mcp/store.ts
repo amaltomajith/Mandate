@@ -121,7 +121,7 @@ export function createStoreServer(ctx: McpContext): McpServer {
       const since = new Date(Date.now() - 7 * 86_400_000).toISOString();
       const [paid, sold, balance] = await Promise.all([
         ctx.db.from("payouts").select("amount_paise").eq("merchant_id", ctx.merchantId).in("status", ["queued", "processing", "processed"]).gte("created_at", since),
-        ctx.db.from("sales").select("amount_paise").eq("merchant_id", ctx.merchantId).gte("captured_at", since).or("razorpay_payment_id.is.null,razorpay_payment_id.not.like.sample_%"),
+        ctx.db.from("sales").select("amount_paise").eq("merchant_id", ctx.merchantId).gte("captured_at", since).or("razorpay_payment_id.is.null,razorpay_payment_id.not.like.sample_%").or("razorpay_payment_id.is.null,razorpay_payment_id.not.like.credit_%"),
         walletBalancePaise(ctx.merchantId),
       ]);
       const spent = (paid.data ?? []).reduce((n, r) => n + Number(r.amount_paise), 0);
