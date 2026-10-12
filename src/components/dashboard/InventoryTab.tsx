@@ -28,8 +28,10 @@ interface Draft {
   stock: string;
   reorder: string;
   lead: string;
+  hsn: string;
+  gst: string;
 }
-const EMPTY: Draft = { sku: "", name: "", category: PRODUCT_CATEGORIES[0], price: "", cost: "", stock: "0", reorder: "0", lead: "7" };
+const EMPTY: Draft = { sku: "", name: "", category: PRODUCT_CATEGORIES[0], price: "", cost: "", stock: "0", reorder: "0", lead: "7", hsn: "", gst: "" };
 
 const toPaise = (v: string): number | null => (v.trim() === "" ? null : Math.round(parseFloat(v) * 100));
 
@@ -47,6 +49,8 @@ function toInput(d: Draft): ProductInput {
     stockQty: parseInt(d.stock || "0", 10),
     reorderPoint: parseInt(d.reorder || "0", 10),
     leadTimeDays: parseInt(d.lead || "0", 10),
+    hsnCode: d.hsn.trim() || null,
+    gstRatePercent: d.gst.trim() === "" ? null : parseFloat(d.gst),
   };
 }
 
@@ -89,6 +93,8 @@ export function InventoryTab({ insights }: { insights: ProductInsight[] }) {
       stock: String(i.stockQty),
       reorder: String(i.reorderPoint),
       lead: String(i.leadTimeDays),
+      hsn: i.hsnCode ?? "",
+      gst: i.gstRateBps == null ? "" : String(i.gstRateBps / 100),
     });
   }
 
@@ -286,6 +292,12 @@ export function InventoryTab({ insights }: { insights: ProductInsight[] }) {
           </Field>
           <Field label="Supplier lead time (days)">
             <input className={inputClass} style={inputStyle} inputMode="numeric" value={draft.lead} onChange={set("lead")} />
+          </Field>
+          <Field label="HSN code" hint="For GST reports. Optional">
+            <input className={inputClass} style={inputStyle} inputMode="numeric" maxLength={8} value={draft.hsn} onChange={set("hsn")} />
+          </Field>
+          <Field label="GST rate (%)" hint="Price includes it. Optional">
+            <input className={inputClass} style={inputStyle} inputMode="decimal" value={draft.gst} onChange={set("gst")} />
           </Field>
         </div>
       </Drawer>

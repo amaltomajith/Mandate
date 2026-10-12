@@ -2,21 +2,13 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentMerchant } from "@/lib/merchant";
 import { allow } from "@/lib/rateLimit";
+import { csvCell as cell } from "@/lib/csv";
 
 /**
  * The merchant's audit trail as a CSV: every action an agent proposed, what the
  * wall decided, which rule decided it, and why. Behind Clerk like the rest of
  * the dashboard and scoped to the signed-in merchant.
  */
-
-/** A spreadsheet will run a cell that starts with = + - or @ as a formula, and
- *  the reasoning column contains text derived from outside parties. Prefixing
- *  the cell makes it inert. */
-function cell(value: unknown): string {
-  let s = value === null || value === undefined ? "" : String(value);
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-  return `"${s.replace(/"/g, '""')}"`;
-}
 
 export async function GET() {
   const merchant = await getCurrentMerchant();

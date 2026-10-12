@@ -36,6 +36,7 @@ export interface VendorInput {
   website?: string;
   categories: string[];
   notes?: string;
+  gstin?: string;
 }
 
 export async function saveVendor(rawId: string | null, rawInput: VendorInput): Promise<void> {
@@ -57,6 +58,7 @@ export async function saveVendor(rawId: string | null, rawInput: VendorInput): P
     website: input.website?.trim() || null,
     categories: input.categories,
     notes: input.notes?.trim() || null,
+    gstin: input.gstin || null,
   };
   if (id) {
     const { error } = await db.from("vendors").update(row).eq("id", id).eq("merchant_id", merchant.id);

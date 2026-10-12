@@ -324,6 +324,10 @@ export interface Database {
           last_sold_at: string | null;
           /** Price before a clearance discount; null at normal price. */
           compare_at_price_paise: number | null;
+          /** 4, 6 or 8 digit HSN code, for GST exports. */
+          hsn_code: string | null;
+          /** GST rate in basis points (1800 = 18%); null = not set. */
+          gst_rate_bps: number | null;
           created_at: string;
         };
         Insert: {
@@ -341,6 +345,8 @@ export interface Database {
           lead_time_days?: number;
           last_sold_at?: string | null;
           compare_at_price_paise?: number | null;
+          hsn_code?: string | null;
+          gst_rate_bps?: number | null;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["products"]["Insert"]>;
@@ -359,6 +365,7 @@ export interface Database {
           source: "manual" | "research";
           categories: string[];
           reliability: number;
+          gstin: string | null;
           notes: string | null;
           simulated: boolean;
           created_at: string;
@@ -375,6 +382,7 @@ export interface Database {
           source?: "manual" | "research";
           categories?: string[];
           reliability?: number;
+          gstin?: string | null;
           notes?: string | null;
           simulated?: boolean;
           created_at?: string;

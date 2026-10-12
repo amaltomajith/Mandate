@@ -31,6 +31,9 @@ export interface ProductInsight {
   /** The price before a clearance discount, if one is running. */
   compareAtPaise: number | null;
   costPaise: number | null;
+  /** For GST exports; null until the merchant sets them. */
+  hsnCode?: string | null;
+  gstRateBps?: number | null;
   stockQty: number;
   reorderPoint: number;
   leadTimeDays: number;
@@ -116,6 +119,8 @@ export async function getInventoryInsights(
       pricePaise: p.price_paise,
       compareAtPaise: p.compare_at_price_paise ?? null,
       costPaise: cost,
+      hsnCode: (p.hsn_code as string | null) ?? null,
+      gstRateBps: (p.gst_rate_bps as number | null) ?? null,
       stockQty: p.stock_qty,
       reorderPoint: p.reorder_point,
       leadTimeDays: p.lead_time_days,

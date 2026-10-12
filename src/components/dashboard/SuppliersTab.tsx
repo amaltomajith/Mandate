@@ -73,7 +73,7 @@ export function SuppliersTab({ coo }: { coo: CooData }) {
   const vendorName = (id: string) => coo.vendors.find((v) => v.id === id)?.name ?? "Unknown supplier";
   const productName = (id: string | null) => coo.insights.find((i) => i.productId === id)?.name ?? "Unknown product";
 
-  const [vf, setVf] = useState({ name: "", channel: "email" as "email" | "whatsapp", email: "", phone: "", website: "", category: "", notes: "" });
+  const [vf, setVf] = useState({ name: "", channel: "email" as "email" | "whatsapp", email: "", phone: "", website: "", category: "", notes: "", gstin: "" });
   const [pf, setPf] = useState({ name: "", kind: "bank" as "bank" | "upi", account: "", ifsc: "", vpa: "" });
 
   return (
@@ -425,9 +425,9 @@ export function SuppliersTab({ coo }: { coo: CooData }) {
               disabled={pending}
               onClick={() =>
                 run(async () => {
-                  await saveVendor(null, { name: vf.name, channel: vf.channel, email: vf.email, phone: vf.phone, website: vf.website, categories: vf.category ? [vf.category] : [], notes: vf.notes });
+                  await saveVendor(null, { name: vf.name, channel: vf.channel, email: vf.email, phone: vf.phone, website: vf.website, categories: vf.category ? [vf.category] : [], notes: vf.notes, gstin: vf.gstin });
                   setAdding(false);
-                  setVf({ name: "", channel: "email", email: "", phone: "", website: "", category: "", notes: "" });
+                  setVf({ name: "", channel: "email", email: "", phone: "", website: "", category: "", notes: "", gstin: "" });
                 })
               }
             >
@@ -466,6 +466,9 @@ export function SuppliersTab({ coo }: { coo: CooData }) {
           </Field>
           <Field label="Website">
             <input className={inputClass} style={inputStyle} value={vf.website} onChange={(e) => setVf({ ...vf, website: e.target.value })} />
+          </Field>
+          <Field label="GSTIN" hint="For your purchase register. Optional">
+            <input className={inputClass} style={inputStyle} maxLength={15} value={vf.gstin} onChange={(e) => setVf({ ...vf, gstin: e.target.value.toUpperCase() })} />
           </Field>
         </div>
       </Drawer>

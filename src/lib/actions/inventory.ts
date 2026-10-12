@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireDashboardUser } from "./authGuard";
 import { getCurrentMerchant } from "@/lib/merchant";
 import { PRODUCT_CATEGORIES } from "@/lib/catalog";
+import { validHsn, validRateBps } from "@/lib/gst";
 
 /**
  * The merchant's own management of what they sell.
@@ -30,6 +31,10 @@ export interface ProductInput {
   stockQty: number;
   reorderPoint: number;
   leadTimeDays: number;
+  /** 4, 6 or 8 digit HSN code; empty or null clears it. */
+  hsnCode?: string | null;
+  /** GST rate in percent (18 = 18%); null clears it. */
+  gstRatePercent?: number | null;
 }
 
 const wholeNumber = (n: unknown, min: number, label: string): number => {
@@ -47,6 +52,10 @@ function validate(input: ProductInput) {
     throw new Error(`"${input.category}" is not a known category (${PRODUCT_CATEGORIES.join(", ")}).`);
   }
   const price = wholeNumber(input.pricePaise, 1, "Price");
+  const hsn = (input.hsnCode ?? "").trim();
+  if (hsn !== "" && !validHsn(hsn)) throw new Error("An HSN code is 4, 6 or 8 digits.");
+  const rateBps = input.gstRatePercent === null || input.gstRatePercent === undefined ? null : Math.round(input.gstRatePercent * 100);
+  if (rateBps !== null && !validRateBps(rateBps)) throw new Error("A GST rate is between 0 and 40 percent.");
   const cost = input.costPaise === null ? null : wholeNumber(input.costPaise, 0, "Cost");
   return {
     sku,
@@ -58,6 +67,8 @@ function validate(input: ProductInput) {
     stock_qty: wholeNumber(input.stockQty, 0, "Stock"),
     reorder_point: wholeNumber(input.reorderPoint, 0, "Reorder point"),
     lead_time_days: wholeNumber(input.leadTimeDays, 0, "Lead time"),
+    hsn_code: hsn === "" ? null : hsn,
+    gst_rate_bps: rateBps,
   };
 }
 

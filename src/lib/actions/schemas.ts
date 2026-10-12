@@ -79,6 +79,12 @@ export const VendorInputSchema = z.object({
     .refine((v) => v === "" || /^https?:\/\//i.test(v), "A website starts with http:// or https://.")
     .optional(),
   categories: z.array(z.string().trim().min(1).max(40)).max(10),
+  gstin: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .refine((v) => v === "" || /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(v), "A GSTIN is 15 characters, like 27AAPFU0939F1ZV.")
+    .optional(),
   notes: optionalText(1000),
 });
 
