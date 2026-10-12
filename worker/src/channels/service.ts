@@ -92,7 +92,9 @@ export class ChannelService {
         .select("id", { count: "exact", head: true })
         .eq("merchant_id", this.merchantId)
         .eq("customer_id", c.id);
-      if (!c.marketing_opt_in && (count ?? 0) === 0) throw new Error(`${c.name} has not opted in to messages.`);
+      // Someone with a credit account has a relationship with the store, so an account reminder is not an unsolicited message.
+      const { count: creditCount } = await db.from("credit_entries").select("id", { count: "exact", head: true }).eq("merchant_id", this.merchantId).eq("customer_id", c.id);
+      if (!c.marketing_opt_in && (count ?? 0) === 0 && (creditCount ?? 0) === 0) throw new Error(`${c.name} has not opted in to messages.`);
       counterparty = c.name;
       customerId = c.id;
       simulated = (c.email ?? "").endsWith(".sandbox.test");

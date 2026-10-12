@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { MerchantSettings } from "@/types/db";
 import { approveEscalationCore, denyEscalationCore } from "@/lib/approvals";
 import { getCooData } from "@/lib/cooData";
+import { getReceivables } from "@/lib/credit";
 import { normalizePhone } from "../channels/phone";
 import type { ChannelDriver } from "../channels/types";
 
@@ -194,11 +195,15 @@ export async function sendBriefingIfDue(db: SupabaseClient, merchantId: string, 
   const since = now.getTime() - 86_400_000;
   const recent = data.sales.filter((s) => new Date(s.captured_at).getTime() >= since);
   const sold = recent.reduce((n, s) => n + Number(s.amount_paise), 0);
+  const receivables = await getReceivables(db, merchantId, now);
+  const owed = receivables.reduce((n, r) => n + r.owedPaise, 0);
+  const overdue = receivables.reduce((n, r) => n + r.overduePaise, 0);
   const lines = [
     "Good morning. Here is your store.",
     `Sales, last 24 hours: ${recent.length} for ${rupees(sold)}.`,
     `Money available: ${rupees(data.kpis.walletPaise)}.`,
     data.kpis.openApprovals > 0 ? `Waiting for you: ${data.kpis.openApprovals}.` : "Nothing is waiting for you.",
+    ...(owed > 0 ? [`Owed to you on credit: ${rupees(owed)}${overdue > 0 ? ` (${rupees(overdue)} overdue)` : ""}.`] : []),
     data.kpis.runningLow > 0 ? `Running low: ${data.kpis.runningLow} product${data.kpis.runningLow === 1 ? "" : "s"}.` : "Nothing is running low.",
   ];
   await sendToOwner(db, merchantId, settings, driver, "briefing", lines.join("\n"));

@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { Session } from "../session";
 import { completeJson } from "../lib/llm";
 import { groundedIn } from "./quotes";
+import { runCollections } from "./collections";
 import { acceptWithLinkMessage, clearanceOfferMessage, counterMessage, declineMessage, holdMessage, money, polish } from "./messages";
 
 /**
@@ -57,6 +58,7 @@ export async function runSellingAgent(s: Session): Promise<string> {
   const notes: string[] = [];
   notes.push(...(await answerBuyers(s, store)));
   notes.push(...(await clearDeadStock(s, store)));
+  notes.push(...(await runCollections(s, store)));
   return notes.length ? notes.join(" ") : "Nothing to sell down and no buyers waiting.";
 }
 
