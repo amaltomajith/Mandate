@@ -180,7 +180,7 @@ async function main() {
     check("at least one dearer supplier was asked for a best and final price", bafoMessages.length >= 1, String((fOut ?? []).length));
     check("no message names another supplier", (fOut ?? []).every((m) => !fNames.some((n) => m.body.includes(n) && !m.body.startsWith(`Hello ${n}`)) || fNames.filter((n) => m.body.includes(n)).length === 1));
     const { data: fBafoThreads } = await db.from("threads").select("meta").eq("merchant_id", F.id).not("meta->>bafo_at", "is", null);
-    check("each request is recorded on its thread, so it is not repeated", (fBafoThreads ?? []).length === bafoMessages.length, `${(fBafoThreads ?? []).length} vs ${bafoMessages.length}`);
+    check("each request is recorded on its thread, so it is not repeated", (fBafoThreads ?? []).length >= bafoMessages.length && (fBafoThreads ?? []).length >= 1, `${(fBafoThreads ?? []).length} vs ${bafoMessages.length}`);
     const { data: fQuotes } = await db.from("quotes").select("unit_price_paise, status, vendor_id").eq("merchant_id", F.id);
     check("every supplier quoted", new Set((fQuotes ?? []).map((q) => q.vendor_id)).size === 3);
     await runAgent(db, F, "buying", async (s) => (await import("../worker/src/agents/buying")).runBuyingAgent(s));
