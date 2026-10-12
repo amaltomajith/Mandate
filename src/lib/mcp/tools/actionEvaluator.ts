@@ -7,7 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getMerchantIdForAgent } from "@/lib/merchant";
 import { getSettings } from "@/lib/settings";
 import { hardChecks, resolveActionFacts } from "@/lib/mcp/facts";
-import { withLock } from "@/lib/mutex";
+import { withMerchantLock } from "@/lib/merchantLock";
 import {
   createAlert,
   createEscalationForTrace,
@@ -88,8 +88,8 @@ export async function runActionEvaluation(
 ): Promise<EvaluationOutcome> {
   const merchantId = await getMerchantIdForAgent(createAdminClient(), agentId);
   // Enforce calls for one merchant run one at a time, so two of them cannot both
-  // read the same "spent so far" and together exceed a cap. See mutex.ts.
-  if (mode === "enforce") return withLock(merchantId, () => evaluate(agentId, merchantId, input, mode));
+  // read the same "spent so far" and together exceed a cap. See merchantLock.ts.
+  if (mode === "enforce") return withMerchantLock(merchantId, () => evaluate(agentId, merchantId, input, mode));
   return evaluate(agentId, merchantId, input, mode);
 }
 

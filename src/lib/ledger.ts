@@ -1,4 +1,5 @@
 import "server-only";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
@@ -30,40 +31,33 @@ export async function recordPayout(input: {
   simulated: boolean;
   note: string;
 }): Promise<void> {
-  const db = createAdminClient();
-  // The unique index on trace_id makes this idempotent: a retried approval hits
-  // the conflict and does nothing, so the same payout can never be booked twice.
-  const { data: payout, error } = await db
-    .from("payouts")
-    .upsert(
-      {
-        merchant_id: input.merchantId,
-        trace_id: input.traceId,
-        payee_id: input.payeeId,
-        po_id: input.poId ?? null,
-        amount_paise: input.amountPaise,
-        status: input.status,
-        razorpay_payout_id: input.razorpayPayoutId,
-        simulated: input.simulated,
-      },
-      { onConflict: "trace_id", ignoreDuplicates: true }
-    )
-    .select("id")
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!payout) return; // already booked
-
-  const { error: walletError } = await db.from("wallet_entries").insert({
-    merchant_id: input.merchantId,
-    direction: "debit",
-    amount_paise: input.amountPaise,
-    kind: "payout",
-    ref_type: "payout",
-    ref_id: payout.id,
-    note: input.note,
-    simulated: input.simulated,
-  });
-  if (walletError) throw new Error(walletError.message);
+  const db = createAdminClient() as unknown as SupabaseClient;
+  // The payout row and its wallet debit are one transaction (record_payout,
+  // migration 0028), idempotent on the trace id: a retried approval gets `false`
+  // and does nothing, so the same payout is never booked twice. And because they
+  // are one transaction, a failure cannot leave the payout recorded without its
+  // debit. This runs AFTER the money has gone out, so a transient database error
+  // is retried before giving up.
+  let booked: boolean | null = null;
+  let lastError = "";
+  for (let attempt = 0; attempt < 3 && booked === null; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 250 * 4 ** (attempt - 1)));
+    const { data, error } = await db.rpc("record_payout", {
+      p_merchant: input.merchantId,
+      p_trace: input.traceId,
+      p_payee: input.payeeId,
+      p_po: input.poId ?? null,
+      p_amount: input.amountPaise,
+      p_status: input.status,
+      p_razorpay_payout_id: input.razorpayPayoutId,
+      p_simulated: input.simulated,
+      p_note: input.note,
+    });
+    if (error) lastError = error.message;
+    else booked = data === true;
+  }
+  if (booked === null) throw new Error(`The payout went out (${input.razorpayPayoutId}) but could not be booked: ${lastError}`);
+  if (!booked) return; // already booked
 
   if (input.poId) {
     // An order is only "paid" once its advance is fully covered. Marking it paid

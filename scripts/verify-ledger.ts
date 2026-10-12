@@ -102,6 +102,24 @@ async function main() {
     const foreign = await apply(p2.razorpay_payout_id, "failed", other!.id);
     check("another merchant cannot touch it", (foreign.data as { found?: boolean })?.found === false);
 
+    console.log("booking a payout that really went out");
+    {
+      const { data: v3 } = await db.from("vendors").insert({ merchant_id: m.id, name: `Rec Co ${rnd}`, status: "approved", channel: "sandbox", simulated: true }).select("id").single();
+      const { data: pe3 } = await db.from("payees").insert({ merchant_id: m.id, vendor_id: v3!.id, kind: "bank", display_name: "Rec Co", masked_identifier: "••••0002", status: "active", approved_by: "v", approved_at: new Date().toISOString(), simulated: true }).select("id").single();
+      const { data: po3 } = await db.from("purchase_orders").insert({ merchant_id: m.id, vendor_id: v3!.id, status: "approved", total_paise: rupees(900), advance_paise: rupees(400) }).select("id").single();
+      const { data: tr } = await db.from("traces").insert({ merchant_id: m.id, mode: "enforce", action_type: "payout.create", params: {}, decision: "allow" }).select("id").single();
+      const rec = () =>
+        db.rpc("record_payout", { p_merchant: m.id, p_trace: tr!.id, p_payee: pe3!.id, p_po: po3!.id, p_amount: rupees(400), p_status: "processing", p_razorpay_payout_id: `pout_rec_${rnd}`, p_simulated: false, p_note: "advance to Rec Co" });
+      const w1 = await walletBalancePaise(m.id);
+      const results = await Promise.all([rec(), rec(), rec(), rec(), rec()]);
+      check("five parallel bookings of one payout succeed without error", results.every((r) => !r.error), JSON.stringify(results.find((r) => r.error)?.error));
+      check("exactly one reports it booked it", results.filter((r) => r.data === true).length === 1, results.map((r) => r.data).join(","));
+      check("one payout row", (await count("payouts", m.id, { trace_id: tr!.id })) === 1);
+      check("one wallet debit", (await walletBalancePaise(m.id)) === w1 - rupees(400), String((await walletBalancePaise(m.id)) - w1));
+      const noWallet = await db.rpc("record_payout", { p_merchant: m.id, p_trace: null, p_payee: pe3!.id, p_po: po3!.id, p_amount: 0, p_status: "processing", p_razorpay_payout_id: "x", p_simulated: false, p_note: "bad" });
+      check("a booking that cannot be completed leaves no payout row behind", !!noWallet.error && (await count("payouts", m.id, { razorpay_payout_id: "x" })) === 0, JSON.stringify(noWallet.error));
+    }
+
     console.log("paying by hand, confirmed twice at once");
     const { data: vendor } = await db.from("vendors").insert({ merchant_id: m.id, name: `Ledger Co ${rnd}`, status: "approved", channel: "sandbox", simulated: true }).select("*").single();
     const { data: payee } = await db

@@ -4,6 +4,7 @@ import { executeRealAction } from "@/lib/razorpay/actions";
 import { ActionInput } from "@/lib/mcp/schemas";
 import { recomputeTrust, updateTraceOutcome } from "@/lib/mcp/traceHelpers";
 import { recheckBeforeApproval } from "@/lib/mcp/tools/actionEvaluator";
+import { withMerchantLock } from "@/lib/merchantLock";
 import type { Json } from "@/types/db";
 
 /**
@@ -18,12 +19,18 @@ import type { Json } from "@/types/db";
 
 export type ApprovalResult = { status: "approved" | "already_approved" };
 
-export async function approveEscalationCore(
-  db: SupabaseClient,
-  merchantId: string,
-  escalationId: string,
-  approver: string
-): Promise<ApprovalResult> {
+/**
+ * The re-check, the claim and the execution run under the same per-merchant lock
+ * as enforce calls. Held payouts are not rows in `payouts` until they execute, so
+ * several approvals racing each re-checked the budget before any of them had
+ * spent from it, and together overspent it. Serialised, each one sees the
+ * previous one's spend.
+ */
+export function approveEscalationCore(db: SupabaseClient, merchantId: string, escalationId: string, approver: string): Promise<ApprovalResult> {
+  return withMerchantLock(merchantId, () => approveLocked(db, merchantId, escalationId, approver));
+}
+
+async function approveLocked(db: SupabaseClient, merchantId: string, escalationId: string, approver: string): Promise<ApprovalResult> {
   const { data: escalation, error: escError } = await db
     .from("escalations")
     .select("*")
