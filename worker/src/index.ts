@@ -1,6 +1,8 @@
 import "./env";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { tick } from "./tick";
+import { createStopSignal, reportAlive } from "./lifecycle";
+import { stopAllWhatsApp } from "./channels/whatsapp";
 
 /**
  * The worker: a long-running process that lets each merchant's Buying and
@@ -21,14 +23,18 @@ const slugIndex = args.indexOf("--slug");
 const slug = slugIndex >= 0 ? args[slugIndex + 1] : undefined;
 const tickMs = Math.max(10, Number(process.env.WORKER_TICK_SECONDS ?? 60)) * 1000;
 
-let stopping = false;
-process.on("SIGINT", () => {
-  stopping = true;
-  console.log("[worker] stopping after this pass...");
-});
-process.on("SIGTERM", () => {
-  stopping = true;
-});
+const stop = createStopSignal();
+// First signal: finish the pass in progress, then exit. Second signal: leave now.
+function onSignal(name: string) {
+  if (stop.stopping) {
+    console.log(`[worker] ${name} again: leaving now.`);
+    process.exit(1);
+  }
+  console.log(`[worker] ${name}: finishing this pass, then stopping (signal again to leave now).`);
+  stop.stop();
+}
+process.on("SIGINT", () => onSignal("SIGINT"));
+process.on("SIGTERM", () => onSignal("SIGTERM"));
 
 async function main() {
   const db = createAdminClient();
@@ -36,14 +42,18 @@ async function main() {
   do {
     const started = Date.now();
     try {
-      await tick(db, slug);
+      await reportAlive(db, { slug: slug ?? null });
+      const reports = await tick(db, slug, tickMs);
+      await reportAlive(db, { slug: slug ?? null, merchants: reports.length });
     } catch (err) {
       // Includes a paused Supabase project or a network blip: log and try again.
       console.error("[worker] pass failed:", err instanceof Error ? err.message : err);
     }
-    if (once || stopping) break;
-    await new Promise((r) => setTimeout(r, Math.max(1000, tickMs - (Date.now() - started))));
-  } while (!stopping);
+    if (once || stop.stopping) break;
+    // Wakes the moment a stop is requested instead of sleeping out the rest of the minute.
+    await stop.sleep(Math.max(1000, tickMs - (Date.now() - started)));
+  } while (!stop.stopping);
+  await stopAllWhatsApp();
   console.log("[worker] stopped.");
 }
 

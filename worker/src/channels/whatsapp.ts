@@ -270,6 +270,11 @@ export async function stopWhatsApp(merchantId: string) {
   sessions.delete(merchantId);
 }
 
+/** Closes every WhatsApp session, for a clean shutdown. */
+export async function stopAllWhatsApp() {
+  await Promise.allSettled([...sessions.keys()].map((id) => stopWhatsApp(id)));
+}
+
 export class WhatsAppDriver implements ChannelDriver {
   readonly channel = "whatsapp" as const;
   readonly live = true;

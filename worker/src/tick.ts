@@ -3,6 +3,7 @@ import { getSettings } from "@/lib/settings";
 import { ChannelService } from "./channels/service";
 import { buildDrivers } from "./channels/drivers";
 import { runAgent, type RunResult } from "./runner";
+import { backoffMs } from "./lifecycle";
 import { ensureWhatsApp, stopWhatsApp } from "./channels/whatsapp";
 import { runBuyingAgent } from "./agents/buying";
 import { runSellingAgent } from "./agents/selling";
@@ -35,8 +36,11 @@ export async function tickMerchant(db: SupabaseClient, merchant: { id: string; s
   return { merchant: merchant.slug, ingested, buying, selling };
 }
 
+/** Merchants whose passes keep failing wait longer before the next try, so one broken account cannot burn every pass. */
+const failing = new Map<string, { failures: number; until: number }>();
+
 /** Every merchant whose team is switched on. */
-export async function tick(db: SupabaseClient, only?: string): Promise<TickReport[]> {
+export async function tick(db: SupabaseClient, only?: string, passMs = 60_000): Promise<TickReport[]> {
   const { data: enabled, error } = await db.from("merchant_settings").select("merchant_id").eq("agents_enabled", true);
   if (error) throw new Error(error.message);
   if (!enabled?.length) return [];
@@ -47,13 +51,23 @@ export async function tick(db: SupabaseClient, only?: string): Promise<TickRepor
 
   const reports: TickReport[] = [];
   for (const m of merchants ?? []) {
+    const state = failing.get(m.slug);
+    if (state && Date.now() < state.until) continue;
     try {
       const report = await tickMerchant(db, m);
       reports.push(report);
+      if (report.buying.status === "error" && report.selling.status === "error") {
+        const failures = (state?.failures ?? 0) + 1;
+        failing.set(m.slug, { failures, until: Date.now() + backoffMs(failures, passMs) });
+      } else {
+        failing.delete(m.slug);
+      }
       console.log(`[worker] ${m.slug}\n  buying : ${describe(report.buying)}\n  selling: ${describe(report.selling)}`);
     } catch (err) {
       // One merchant's failure must not stop the others.
-      console.error(`[worker] ${m.slug} failed:`, err instanceof Error ? err.message : err);
+      const failures = (state?.failures ?? 0) + 1;
+      failing.set(m.slug, { failures, until: Date.now() + backoffMs(failures, passMs) });
+      console.error(`[worker] ${m.slug} failed (${failures} in a row, next try in ${Math.round(backoffMs(failures, passMs) / 1000)}s):`, err instanceof Error ? err.message : err);
     }
   }
   return reports;

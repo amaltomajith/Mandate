@@ -104,6 +104,11 @@ export async function getCooData(db: SupabaseClient, merchantId: string): Promis
     : { data: [], error: null };
   if (messages.error) throw new Error(messages.error.message);
 
+  // The worker's own pulse. When it has ever reported, "idle" means it has gone quiet,
+  // not that no agent happened to have work; before that, fall back to the last run.
+  const pulse = await (db as unknown as SupabaseClient).from("worker_status").select("beat_at").eq("id", "main").maybeSingle();
+  const lastBeat = pulse.data?.beat_at ? new Date(pulse.data.beat_at as string).getTime() : null;
+
   // The changes log is untyped in the generated database types, so read it untyped.
   const configEvents = await (db as unknown as SupabaseClient)
     .from("config_events")
@@ -143,7 +148,7 @@ export async function getCooData(db: SupabaseClient, merchantId: string): Promis
     runs: runs.data ?? [],
     connections: (connections.data ?? []) as SafeConnection[],
     lastRunAt: runs.data?.[0]?.started_at ?? null,
-    workerIdle: !runs.data?.[0] || Date.now() - new Date(runs.data[0].started_at).getTime() > 15 * 60_000,
+    workerIdle: lastBeat !== null ? Date.now() - lastBeat > 3 * 60_000 : !runs.data?.[0] || Date.now() - new Date(runs.data[0].started_at).getTime() > 15 * 60_000,
     configEvents: (configEvents.data ?? []) as ConfigEventRow[],
     kpis: {
       walletPaise: balance,
