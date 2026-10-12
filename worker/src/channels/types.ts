@@ -34,7 +34,7 @@ export interface SendResult {
  * a model.
  */
 export type SandboxContext =
-  | { kind: "rfq"; sku: string; name: string; qty: number; listPricePaise: number; counterparty: string; notes?: string | null; round: number }
+  | { kind: "rfq"; sku: string; name: string; qty: number; listPricePaise: number; counterparty: string; notes?: string | null; round: number; /** The lowest real competing quote, when this is a best-and-final request. */ benchmarkPaise?: number }
   | { kind: "offer"; sku: string; name: string; askPaise: number; qty: number; counterparty: string; round: number }
   | { kind: "negotiation"; sku: string; name: string; askPaise: number; counterpartyOfferPaise: number | null; counterparty: string; round: number }
   | { kind: "other"; counterparty: string; round: number };

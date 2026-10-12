@@ -165,6 +165,28 @@ async function main() {
     const { data: dAlerts } = await db.from("alerts").select("message").eq("merchant_id", D.id);
     check("the merchant is told what is missing", (dAlerts ?? []).some((a) => /payment details/i.test(a.message)));
 
+    console.log("best and final: dearer suppliers are asked to beat the real best price, truthfully");
+    const F = await newMerchant("f");
+    created.push(F.id);
+    await loadSampleStore(db, F.id);
+    await db.from("vendors").delete().eq("merchant_id", F.id);
+    const fNames = ["Alpha Traders", "Beta Wholesale", "Gamma Supplies"];
+    for (const n of fNames) {
+      await db.from("vendors").insert({ merchant_id: F.id, name: n, channel: "sandbox", email: `${n.split(" ")[0].toLowerCase()}@f.sandbox.test`, status: "approved", categories: ["electronics"], simulated: true });
+    }
+    await runAgent(db, F, "buying", async (s) => (await import("../worker/src/agents/buying")).runBuyingAgent(s));
+    const { data: fOut } = await db.from("messages").select("body").eq("merchant_id", F.id).eq("direction", "out");
+    const bafoMessages = (fOut ?? []).filter((m) => /best and final/i.test(m.body));
+    check("at least one dearer supplier was asked for a best and final price", bafoMessages.length >= 1, String((fOut ?? []).length));
+    check("no message names another supplier", (fOut ?? []).every((m) => !fNames.some((n) => m.body.includes(n) && !m.body.startsWith(`Hello ${n}`)) || fNames.filter((n) => m.body.includes(n)).length === 1));
+    const { data: fBafoThreads } = await db.from("threads").select("meta").eq("merchant_id", F.id).not("meta->>bafo_at", "is", null);
+    check("each request is recorded on its thread, so it is not repeated", (fBafoThreads ?? []).length === bafoMessages.length, `${(fBafoThreads ?? []).length} vs ${bafoMessages.length}`);
+    const { data: fQuotes } = await db.from("quotes").select("unit_price_paise, status, vendor_id").eq("merchant_id", F.id);
+    check("every supplier quoted", new Set((fQuotes ?? []).map((q) => q.vendor_id)).size === 3);
+    await runAgent(db, F, "buying", async (s) => (await import("../worker/src/agents/buying")).runBuyingAgent(s));
+    const { data: fOut2 } = await db.from("messages").select("body").eq("merchant_id", F.id).eq("direction", "out");
+    check("a second run does not ask again", (fOut2 ?? []).filter((m) => /best and final/i.test(m.body)).length === bafoMessages.length);
+
     console.log("controls");
     const off = await newMerchant("e");
     created.push(off.id);

@@ -1,7 +1,8 @@
 import type { Session } from "../session";
 import { toolLoop, llmAvailable } from "../lib/llm";
 import { asksToChangePaymentDetails, isWrittenConfirmation, usableQuote, parseQuote, pickBestQuote, sanityCheck } from "./quotes";
-import { money, polish, poConfirmationMessage, rfqMessage, voiceConfirmMessage } from "./messages";
+import { bestAndFinalMessage, money, polish, poConfirmationMessage, rfqMessage, voiceConfirmMessage } from "./messages";
+import { checkClaims, loadClaimTruth } from "./claims";
 import { isVoiceBody } from "../voice/transcribe";
 
 /**
@@ -163,6 +164,106 @@ export async function processVendorReplies(s: Session): Promise<string[]> {
     }
   }
   return out;
+}
+
+// --------------------------------------------------------------------------
+// Choosing a quote: the usable ones, and a best-and-final round
+// --------------------------------------------------------------------------
+
+type SupplierRow = { id: string; name: string; reliability: number | string };
+
+async function loadCandidates(s: Session, productId: string, suitable: SupplierRow[], vendors: SupplierRow[]) {
+  const { data: quotes } = await s.db
+    .from("quotes")
+    .select("*")
+    .eq("merchant_id", s.merchant.id)
+    .eq("product_id", productId)
+    .eq("status", "open")
+    .gte("valid_until", new Date().toISOString());
+  const reliability = new Map(vendors.map((v) => [v.id, Number(v.reliability)]));
+  return (quotes ?? [])
+    .filter((q) => suitable.some((v) => v.id === q.vendor_id))
+    // A quote that came from a voice note is only a draft until the supplier confirms it in writing.
+    .filter(usableQuote)
+    .map((q) => ({ id: q.id, vendorId: q.vendor_id, unitPricePaise: q.unit_price_paise, moq: q.moq, leadTimeDays: q.lead_time_days, reliability: reliability.get(q.vendor_id) ?? 50 }));
+}
+
+const BAFO_WAIT_MS = 24 * 3600_000;
+const BAFO_REPEAT_MS = 14 * 86_400_000;
+
+async function rfqThreads(s: Session, sku: string) {
+  const { data } = await s.db.from("threads").select("*").eq("merchant_id", s.merchant.id).eq("kind", "vendor").eq("meta->rfq->>sku", sku).order("created_at", { ascending: false });
+  return data ?? [];
+}
+
+const bafoAt = (t: { meta: unknown }) => {
+  const at = (t.meta as { bafo_at?: string } | null)?.bafo_at;
+  return at ? new Date(at).getTime() : null;
+};
+
+/**
+ * With two or more real quotes, ask each supplier that is dearer than the best to
+ * match or beat it. Everything said is true: the figure is the cheapest quote
+ * actually on record, the supplier it came from is never named, and the message
+ * has to pass the claim check (see claims.ts) before it is sent. Each supplier is
+ * asked once.
+ */
+async function bestAndFinal(
+  s: Session,
+  store: string,
+  product: { id: string; name: string; sku: string },
+  qty: number,
+  candidates: { vendorId: string; unitPricePaise: number; moq: number; leadTimeDays: number | null; reliability: number; id: string }[],
+  vendors: SupplierRow[]
+): Promise<{ sent: number; notes: string[] }> {
+  const notes: string[] = [];
+  let sent = 0;
+  const best = pickBestQuote(candidates)!;
+  const lowestByVendor = new Map<string, number>();
+  for (const c of candidates) lowestByVendor.set(c.vendorId, Math.min(c.unitPricePaise, lowestByVendor.get(c.vendorId) ?? Infinity));
+  const threads = await rfqThreads(s, product.sku);
+  // One round only. A second would let each answer trigger the next, a bidding war between suppliers.
+  if (threads.some((t) => { const at = bafoAt(t); return at !== null && Date.now() - at < BAFO_REPEAT_MS; })) return { sent: 0, notes };
+  for (const [vendorId, own] of lowestByVendor) {
+    if (vendorId === best.vendorId || own <= best.unitPricePaise) continue;
+    const vendor = vendors.find((v) => v.id === vendorId);
+    if (!vendor) continue;
+    const prior = threads.filter((t) => t.vendor_id === vendorId).map(bafoAt).find((t) => t !== null);
+    if (prior && Date.now() - prior < BAFO_REPEAT_MS) continue; // already asked
+
+    const template = bestAndFinalMessage({ vendor: vendor.name, store, name: product.name, ownPaise: own, bestPaise: best.unitPricePaise });
+    const truth = await loadClaimTruth(s.db, s.merchant.id, vendorId, product.sku);
+    let body = await polish(template.text, template.facts, "polite, firm and honest: a small business asking a supplier to beat a price it really has");
+    if (!checkClaims(body, truth).ok) body = template.text;
+    const verdict = checkClaims(body, truth);
+    if (!verdict.ok) {
+      notes.push(`Did not ask ${vendor.name} for a best and final price: ${verdict.problems.join(" ")}`);
+      continue;
+    }
+    // Stamped before sending: a sandbox supplier answers during the send, and its reply must count as after the request.
+    const askedAt = new Date().toISOString();
+    try {
+      await s.call("channels_send_message_to_vendor", { vendor_id: vendorId, subject: `Best and final: ${product.name}`, body, sku: product.sku, qty });
+      sent++;
+      const latest = (await rfqThreads(s, product.sku)).find((t) => t.vendor_id === vendorId);
+      if (latest) await s.db.from("threads").update({ meta: { ...((latest.meta as Record<string, unknown>) ?? {}), bafo_at: askedAt, bafo_benchmark_paise: best.unitPricePaise } as never }).eq("id", latest.id);
+    } catch (err) {
+      notes.push(`Could not ask ${vendor.name} for a best and final price: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  if (sent > 0) notes.push(`${product.name}: asked ${sent} supplier${sent === 1 ? "" : "s"} to beat the best real quote of ${money(best.unitPricePaise)}.`);
+  return { sent, notes };
+}
+
+/** True while a supplier asked for a best and final price has not yet answered, up to a day. */
+async function bafoPending(s: Session, sku: string): Promise<boolean> {
+  for (const t of await rfqThreads(s, sku)) {
+    const at = bafoAt(t);
+    if (at === null || Date.now() - at > BAFO_WAIT_MS) continue;
+    const { count } = await s.db.from("messages").select("id", { count: "exact", head: true }).eq("thread_id", t.id).eq("direction", "in").gt("created_at", new Date(at).toISOString());
+    if ((count ?? 0) === 0) return true;
+  }
+  return false;
 }
 
 // --------------------------------------------------------------------------
@@ -348,19 +449,7 @@ async function restockProduct(s: Session, store: string, item: InventoryItem): P
   }
 
   // Choose among valid, sane quotes.
-  const { data: quotes } = await s.db
-    .from("quotes")
-    .select("*")
-    .eq("merchant_id", s.merchant.id)
-    .eq("product_id", product.id)
-    .eq("status", "open")
-    .gte("valid_until", new Date().toISOString());
-  const reliability = new Map((vendors ?? []).map((v) => [v.id, Number(v.reliability)]));
-  const candidates = (quotes ?? [])
-    .filter((q) => suitable.some((v) => v.id === q.vendor_id))
-    // A quote that came from a voice note is only a draft until the supplier confirms it in writing.
-    .filter(usableQuote)
-    .map((q) => ({ id: q.id, vendorId: q.vendor_id, unitPricePaise: q.unit_price_paise, moq: q.moq, leadTimeDays: q.lead_time_days, reliability: reliability.get(q.vendor_id) ?? 50 }));
+  let candidates = await loadCandidates(s, product.id, suitable, vendors ?? []);
 
   // Wait for more answers if suppliers were asked and fewer than two replied,
   // unless the oldest request is a day old.
@@ -373,6 +462,21 @@ async function restockProduct(s: Session, store: string, item: InventoryItem): P
   if (candidates.length < Math.min(2, asked.size) && !stale) {
     out.push(`${product.name}: waiting for more supplier replies before choosing.`);
     return out;
+  }
+
+  // Best and final: tell the dearer suppliers, truthfully, what the cheapest real quote is and let them beat it.
+  if (new Set(candidates.map((c) => c.vendorId)).size >= 2) {
+    const round = await bestAndFinal(s, store, product, item.reorder_qty, candidates, vendors ?? []);
+    out.push(...round.notes);
+    if (round.sent > 0) {
+      // Replies in the sandbox arrive immediately; live ones come on a later run.
+      out.push(...(await processVendorReplies(s)));
+      candidates = await loadCandidates(s, product.id, suitable, vendors ?? []);
+    }
+    if (await bafoPending(s, product.sku)) {
+      out.push(`${product.name}: waiting for best-and-final answers before choosing.`);
+      return out;
+    }
   }
 
   const best = pickBestQuote(candidates)!;

@@ -36,7 +36,11 @@ export function simulateReplies(ctx: SandboxContext): string[] {
       const expensive = ctx.notes?.includes("[sandbox:expensive]") ?? false;
       // Wholesale lands at 54-66% of retail for an honest supplier.
       const factor = expensive ? 0.97 : 0.54 + h * 0.12;
-      const unit = Math.round((ctx.listPricePaise * factor) / 100) * 100;
+      let unit = Math.round((ctx.listPricePaise * factor) / 100) * 100;
+      // Asked to beat a real competing price, a reasonable supplier comes in just under it, but never below half of retail.
+      if (!expensive && ctx.benchmarkPaise && unit > ctx.benchmarkPaise) {
+        unit = Math.max(Math.round((ctx.listPricePaise * 0.5) / 100) * 100, Math.round((ctx.benchmarkPaise * 0.99) / 100) * 100);
+      }
       const moq = [20, 30, 50][Math.floor(h * 3)];
       const lead = 5 + Math.floor(h * 8);
       const qty = Math.max(ctx.qty, moq);

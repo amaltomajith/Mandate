@@ -51,6 +51,15 @@ export function rfqMessage(p: { vendor: string; store: string; name: string; sku
   return { text, facts: { required: [p.name, String(p.qty)] } };
 }
 
+export function bestAndFinalMessage(p: { vendor: string; store: string; name: string; ownPaise: number; bestPaise: number }): { text: string; facts: Facts } {
+  const text =
+    `Hello ${p.vendor},\n\n` +
+    `Thank you for your quote of ${money(p.ownPaise)} per unit for ${p.name}. We have received a lower quote of ${money(p.bestPaise)} per unit for the same product ` +
+    `(we do not share who it is from). If you can match or beat ${money(p.bestPaise)}, we would like to order from you. ` +
+    `Please reply with your best and final price per unit, minimum order and delivery time.\n\nThank you,\n${p.store}`;
+  return { text, facts: { required: [p.name, money(p.ownPaise), money(p.bestPaise)] } };
+}
+
 export function voiceConfirmMessage(p: { vendor: string; store: string; name: string; unitPaise: number; moq: number }): { text: string; facts: Facts } {
   const text =
     `Hello ${p.vendor},\n\n` +

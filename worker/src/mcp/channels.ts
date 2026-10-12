@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { ChannelService } from "../channels/service";
 import { fail, ok, type McpContext } from "./shared";
+import { checkOutgoingClaims } from "../agents/claims";
 
 /**
  * Email and WhatsApp (or the sandbox standing in for them), as an MCP server.
@@ -43,12 +44,15 @@ export function createChannelsServer(ctx: McpContext, channels: ChannelService):
     },
     async ({ vendor_id, subject, body, sku, qty }) => {
       try {
+        // No-lie negotiation: a claim about another offer, a price or a deadline must match the records, or nothing is sent.
+        const verdict = await checkOutgoingClaims(ctx.db, ctx.merchantId, vendor_id, sku, body);
+        if (!verdict.ok) return fail(`Not sent. ${verdict.problems.join(" ")}`);
         let sandbox: Parameters<ChannelService["send"]>[0]["sandbox"];
         let meta: Record<string, unknown> | undefined;
         if (sku && qty) {
           const { data: p } = await ctx.db.from("products").select("name, price_paise").eq("merchant_id", ctx.merchantId).eq("sku", sku).maybeSingle();
           if (!p) return fail(`No product "${sku}".`);
-          sandbox = { kind: "rfq", sku, name: p.name, qty, listPricePaise: p.price_paise };
+          sandbox = { kind: "rfq", sku, name: p.name, qty, listPricePaise: p.price_paise, benchmarkPaise: verdict.truth.competitorLowestPaise ?? undefined };
           meta = { rfq: { sku, qty } };
         } else {
           sandbox = { kind: "other" };
