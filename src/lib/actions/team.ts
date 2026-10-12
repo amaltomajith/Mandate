@@ -8,7 +8,8 @@ import { requireDashboardUser } from "./authGuard";
 import { getCurrentMerchant } from "@/lib/merchant";
 import { getSettings } from "@/lib/settings";
 import { changedFields, logConfigChange } from "@/lib/configLog";
-import { applyGuardrails } from "@/lib/policy/guardrails";
+import { applyGuardrails, guardrailPatch } from "@/lib/policy/guardrails";
+import { replayGuardrails, type ReplayResult } from "@/lib/policy/timeMachine";
 import { clearSampleStore, loadSampleStore } from "@/lib/sample";
 import { simulateSandboxPayment } from "@/lib/sales";
 
@@ -63,17 +64,20 @@ export async function updateGuardrails(input: GuardrailInput): Promise<void> {
     // enough to need approval would already be refused outright.
     throw new Error("The approval amount can't be higher than the largest single payout, or it would never ask you.");
   }
-  const { merchantId, db } = await updateSettings({
-    max_single_payout_paise: Math.round(v.maxSinglePayoutRupees * 100),
-    approval_threshold_paise: Math.round(v.approvalThresholdRupees * 100),
-    min_margin_bps: Math.round(v.minMarginPercent * 100),
-    weekly_payout_budget_paise: Math.round(v.weeklyBudgetRupees * 100),
-    payout_budget_pct: Math.round(v.budgetPercentOfRevenue),
-    starting_float_paise: Math.round(v.startingFloatRupees * 100),
-    require_approved_vendors: v.requireApprovedVendors,
-  });
+  const { merchantId, db } = await updateSettings(guardrailPatch(v));
   await applyGuardrails(db, merchantId, await getSettings(db, merchantId));
   revalidatePath("/dashboard");
+}
+
+/**
+ * "What would this have changed?" Replays the last month of real decisions under the
+ * proposed numbers. Reads only: nothing is saved, no money or message moves.
+ */
+export async function previewGuardrails(input: GuardrailInput): Promise<ReplayResult> {
+  const { merchant, db } = await scope();
+  const v = GuardrailInput.parse(input);
+  const current = await getSettings(db, merchant.id);
+  return replayGuardrails(db as never, merchant.id, { ...current, ...guardrailPatch(v) }, 30);
 }
 
 export async function setTeamEnabled(enabled: boolean): Promise<void> {

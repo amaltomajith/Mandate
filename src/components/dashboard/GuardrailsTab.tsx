@@ -4,8 +4,10 @@ import { useState, type ReactNode } from "react";
 import { CaretDown, ShieldCheck, ShieldWarning } from "@phosphor-icons/react";
 import type { MerchantSettings, PolicyRule } from "@/types/db";
 import type { PolicyIssue } from "@/lib/policy/audit";
-import { updateGuardrails } from "@/lib/actions/team";
-import { PrimaryButton } from "./ui";
+import { previewGuardrails, updateGuardrails } from "@/lib/actions/team";
+import type { ReplayResult } from "@/lib/policy/timeMachine";
+import { GhostButton, PrimaryButton } from "./ui";
+import { PolicyReplay } from "./PolicyReplay";
 import { ErrorLine, inputClass, inputStyle, useRunner } from "./kit";
 import { Reveal } from "./motion";
 import { PolicyRulesPanel } from "./PolicyRulesPanel";
@@ -35,6 +37,7 @@ export function GuardrailsTab({
 }) {
   const { error, pending, run } = useRunner();
   const [saved, setSaved] = useState(false);
+  const [replay, setReplay] = useState<ReplayResult | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const r = (paise: number) => String(Number(paise) / 100);
   const [f, setF] = useState({
@@ -48,8 +51,19 @@ export function GuardrailsTab({
   });
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setSaved(false);
+    setReplay(null);
     setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
   };
+
+  const values = () => ({
+    maxSinglePayoutRupees: parseFloat(f.maxSingle),
+    approvalThresholdRupees: parseFloat(f.approval),
+    minMarginPercent: parseFloat(f.margin),
+    weeklyBudgetRupees: parseFloat(f.weekly),
+    budgetPercentOfRevenue: parseFloat(f.pct),
+    startingFloatRupees: parseFloat(f.float),
+    requireApprovedVendors: f.approvedOnly,
+  });
 
   const activeRules = rules.filter((x) => x.status === "active").length;
   const healthy = deterministicIssues.length === 0;
@@ -123,20 +137,15 @@ export function GuardrailsTab({
               Saved. The wall is using these now.
             </span>
           )}
+          <GhostButton disabled={pending} onClick={() => run(async () => setReplay(await previewGuardrails(values())))}>
+            See what this would have changed
+          </GhostButton>
           <PrimaryButton
             disabled={pending}
             className="px-7"
             onClick={() =>
               run(async () => {
-                await updateGuardrails({
-                  maxSinglePayoutRupees: parseFloat(f.maxSingle),
-                  approvalThresholdRupees: parseFloat(f.approval),
-                  minMarginPercent: parseFloat(f.margin),
-                  weeklyBudgetRupees: parseFloat(f.weekly),
-                  budgetPercentOfRevenue: parseFloat(f.pct),
-                  startingFloatRupees: parseFloat(f.float),
-                  requireApprovedVendors: f.approvedOnly,
-                });
+                await updateGuardrails(values());
                 setSaved(true);
               })
             }
@@ -145,6 +154,8 @@ export function GuardrailsTab({
           </PrimaryButton>
         </div>
       </section>
+
+      {replay && <PolicyReplay r={replay} />}
 
       <section className="surface overflow-hidden">
         <button type="button" onClick={() => setAdvancedOpen((v) => !v)} aria-expanded={open} className="focus-ring flex w-full items-center justify-between gap-4 px-7 py-6 text-left">

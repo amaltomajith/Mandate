@@ -111,3 +111,27 @@ export async function applyGuardrails(db: SupabaseClient, merchantId: string, se
     if (writeError) throw new Error(writeError.message);
   }
 }
+
+export interface GuardrailValues {
+  maxSinglePayoutRupees: number;
+  approvalThresholdRupees: number;
+  minMarginPercent: number;
+  weeklyBudgetRupees: number;
+  budgetPercentOfRevenue: number;
+  startingFloatRupees: number;
+  requireApprovedVendors: boolean;
+}
+
+/** The settings columns a set of plain guardrail values writes. One mapping, so a
+ *  preview and a save can never disagree about what a number means. */
+export function guardrailPatch(v: GuardrailValues) {
+  return {
+    max_single_payout_paise: Math.round(v.maxSinglePayoutRupees * 100),
+    approval_threshold_paise: Math.round(v.approvalThresholdRupees * 100),
+    min_margin_bps: Math.round(v.minMarginPercent * 100),
+    weekly_payout_budget_paise: Math.round(v.weeklyBudgetRupees * 100),
+    payout_budget_pct: Math.round(v.budgetPercentOfRevenue),
+    starting_float_paise: Math.round(v.startingFloatRupees * 100),
+    require_approved_vendors: v.requireApprovedVendors,
+  };
+}
