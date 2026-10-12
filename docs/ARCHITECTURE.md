@@ -142,7 +142,7 @@ is held to the same list on every call. None of the local servers can move money
 | An agent refunds a payment that is not this business's | The wall requires the payment to be a recorded sale. |
 | A forged "from" on a supplier email | Only mail Gmail authenticated (DKIM or DMARC pass) is filed as a supplier's. |
 | A tenant borrows the operator's Razorpay account | Server keys are offered only to `MANDATE_OPERATOR_EMAILS`; RazorpayX likewise. |
-| Many parallel requests overshoot a daily cap or the budget | Enforce calls are serialised per merchant in-process (see "Honest notes" in the README for the multi-instance caveat). |
+| Many parallel requests overshoot a daily cap or the budget | Enforce calls and approvals are serialised per merchant: an in-process mutex plus a database lease (`merchant_locks`, migration 0027) that holds across instances and expires on its own. Money bookings (a sale, a payout, a refund, a manual confirmation) are single SQL transactions, so a failure part-way cannot lose or double money. |
 | A forged or replayed request | Signature, timestamp window and single-use nonce. |
 | A retired or paused agent keeps acting | Retired keys stop verifying; pause is checked at the wall, not requested of the agent. |
 | Double approval pays twice | Atomic claim before execution, a unique payout per trace, and the trace id as RazorpayX's idempotency key. |

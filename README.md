@@ -121,7 +121,7 @@ oracle (`evaluate_offer`) that returns accept, counter or decline without reveal
 ## Verification
 
 ```bash
-npm run verify:offline    # engine, inventory maths, channels, reset  (database only)
+npm run verify:offline    # engine, hardening, inventory, channels, reset, ledger, concurrency  (database only)
 npm run verify:online     # wall, manual payouts, buying, selling, webhook, closed loop  (needs `npm run dev`)
 npm run verify            # typecheck + lint + everything
 ```
@@ -129,18 +129,21 @@ npm run verify            # typecheck + lint + everything
 | Suite | Checks |
 |---|---|
 | `verify-engine` | 30: every rule, including fail-closed cases and priority |
-| `verify-hardening` | 36: findings from the independent security review (mutex, operator gate, rate limit, sender authentication, price grounding, SSRF ranges, input contract) |
+| `verify-hardening` | 58: mutex, operator gate, rate limits, sender authentication (DKIM alignment), price grounding, SSRF ranges, input contract, dashboard action schemas |
 | `verify-inventory` | 15: velocity, runway, dead stock, floor price |
-| `verify-channels` | 36: Gmail parsing and header-injection safety, phone matching, who may be contacted, SSRF refusals |
+| `verify-channels` | 43: Gmail parsing and a stubbed Gmail (429 retry), phone matching, who may be contacted, a failed record never re-sends, SSRF refusals |
 | `verify-reset` | 31: clears exactly one tenant, keeps what it promises |
-| `verify-manual` | 30: a payout becomes a task, the wallet moves only when you confirm, double-confirm and cross-tenant refused, cancel releases the budget |
+| `verify-ledger` | 34: sales, refunds, payout booking and manual confirm are atomic and exactly-once; no encrypted payee details reach the browser; config change log |
+| `verify-concurrency` | 10: the cross-instance lock; parallel enforce and approvals never overspend a budget |
 | `verify-wall` | 43: signatures, replay, payee/margin/budget/caps, purchase-order and refund ownership checks, currency, kill switches, dry-run, idempotency |
-| `verify-buying` | 35: quote → order → approval → payout → confirmation; hostile and unprofitable suppliers |
-| `verify-selling` | 28: clearance ladder, opt-in only, haggling, payment links, a buyer trying to talk the price to ₹1 |
+| `verify-worker` | 19: heartbeat vs reaping, prompt shutdown, backoff, worker pulse, log lines |
+| `verify-manual` | 30: a payout becomes a task, the wallet moves only when you confirm, double-confirm and cross-tenant refused, cancel releases the budget |
+| `verify-buying` | 35: quote, order, approval, payout, confirmation; hostile and unprofitable suppliers |
+| `verify-selling` | 28: clearance ladder, opt-in only, haggling, payment links, a buyer trying to talk the price to 1 rupee |
 | `verify-webhook` | 18: signature, idempotency, sales, payout failures, out-of-order events |
 | `verify-loop` | 13: slow stock funds the restock, end to end |
 
-**Total: 315 checks.** The online suites make real model calls and take several minutes.
+**Total: 407 checks** (offline 221, online 186). The online suites make real model calls and take several minutes.
 
 ## Honest notes
 
@@ -155,11 +158,9 @@ npm run verify            # typecheck + lint + everything
   simulated, and its payment links go nowhere. Everything it produces is labelled.
 - **Free-tier Supabase pauses after a week idle.** If the dashboard reports "fetch failed", restore the
   project. The worker's polling keeps an active account awake.
-- **Single worker, single app instance.** The run lock is per agent in the database, and enforce
-  calls are serialised per merchant *within one server process*, which closes the window where two
-  concurrent requests read the same "spent so far". A deployment with several app instances and
-  external agents calling in parallel would need a Postgres advisory lock to make that guarantee
-  across instances. The in-house agents are serialised regardless.
+- **Locking.** Enforce calls and approvals for one merchant run one at a time, across instances: an
+  in-process mutex plus a database lease that expires by itself if its holder crashes. Rate limits are
+  still per process. Only one worker should run per deployment.
 - **Server keys are the operator's.** "Use this server's Razorpay keys" is offered only to emails in
   `MANDATE_OPERATOR_EMAILS`. Leave it empty on a deployment with more than one merchant.
 - **Supplier email must be authenticated.** A message is only filed as a supplier's if Gmail reports

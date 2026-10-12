@@ -105,7 +105,7 @@ step-up) do not apply to it, only rules that name it (margin floor).
 **Approvals** (`src/lib/approvals.ts`): atomic claim `pending → approved`, then execute, release the
 claim on failure. Before executing, the limit rules are re-run (a payee revoked since still blocks it).
 
-**Concurrency:** enforce calls are serialised per merchant by an in-process mutex (`src/lib/mutex.ts`).
+**Concurrency:** enforce calls AND approvals run one at a time per merchant under `withMerchantLock` (`src/lib/merchantLock.ts`): the in-process mutex (`mutex.ts`) orders callers inside a process, and a database lease (`merchant_locks`, `acquire_merchant_lock`, migration 0027, expires on its own) orders instances against each other.
 This is correct for one app instance only (see section 10).
 
 **Guardrails UI to rules:** six numbers in `merchant_settings` (max single payout, approval threshold,
@@ -257,26 +257,37 @@ npm run verify            # typecheck + lint + everything
 | Suite | Checks | Covers |
 |---|---|---|
 | verify-engine | 30 | every rule, fail-closed cases, priority |
-| verify-hardening | 36 | mutex, operator gate, rate limit, sender auth, price grounding, SSRF, input contract |
+| verify-hardening | 58 | mutex, operator gate, rate limits (wall and dashboard actions), mail sender authentication (DKIM alignment), price grounding, SSRF, input contract, dashboard action input schemas |
 | verify-inventory | 15 | velocity, runway, dead stock, floor price |
-| verify-channels | 36 | Gmail parsing and header safety, phone matching, consent, SSRF refusals |
+| verify-channels | 43 | Gmail parsing, header safety and a stubbed Gmail (429 retry, no refetch), phone matching, consent, a failed record never re-sends, SSRF refusals |
 | verify-reset | 31 | clears exactly one tenant |
+| verify-ledger | 34 | sale booking, payout failure refund, payout booking and manual confirm are atomic and exactly-once under parallel calls; no encrypted payee details in dashboard data; config change log |
+| verify-concurrency | 10 | the cross-instance lease; parallel enforce and parallel approvals never overspend one budget |
 | verify-wall | 43 | signatures, replay, payee/margin/budget/caps, PO and refund ownership, currency, kill switches, dry run, idempotency |
+| verify-worker | 19 | heartbeat vs reaping, prompt shutdown, merchant backoff, worker pulse, log lines (needs the app running) |
 | verify-manual | 30 | queue, wallet moves only on confirm, double-confirm and cross-tenant refused, cancel releases budget |
 | verify-buying | 35 | quote to order to approval to payout to confirmation; hostile and unprofitable suppliers |
-| verify-selling | 28 | clearance ladder, opt-in only, haggling, links, a buyer pushing the price to ₹1 |
+| verify-selling | 28 | clearance ladder, opt-in only, haggling, links, a buyer pushing the price to Rs 1 |
 | verify-webhook | 18 | signature, idempotency, sales, payout failures, out-of-order events |
 | verify-loop | 13 | slow stock funds the restock end to end |
 
-315 checks, all passing as of the manual-payout commit. **Not re-run since the dashboard rewrite**;
-that change is presentation-only, but `verify:offline`, `next build` and the online suites have not
-been executed after it. `tsc --noEmit` and `eslint` were clean.
+**Total: 407 checks** (offline 221, online 186). All passing on 2026-10-12 after the hardening pass in
+section 14, together with `tsc` (app and worker), `eslint`, `next build` and `npm audit` (0 vulnerabilities).
+`.github/workflows/ci.yml` runs typecheck and lint always, and `verify:offline` when the `TEST_SUPABASE_*`
+secrets are set; the online suites stay manual (they need a running app and make real model calls).
 
 ## 12. Known limits and unverified areas
 
-- **Single app instance.** The per-merchant mutex is in-process. Several instances, or external agents
-  calling in parallel, need a Postgres advisory lock to keep the same guarantee across instances.
-- **Single worker.** The run lock is per agent in the database.
+- **Locking across instances** is a lease row with a 90 s expiry: a holder that crashes mid-evaluation
+  blocks that merchant's money path for up to that long, then the lease frees itself. A single evaluation
+  that legitimately runs longer than the lease (a very slow RazorpayX call) could in theory be overlapped;
+  the payout idempotency key and the unique indexes make that safe for money, but it is the one place the
+  guarantee is time-based rather than absolute.
+- **Single worker.** Each agent run is guarded by the `agent_runs` unique index plus a heartbeat; two
+  workers cannot run the same agent for one merchant at once, but nothing coordinates which worker
+  holds a WhatsApp session.
+- **Rate limits are per process** (`src/lib/rateLimit.ts`). Fine as a brake on one instance; a precise
+  global limit belongs at the platform edge.
 - **Gmail and RazorpayX are implemented but unexercised against live accounts.** Parsing, safety and
   consent rules are tested; the network calls follow the providers' documented APIs. RazorpayX needs a
   registered business account (not available during development, hence manual payout mode).
@@ -291,8 +302,38 @@ been executed after it. `tsc --noEmit` and `eslint` were clean.
 
 ## 13. Next steps, if continuing
 
-1. Run `npm run verify:offline`, `next build`, then the online suites.
-2. Finish the unrestyled panels listed in section 9, then the responsive and reduced-motion checks.
-3. Live-test Gmail (OAuth client is configured locally) and WhatsApp with a real number.
-4. Decide hosting: the app anywhere Next runs; the worker needs a long-lived process.
-5. Replace the in-process mutex with a Postgres advisory lock before running more than one instance.
+1. Live-test Gmail (OAuth client is configured locally) and WhatsApp with a real number.
+2. Decide hosting: the app anywhere Next runs; the worker needs a long-lived process.
+3. Responsive and reduced-motion checks on a real phone; a skeleton for each tab's first paint.
+4. Error reporting (Sentry or similar) behind the existing structured logs.
+5. Reconciliation for a real payout that went out but could not be booked (it is retried three times, and
+   the failure is logged with the payout id, but there is no background sweep yet).
+
+## 14. Hardening pass (2026-10-12)
+
+Every item began as a failing test that reproduced the problem; claims from the audits that did not
+reproduce were not changed.
+
+| Problem (reproduced) | Fix | Where |
+|---|---|---|
+| Three parallel sales left stock at 7 instead of 1 (lost updates); a failure after the sale insert lost the wallet credit for good because the retry saw the sale | `book_captured_payment`: sale lines, guarded stock decrement and wallet credit in one transaction | migration 0026, `src/lib/sales.ts` |
+| A failed and a reversed payout event arriving together could both credit the wallet | `apply_payout_status`: row lock, forward-only status, one refund; unique index backstops | 0026, webhook route |
+| Manual confirm claimed the payout, then debited separately | `confirm_manual_payout`: one transaction | 0026, `src/lib/manualPayouts.ts` |
+| Four simultaneous approvals paid 48,000 rupees against a 25,000 budget | approvals run under the same per-merchant lock as enforce | `src/lib/approvals.ts` |
+| The lock only worked inside one process | database lease `acquire_merchant_lock` / `release_merchant_lock` | 0027, `src/lib/merchantLock.ts` |
+| A payout row could exist without its debit, and the retry then called it "already booked" | `record_payout`: row + debit in one transaction, bounded retry after the money has gone out | 0028, `src/lib/ledger.ts` |
+| A DKIM pass from any domain authenticated a spoofed From | DKIM counts only when its domain aligns with the From domain; `dmarc=pass` alone is enough | `worker/src/channels/gmail.ts` |
+| `payees.details_enc` (ciphertext) was sent to the browser | explicit column list, blanked in the returned object | `src/lib/cooData.ts` |
+| Server actions trusted TypeScript types and had unbounded text | zod schemas (ids, enums, lengths, formats), a per-user action rate limit, an export rate limit and a truncation header | `src/lib/actions/schemas.ts`, `authGuard.ts`, `rateLimit.ts` |
+| No record of who changed a limit or switched the team off | `config_events` + a Changes view on Activity; every setting change goes through one logged path | 0029, `src/lib/configLog.ts`, `actions/team.ts` |
+| A slow legitimate run was reaped after a fixed 10 minutes; shutdown waited out the sleep; a failing merchant retried at full speed; the dashboard guessed worker health | heartbeats, abortable sleep with a second-signal exit, exponential backoff per merchant, a `worker_status` pulse | 0030, `worker/src/{runner,lifecycle,index,tick}.ts` |
+| A failed message record after a successful send made the call fail, so a retry sent the email twice | bounded retry on the record; the send is reported as done and the gap logged | `worker/src/channels/service.ts` |
+| Gmail polling re-downloaded every body each tick and failed on a 429 | retry with `Retry-After`; messages are skipped once the service acknowledges them | `gmail.ts`, `types.ts` |
+| The 3D map's drei `<Html>` labels logged "unmount a root" a dozen times a load (dev only) | one exact message filtered in dev; Strict Mode turned off for the map | `GraphCanvas.tsx`, `next.config.ts` |
+
+Front end: error, global-error and not-found pages (this Next version passes `retry`, not `reset`), a
+loading skeleton that matches the rail layout, Settings reachable on phones, a focus trap and
+`aria-labelledby` on dialogs, arrow keys on the segmented control, `aria-live` on toasts, `aria-expanded`
+on the alerts bell, a skip link, `--muted-2` raised to AA contrast, the refresher paused while the tab is
+hidden, and `optimizePackageImports` for icons and motion. A Supabase query is lazy: it is only sent when
+awaited or `.then`-ed, which is why the worker heartbeat uses `.then(...)`.
