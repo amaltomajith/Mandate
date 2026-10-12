@@ -67,46 +67,27 @@ export async function recordCapturedPayment(db: SupabaseClient, p: CapturedPayme
           return { product_id: bySku.get(i.sku)!.id as string | null, qty: i.qty, amount_paise: share };
         });
 
-  const now = new Date().toISOString();
-  for (const [idx, row] of rows.entries()) {
-    const { error } = await db.from("sales").insert({
-      merchant_id: p.merchantId,
-      product_id: row.product_id,
-      qty: row.qty,
-      amount_paise: row.amount_paise,
-      source: p.source,
-      // One payment id per payment; extra lines get a suffix so the unique key holds.
-      razorpay_payment_id: idx === 0 ? p.paymentId : `${p.paymentId}#${idx}`,
-      razorpay_order_id: p.orderId ?? null,
-      captured_at: now,
-    });
-    if (error) {
-      if (error.code === "23505") return { booked: false, reason: "already recorded" };
-      throw new Error(error.message);
-    }
+  // Sale lines, stock and the wallet credit are one transaction in the database
+  // (book_captured_payment, migration 0026). They used to be separate writes, so a
+  // failure after the first left a sale with no credit, and Razorpay's retry then
+  // saw the sale and stopped. Now it is all booked or none of it is, and a retry
+  // simply tries again.
+  const { data: booked, error } = await db.rpc("book_captured_payment", {
+    p_merchant: p.merchantId,
+    p_payment_id: p.paymentId,
+    p_order_id: p.orderId ?? null,
+    p_source: p.source,
+    p_amount: p.amountPaise,
+    p_simulated: p.simulated,
+    p_note: p.items.length ? `Sale: ${p.items.map((i) => `${i.qty} x ${i.sku}`).join(", ")}` : "Payment received",
+    p_rows: rows,
+  });
+  if (error) {
+    // A concurrent delivery of the same payment lost the race on the unique key.
+    if (error.code === "23505") return { booked: false, reason: "already recorded" };
+    throw new Error(error.message);
   }
-
-  for (const i of lines) {
-    const product = bySku.get(i.sku)!;
-    await db
-      .from("products")
-      .update({ stock_qty: Math.max(0, product.stock_qty - i.qty), last_sold_at: now })
-      .eq("id", product.id)
-      .eq("merchant_id", p.merchantId);
-  }
-
-  if (p.amountPaise > 0) {
-    const { error } = await db.from("wallet_entries").insert({
-      merchant_id: p.merchantId,
-      direction: "credit",
-      amount_paise: p.amountPaise,
-      kind: "sale",
-      ref_type: "payment",
-      note: p.items.length ? `Sale: ${p.items.map((i) => `${i.qty} x ${i.sku}`).join(", ")}` : "Payment received",
-      simulated: p.simulated,
-    });
-    if (error) throw new Error(error.message);
-  }
+  if (booked === false) return { booked: false, reason: "already recorded" };
   return { booked: true };
 }
 

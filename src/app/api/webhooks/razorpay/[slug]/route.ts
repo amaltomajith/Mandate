@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getMerchantBySlug } from "@/lib/merchant";
 import { decryptJson } from "@/lib/secrets";
@@ -128,40 +129,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     if (payout?.id && /^payout\.(processed|failed|reversed|rejected|queued|initiated)$/.test(event.event ?? "")) {
       const status =
         event.event === "payout.processed" ? "processed" : event.event === "payout.reversed" ? "reversed" : /failed|rejected/.test(event.event ?? "") ? "failed" : event.event === "payout.queued" ? "queued" : "processing";
-      const { data: row } = await db
-        .from("payouts")
-        .select("id, amount_paise, status, po_id")
-        .eq("merchant_id", merchantId)
-        .eq("razorpay_payout_id", payout.id)
-        .maybeSingle();
-      if (row) {
-        // Webhooks can arrive out of order. A status only ever moves forward, so a
-        // late "processed" cannot undo a "failed" the wallet has already been
-        // credited for.
-        const rank: Record<string, number> = { queued: 0, processing: 1, processed: 2, failed: 2, reversed: 3 };
-        if ((rank[status] ?? 0) <= (rank[row.status] ?? 0)) return NextResponse.json({ ok: true, stale: true });
-        await db.from("payouts").update({ status }).eq("id", row.id);
-        if ((status === "failed" || status === "reversed") && row.status !== "failed" && row.status !== "reversed") {
-          // The money did not leave (or came back): credit the wallet to match and tell the merchant.
-          await db.from("wallet_entries").insert({
-            merchant_id: merchantId,
-            direction: "credit",
-            amount_paise: row.amount_paise,
-            kind: "refund",
-            ref_type: "payout",
-            ref_id: row.id,
-            note: `Payout ${status}`,
-          });
-          if (row.po_id) {
-            await db
-              .from("purchase_orders")
-              .update({ status: "draft", rationale: `Payout ${status}. Check the supplier's payment details and retry.` })
-              .eq("id", row.po_id)
-              .eq("merchant_id", merchantId);
-          }
-          await db.from("alerts").insert({ merchant_id: merchantId, trace_id: null, severity: "high", message: `A payout to a supplier ${status}. The amount was returned to your wallet and the order is back to draft.` });
-        }
-      }
+      // Status, wallet credit, order and alert move together in the database
+      // (apply_payout_status, migration 0026), under a row lock: a failed and a
+      // reversed event arriving together cannot both credit the wallet, and a late
+      // "processed" cannot undo a failure.
+      const { data: applied, error: applyError } = await (db as unknown as SupabaseClient).rpc("apply_payout_status", { p_merchant: merchantId, p_razorpay_payout_id: payout.id, p_status: status });
+      if (applyError) throw new Error(applyError.message);
+      if ((applied as { stale?: boolean } | null)?.stale) return NextResponse.json({ ok: true, stale: true });
       return NextResponse.json({ ok: true });
     }
 

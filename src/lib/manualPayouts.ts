@@ -77,47 +77,13 @@ export async function confirmManualPayout(
   const ref = reference?.trim().slice(0, 64) || null;
   if (ref && !/^[\w .\-/#]+$/.test(ref)) throw new Error("A payment reference is letters, digits, spaces and . - / # _ only.");
 
-  // Claim first, then book. Conditional on `queued`, so a double click, or two
-  // tabs, cannot debit the wallet twice.
-  const { data: claimed, error } = await db
-    .from("payouts")
-    .update({ status: "processed", paid_at: new Date().toISOString(), paid_ref: ref, confirmed_by: confirmedBy })
-    .eq("id", payoutId)
-    .eq("merchant_id", merchantId)
-    .eq("manual", true)
-    .eq("status", "queued")
-    .select("id, amount_paise, po_id, payee_id")
-    .maybeSingle();
+  // Claim, wallet debit, order and alert are one transaction in the database
+  // (confirm_manual_payout, migration 0026). Conditional on `queued`, so a double
+  // click or two tabs cannot debit the wallet twice, and a failed debit cannot
+  // leave a payout marked paid with no money booked.
+  const { data, error } = await db.rpc("confirm_manual_payout", { p_merchant: merchantId, p_payout: payoutId, p_by: confirmedBy, p_ref: ref });
   if (error) throw new Error(error.message);
-  if (!claimed) return { confirmed: false, reason: "This payment is not waiting for you any more." };
-
-  const { data: payee } = claimed.payee_id
-    ? await db.from("payees").select("display_name").eq("id", claimed.payee_id).maybeSingle()
-    : { data: null };
-
-  const { error: walletError } = await db.from("wallet_entries").insert({
-    merchant_id: merchantId,
-    direction: "debit",
-    amount_paise: claimed.amount_paise,
-    kind: "payout",
-    ref_type: "payout",
-    ref_id: claimed.id,
-    note: `Paid ${payee?.display_name ?? "a supplier"} by hand${ref ? ` (ref ${ref})` : ""}`,
-    simulated: false,
-  });
-  if (walletError) throw new Error(walletError.message);
-
-  if (claimed.po_id) {
-    const [{ data: po }, { data: paid }] = await Promise.all([
-      db.from("purchase_orders").select("advance_paise").eq("id", claimed.po_id).eq("merchant_id", merchantId).maybeSingle(),
-      db.from("payouts").select("amount_paise").eq("merchant_id", merchantId).eq("po_id", claimed.po_id).eq("status", "processed"),
-    ]);
-    const covered = (paid ?? []).reduce((n, x) => n + Number(x.amount_paise), 0);
-    if (po && covered >= Number(po.advance_paise)) {
-      await db.from("purchase_orders").update({ status: "paid" }).eq("id", claimed.po_id).eq("merchant_id", merchantId).in("status", OPEN);
-    }
-  }
-  await db.from("alerts").insert({ merchant_id: merchantId, trace_id: null, severity: "info", message: `You confirmed paying ${payee?.display_name ?? "a supplier"}. The wallet has been updated and the supplier will be told.` });
+  if (!(data as { confirmed?: boolean } | null)?.confirmed) return { confirmed: false, reason: "This payment is not waiting for you any more." };
   return { confirmed: true };
 }
 
