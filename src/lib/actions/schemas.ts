@@ -27,6 +27,29 @@ export const OwnerChannelSchema = z.object({
   maxRupees: z.number().finite().min(1).max(10_000_000),
 });
 
+export const CreditCustomerSchema = z.object({
+  customerId: z.uuid().optional(),
+  name: z.string().trim().max(120).optional(),
+  phone: z.string().trim().max(20).regex(/^(\+?[0-9][0-9 ()-]{5,18})?$/, "A phone number is digits, with an optional + and country code.").optional(),
+  email: z.string().trim().max(254).pipe(z.union([z.literal(""), z.email()])).optional(),
+  limitRupees: z.number().finite().min(0).max(100_000_000),
+  termsDays: z.number().int().min(1).max(180),
+});
+
+export const CreditSaleSchema = z.object({
+  customerId: z.uuid(),
+  sku: z.string().trim().min(1).max(80),
+  qty: z.number().int().min(1).max(100000),
+  /** One per submit, so a double click or a retry is one sale. */
+  ref: z.string().trim().max(80).optional(),
+});
+
+export const CreditPaymentSchema = z.object({
+  customerId: z.uuid(),
+  amountRupees: z.number().finite().min(1).max(100_000_000),
+  ref: z.string().trim().max(80).optional(),
+});
+
 const optionalText = (max: number) => z.string().trim().max(max).optional();
 
 export const VendorInputSchema = z.object({

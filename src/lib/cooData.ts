@@ -1,4 +1,5 @@
 import "server-only";
+import { getReceivables, type Receivable } from "@/lib/credit";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { deadStockValue, getInventoryInsights, type ProductInsight } from "@/lib/inventory";
 import { getSettings } from "@/lib/settings";
@@ -56,6 +57,13 @@ export interface OwnerMessageRow {
   created_at: string;
 }
 
+export interface CreditCustomer {
+  id: string;
+  name: string;
+  limitPaise: number;
+  termsDays: number;
+}
+
 export interface CooData {
   settings: MerchantSettings;
   insights: ProductInsight[];
@@ -73,6 +81,10 @@ export interface CooData {
   connections: SafeConnection[];
   /** Who changed which setting, newest first. */
   configEvents: ConfigEventRow[];
+  /** Customers, for granting credit. */
+  creditCustomers: CreditCustomer[];
+  /** Who owes what on credit. */
+  receivables: Receivable[];
   /** What the owner channel has sent, newest first; undelivered ones were only recorded (sandbox). */
   ownerMessages: OwnerMessageRow[];
   kpis: Kpis;
@@ -134,6 +146,9 @@ export async function getCooData(db: SupabaseClient, merchantId: string): Promis
     .order("created_at", { ascending: false })
     .limit(8);
   if (ownerMessages.error) throw new Error(ownerMessages.error.message);
+  const customerRows = await db.from("customers").select("id, name, credit_limit_paise, credit_terms_days").eq("merchant_id", merchantId).order("name").limit(300);
+  if (customerRows.error) throw new Error(customerRows.error.message);
+  const receivables = await getReceivables(db, merchantId);
 
   // Real sales only: sample sales never fund anything, so they are not "earned".
   // Sample sales fund nothing, and a sale on credit is not revenue until it is paid.
@@ -169,6 +184,8 @@ export async function getCooData(db: SupabaseClient, merchantId: string): Promis
     workerIdle: lastBeat !== null ? Date.now() - lastBeat > 3 * 60_000 : !runs.data?.[0] || Date.now() - new Date(runs.data[0].started_at).getTime() > 15 * 60_000,
     configEvents: (configEvents.data ?? []) as ConfigEventRow[],
     ownerMessages: (ownerMessages.data ?? []) as OwnerMessageRow[],
+    creditCustomers: (customerRows.data ?? []).map((r) => ({ id: r.id, name: r.name, limitPaise: Number(r.credit_limit_paise), termsDays: r.credit_terms_days })),
+    receivables,
     kpis: {
       walletPaise: balance,
       earned7dPaise: earned7d,
