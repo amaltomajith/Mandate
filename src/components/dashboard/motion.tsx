@@ -131,7 +131,7 @@ export function Segmented<T extends string>({
     <div
       role="tablist"
       aria-label={label}
-      className="inline-flex rounded-full border p-1"
+      className="inline-flex max-w-full overflow-x-auto rounded-full border p-1"
       style={{ borderColor: "var(--hairline-strong)", background: "rgba(255,255,255,0.03)" }}
       onKeyDown={(e) => {
         // Arrow keys, Home and End move between options, as a tab list should.

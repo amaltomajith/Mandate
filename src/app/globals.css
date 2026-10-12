@@ -343,3 +343,6 @@ body::before {
     transition: none;
   }
 }
+
+/* Grid items default to min-width:auto, so one long unbroken line can force the page wider than a phone. */
+main .grid > * { min-width: 0; }

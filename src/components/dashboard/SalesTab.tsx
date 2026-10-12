@@ -96,7 +96,7 @@ export function SalesTab({ coo, traces }: { coo: CooData; traces: Trace[] }) {
           accent="var(--entity-mandate)"
           count={awaiting.length}
         >
-          <ul className="grid gap-4 lg:grid-cols-2">
+          <ul className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {awaiting.slice(0, 8).map((t) => {
               const p = t.params as { amount?: number; lineItems?: { sku: string; qty: number }[]; customerName?: string };
               const what = (p.lineItems ?? []).map((i) => `${i.qty} x ${coo.insights.find((x) => x.sku === i.sku)?.name ?? i.sku}`).join(", ");

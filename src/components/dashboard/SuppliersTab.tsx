@@ -78,7 +78,7 @@ export function SuppliersTab({ coo }: { coo: CooData }) {
             accent="var(--decision-escalate)"
             count={candidates.length}
           >
-            <ul className="grid gap-4 lg:grid-cols-2">
+            <ul className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               {candidates.map((v) => (
                 <li key={v.id} className="surface-tile flex flex-col justify-between gap-5 p-6">
                   <div className="min-w-0">
@@ -121,7 +121,7 @@ export function SuppliersTab({ coo }: { coo: CooData }) {
         {vendors.length === 0 ? (
           <EmptyState text="No suppliers yet." hint="Add one, or let the buying agent research some when something runs low." />
         ) : (
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {vendors.map((v, idx) => {
               const payees = payeesByVendor(v.id);
               return (
